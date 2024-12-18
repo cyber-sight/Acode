@@ -54,6 +54,7 @@ import NotificationManager from "lib/notificationManager";
 import { addedFolder } from "lib/openFolder";
 import { getEncoding, initEncodings } from "utils/encodings";
 import constants from "./constants";
+import LanguageClientService from "./languageClient";
 
 const previousVersionCode = Number.parseInt(localStorage.versionCode, 10);
 
@@ -372,6 +373,9 @@ async function loadApp() {
 
 	const notificationManager = new NotificationManager();
 	notificationManager.init();
+
+	const languageclient = new LanguageClientService();
+	await languageclient.init();
 
 	window.log("info", "Started app and its services...");
 

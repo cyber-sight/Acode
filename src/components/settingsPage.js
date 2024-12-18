@@ -33,6 +33,7 @@ export default function settingsPage(
 	title,
 	settings,
 	callback,
+	headerItems,
 	type = "united",
 ) {
 	let hideSearchBar = () => {};
@@ -43,6 +44,8 @@ export default function settingsPage(
 	let note;
 
 	settings = settings.filter((setting) => {
+		if (!setting) return false;
+
 		if ("note" in setting) {
 			note = setting.note;
 			return false;
@@ -84,6 +87,10 @@ export default function settingsPage(
 						}
 					: null,
 			);
+
+		if (Array.isArray(headerItems)) {
+			headerItems.map((item) => $page.header.append(item));
+		}
 
 		$page.header.append($search);
 	}

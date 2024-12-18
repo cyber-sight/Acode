@@ -4,7 +4,11 @@
     "baseUrl": "./src",
     "paths": {
       "*": ["*"]
-    }
+    },
+    "module": "ESNext",
+    "moduleResolution": "Node",
+    "allowJs": true,
+    "resolveJsonModule": true
   },
   "include": ["src/**/*"],
   "typeAcquisition": {

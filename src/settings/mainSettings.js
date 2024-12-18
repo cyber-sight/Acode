@@ -21,6 +21,25 @@ import previewSettings from "./previewSettings";
 import scrollSettings from "./scrollSettings";
 import searchSettings from "./searchSettings";
 
+let CUSTOM_SETTINGS = [];
+
+export function addCustomSettings(setting, settingPage) {
+	if (typeof setting !== "object") throw new Error("Invalid object type");
+
+	if (!setting.key) throw new Error("Setting key and text required");
+
+	const entry = [setting, settingPage];
+	CUSTOM_SETTINGS.push(entry);
+	return () =>
+		(CUSTOM_SETTINGS = CUSTOM_SETTINGS.filter((item) => item !== entry));
+}
+
+function editSettingsButton(callback) {
+	const button = <span className="icon edit" attr-action="edit-settings"></span>;
+	button.addEventListener("click", callback);
+	return button;
+}
+
 export default function mainSettings() {
 	const title = strings.settings.capitalize();
 	const items = [
@@ -87,10 +106,15 @@ export default function mainSettings() {
 			icon: "play_arrow",
 			index: 4,
 		},
+		// {
+		// 	key: "editSettings",
+		// 	text: `${strings["edit"]} settings.json`,
+		// 	icon: "edit",
+		// },
 		{
-			key: "editSettings",
-			text: `${strings["edit"]} settings.json`,
-			icon: "edit",
+			key: "other-settings",
+			text: strings["extra settings"] || "Extra Settings",
+			icon: "settings_applications",
 		},
 		{
 			key: "changeLog",
@@ -118,6 +142,7 @@ export default function mainSettings() {
 			case "backup-restore":
 			case "editor-settings":
 			case "preview-settings":
+			case "other-settings":
 				appSettings.uiSettings[key].show();
 				break;
 
@@ -180,7 +205,9 @@ export default function mainSettings() {
 		}
 	}
 
-	const page = settingsPage(title, items, callback);
+	const page = settingsPage(title, items, callback, [
+		editSettingsButton(() => callback("editSettings")),
+	]);
 	page.show();
 
 	appSettings.uiSettings["main-settings"] = page;
@@ -191,4 +218,13 @@ export default function mainSettings() {
 	appSettings.uiSettings["scroll-settings"] = scrollSettings();
 	appSettings.uiSettings["search-settings"] = searchSettings();
 	appSettings.uiSettings["preview-settings"] = previewSettings();
+
+	appSettings.uiSettings["other-settings"] = settingsPage(
+		strings["extra settings"] || "Extra Settings",
+		CUSTOM_SETTINGS.map((entry) => entry[0]),
+		(key) => {
+			const entry = CUSTOM_SETTINGS.find((item) => item[0].key === key);
+			if (entry) entry[1]?.show();
+		},
+	);
 }
