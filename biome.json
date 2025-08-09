@@ -1,0 +1,52 @@
+{
+	"$schema": "https://biomejs.dev/schemas/2.1.1/schema.json",
+	"formatter": {
+		"enabled": true,
+		"indentStyle": "tab"
+	},
+	"assist": { "actions": { "source": { "organizeImports": "on" } } },
+	"linter": {
+		"enabled": true,
+		"rules": {
+			"recommended": false,
+			"complexity": {
+				"noForEach": "off",
+				"noStaticOnlyClass": "error",
+				"noUselessSwitchCase": "error",
+				"useFlatMap": "error"
+			},
+			"style": {
+				"noNegationElse": "off",
+				"useForOf": "error",
+				"useNodejsImportProtocol": "error",
+				"useNumberNamespace": "error"
+			},
+			"suspicious": {
+				"noDoubleEquals": "error",
+				"noThenProperty": "error",
+				"useIsArray": "error"
+			}
+		}
+	},
+	"javascript": {
+		"globals": ["Global1"]
+	},
+	"files": {
+		"includes": [
+			"**/src/**/*",
+			"**/utils/**/*.js",
+			"**/www/**/*.js",
+			"**/www/res/**/*.css",
+			"**/src/plugins/terminal/**",
+			"!**/ace-builds",
+			"!**/www/js/**/*.js",
+			"!**/www/css/**/*.css",
+			"!**/src/plugins/**/*",
+			"!**/plugins/**/*",
+			"!**/hooks/**/*",
+			"!**/fastlane/**/*",
+			"!**/res/**/*",
+			"!**/platforms/**/*"
+		]
+	}
+}

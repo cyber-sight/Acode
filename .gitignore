@@ -1,0 +1,16 @@
+/node_modules
+/build.json
+/www/js/build
+/www/css/build
+/plugins
+/platforms
+/keystore.jks
+/platforms/android/debug-signing.properties
+/platforms/android/release-signing.properties
+**/*/.DS_Store
+.DS_Store
+pnpm-lock.yaml
+.zed
+.idea
+ace-builds
+fdroid.bool
