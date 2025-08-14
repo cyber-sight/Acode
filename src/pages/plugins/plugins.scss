@@ -1,7 +1,6 @@
 #plugins {
   display: flex;
   flex-direction: column;
-  height: 100%;
 
   .filter-message {
     font-size: 0.9rem;
@@ -39,7 +38,7 @@
   .list {
     overflow-y: auto;
     padding: 0.5rem 0;
-    
+
     &:empty::after {
       content: attr(empty-msg);
       display: flex;
@@ -517,5 +516,4 @@
       }
     }
   }
-
 }
