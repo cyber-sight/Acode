@@ -229,42 +229,20 @@ export default class EditorFile {
 					container.appendChild(content);
 					this.#content = container;
 				} else {
-					container = tag("div", {
-						className: "tab-page-container",
-					});
+					container = <div className="tab-page-container" />;
 
 					// shadow dom
 					shadow = container.attachShadow({ mode: "open" });
 
-					// main app styles
-					const mainStyle = tag("link", {
-						rel: "stylesheet",
-						href: "./css/build/main.css",
-					});
-					// icon styles
-					const iconStyle = tag("link", {
-						rel: "stylesheet",
-						href: "./res/icons/style.css",
-					});
-					// file icon styles
-					const fileIconStyle = tag("link", {
-						rel: "stylesheet",
-						href: "./res/file-icons/style.css",
-					});
-
 					// Add base styles to shadow DOM first
-					shadow.appendChild(mainStyle);
-					shadow.appendChild(iconStyle);
-					shadow.appendChild(fileIconStyle);
+					shadow.appendChild(<link rel="stylesheet" href="build/main.css" />);
 
 					// Handle custom stylesheets if provided
 					if (options.stylesheets) {
 						this.#addCustomStyles(options.stylesheets, shadow);
 					}
 
-					const content = tag("div", {
-						className: "tab-page-content",
-					});
+					const content = <div className="tab-page-content" />;
 
 					if (typeof options.content === "string") {
 						content.innerHTML = DOMPurify.sanitize(options.content);

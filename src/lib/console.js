@@ -1,7 +1,7 @@
 import "core-js/stable";
 import "html-tag-js/dist/polyfill";
 import * as esprima from "esprima";
-import css from "styles/console.module.scss";
+import css from "styles/console.m.scss";
 import loadPolyFill from "utils/polyfill";
 
 (function () {

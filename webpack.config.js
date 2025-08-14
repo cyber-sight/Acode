@@ -12,7 +12,7 @@ module.exports = (env, options) => {
       use: ['raw-loader'],
     },
     {
-      test: /\.module.(sa|sc|c)ss$/,
+      test: /\.m.(sa|sc|c)ss$/,
       use: [
         'raw-loader',
         'postcss-loader',
@@ -24,7 +24,7 @@ module.exports = (env, options) => {
       type: "asset/resource",
     },
     {
-      test: /(?<!\.module)\.(sa|sc|c)ss$/,
+      test: /(?<!\.m)\.(sa|sc|c)ss$/,
       use: [
         {
           loader: MiniCssExtractPlugin.loader,
