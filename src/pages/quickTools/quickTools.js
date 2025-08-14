@@ -31,7 +31,7 @@ export default function QuickTools() {
  * @param {WCPage} $page
  */
 function render($page) {
-	$page.content = (
+	$page.body = (
 		<div className="main" id="quicktools-settings">
 			{(() => {
 				const totalRows = settings.QUICKTOOLS_ROWS * settings.QUICKTOOLS_GROUPS;
