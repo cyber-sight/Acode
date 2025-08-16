@@ -430,6 +430,13 @@ export default {
 		readOnly: true,
 		editorOnly: true,
 	},
+	formatcode: {
+		description: "Format Code",
+		key: "Ctrl-Alt-F",
+		readOnly: false,
+		editorOnly: true,
+		action: "format",
+	},
 	replaymacro: {
 		description: "Replay macro",
 		key: "Ctrl-Shift-E",
