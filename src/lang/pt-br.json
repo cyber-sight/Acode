@@ -421,5 +421,10 @@
 	"terminal": "Terminal",
 	"allFileAccess": "Acesso total aos arquivos",
 	"fonts": "Fontes",
-	"sponsor": "Patrocinador"
+	"sponsor": "Patrocinador",
+	"downloads": "Downloads",
+	"reviews": "Avaliações",
+	"overview": "Visão Geral",
+	"contributors": "Contribuidores",
+	"quicktools:hyphen": "Inserir símbolo de hífen"
 }
