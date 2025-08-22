@@ -8,14 +8,13 @@ import "styles/overrideAceStyle.scss";
 import "styles/wideScreen.scss";
 
 import "lib/polyfill";
-import "ace/supportedModes";
+import "./codemirror/supportedModes";
 import "components/WebComponents";
 
 import fsOperation from "fileSystem";
 import sidebarApps from "sidebarApps";
 import ajax from "@deadlyjack/ajax";
 import { setKeyBindings } from "ace/commands";
-import { initModes } from "ace/modelist";
 import Contextmenu from "components/contextmenu";
 import Sidebar from "components/sidebar";
 import tile from "components/tile";
@@ -51,6 +50,7 @@ import loadPolyFill from "utils/polyfill";
 import Url from "utils/Url";
 import $_fileMenu from "views/file-menu.hbs";
 import $_menu from "views/menu.hbs";
+import { initModes } from "./codemirror/modelist";
 import auth, { loginEvents } from "./lib/auth";
 
 const previousVersionCode = Number.parseInt(localStorage.versionCode, 10);
@@ -433,7 +433,7 @@ async function loadApp() {
 
 	$sidebar.onshow = () => {
 		const activeFile = editorManager.activeFile;
-		if (activeFile) editorManager.editor.blur();
+		if (activeFile) editorManager.editor.contentDOM.blur();
 	};
 	sdcard.watchFile(KEYBINDING_FILE, async () => {
 		await setKeyBindings(editorManager.editor);
@@ -573,7 +573,8 @@ function onClickApp(e) {
 
 function mainPageOnShow() {
 	const { editor } = editorManager;
-	editor.resize(true);
+	// TODO : Codemirror
+	//editor.resize(true);
 }
 
 function createMainMenu({ top, bottom, toggler }) {
@@ -610,16 +611,17 @@ function createFileMenu({ top, bottom, toggler }) {
 
 			const { label: encoding } = getEncoding(file.encoding);
 			const isEditorFile = file.type === "editor";
+			const cmEditor = window.editorManager?.editor;
+			const hasSelection = !!cmEditor && !cmEditor.state.selection.main.empty;
 			return mustache.render($_fileMenu, {
 				...strings,
-				file_mode: isEditorFile
-					? (file.session?.getMode()?.$id || "").split("/").pop()
-					: "",
+				// Use CodeMirror mode stored on EditorFile (set in setMode)
+				file_mode: isEditorFile ? file.currentMode || "" : "",
 				file_encoding: isEditorFile ? encoding : "",
 				file_read_only: !file.editable,
 				file_on_disk: !!file.uri,
 				file_eol: isEditorFile ? file.eol : "",
-				copy_text: !!window.editorManager.editor.getCopyText(),
+				copy_text: isEditorFile ? hasSelection : false,
 				is_editor: isEditorFile,
 			});
 		},

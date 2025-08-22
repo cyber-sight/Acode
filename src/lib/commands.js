@@ -137,10 +137,15 @@ export default {
 		});
 
 		if (!res) return;
-
-		const [line, col] = `${res}`.split(".");
-		const editor = editorManager.editor;
-
+		const [lineStr, colStr] = String(res).split(".");
+		const lineNum = Math.max(1, Number.parseInt(lineStr || "1", 10) || 1);
+		const colNum = Math.max(1, Number.parseInt(colStr || "1", 10) || 1);
+		const { editor } = editorManager;
+		const { doc } = editor.state;
+		const line = doc.line(Math.min(lineNum, doc.lines));
+		const col = Math.min(colNum - 1, Math.max(0, line.length));
+		const pos = line.from + col;
+		editor.dispatch({ selection: { anchor: pos }, scrollIntoView: true });
 		editor.focus();
 		editor.gotoLine(line, col, true);
 	},
@@ -191,19 +196,19 @@ export default {
 			default:
 				return;
 		}
-		editorManager.editor.blur();
+		editorManager.editor.contentDOM.blur();
 	},
 	"open-with"() {
 		editorManager.activeFile.openWith();
 	},
 	"open-file"() {
-		editorManager.editor.blur();
+		editorManager.editor.contentDOM.blur();
 		FileBrowser("file")
 			.then(FileBrowser.openFile)
 			.catch(FileBrowser.openFileError);
 	},
 	"open-folder"() {
-		editorManager.editor.blur();
+		editorManager.editor.contentDOM.blur();
 		FileBrowser("folder")
 			.then(FileBrowser.openFolder)
 			.catch(FileBrowser.openFolderError);
@@ -241,7 +246,8 @@ export default {
 		this.find();
 	},
 	"resize-editor"() {
-		editorManager.editor.resize(true);
+		// TODO : Codemirror
+		//editorManager.editor.resize(true);
 	},
 	"open-inapp-browser"(url) {
 		browser.open(url);
@@ -307,7 +313,7 @@ export default {
 		const range = getColorRange();
 		let defaultColor = range ? editor.session.getTextRange(range) : "";
 
-		editor.blur();
+		editor.contentDOM.blur();
 		const wasFocused = editorManager.activeFile.focused;
 		const res = await color(defaultColor, () => {
 			if (wasFocused) {

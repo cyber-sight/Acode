@@ -1,12 +1,13 @@
 import palette from "components/palette";
 import Path from "utils/Path";
+import { getModes } from "../../codemirror/modelist";
 
 export default function changeMode() {
 	palette(generateHints, onselect, strings["syntax highlighting"]);
 }
 
 function generateHints() {
-	const { modes } = ace.require("ace/ext/modelist");
+	const modes = getModes();
 
 	return modes.map(({ caption, mode, extensions }) => {
 		return {

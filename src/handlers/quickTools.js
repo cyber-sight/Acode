@@ -40,7 +40,7 @@ quickTools.$input.addEventListener("input", (e) => {
 	}
 
 	const event = KeyboardEvent("keydown", keyCombination);
-	input = input || editorManager.editor.textInput.getElement();
+	input = input || editorManager.editor.contentDOM;
 
 	resetKeys();
 	input.dispatchEvent(event);
@@ -62,8 +62,8 @@ quickTools.$input.addEventListener("keydown", (e) => {
 	if (input && input !== quickTools.$input) {
 		input.dispatchEvent(event);
 	} else {
-		// Otherwise fallback to editor input
-		editorManager.editor.textInput.getElement().dispatchEvent(event);
+		// Otherwise fallback to editor view content
+		editorManager.editor.contentDOM.dispatchEvent(event);
 	}
 });
 
@@ -334,7 +334,8 @@ function toggleSearch() {
 	}
 
 	$searchInput.focus();
-	editor.resize(true);
+	// TODO : Codemirror
+	//editor.resize(true);
 }
 
 function toggle() {
@@ -367,7 +368,8 @@ function setHeight(height = 1, save = true) {
 	if (save) {
 		appSettings.update({ quickTools: height }, false);
 	}
-	editor.resize(true);
+	// TODO : Codemirror
+	// editor.resize(true);
 
 	if (!height) {
 		$row1.remove();

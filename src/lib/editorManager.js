@@ -1,13 +1,42 @@
 import sidebarApps from "sidebarApps";
-import initColorView, { deactivateColorView } from "ace/colorView";
-import { setCommands, setKeyBindings } from "ace/commands";
-import touchListeners, { scrollAnimationFrame } from "ace/touchHandler";
+
+// TODO: Migrate commands and key bindings to CodeMirror
+// import { setCommands, setKeyBindings } from "ace/commands";
+// TODO: Migrate touch handlers to CodeMirror
+// import touchListeners, { scrollAnimationFrame } from "ace/touchHandler";
+
+import { EditorState } from "@codemirror/state";
+import { oneDark } from "@codemirror/theme-one-dark";
+import { keymap } from "@codemirror/view";
+import {
+	abbreviationTracker,
+	emmetConfig,
+	expandAbbreviation,
+	wrapWithAbbreviation,
+} from "@emmetio/codemirror6-plugin";
+// CodeMirror imports
+import { basicSetup, EditorView } from "codemirror";
+// TODO: Add search keymap when implementing search functionality
+// import { searchKeymap } from "@codemirror/search";
+// TODO: Add keymaps when implementing command system
+// import { defaultKeymap, historyKeymap } from "@codemirror/commands";
+// CodeMirror mode management
+import {
+	getModeForPath,
+	getModes,
+	getModesByName,
+	initModes,
+} from "../codemirror/modelist";
+import "../codemirror/supportedModes";
+import { autocompletion } from "@codemirror/autocomplete";
 import list from "components/collapsableList";
 import quickTools from "components/quickTools";
 import ScrollBar from "components/scrollbar";
 import SideButton, { sideButtonContainer } from "components/sideButton";
 import keyboardHandler, { keydownState } from "handlers/keyboard";
 import actions from "handlers/quickTools";
+import colorView from "../codemirror/colorView";
+// TODO: Update EditorFile for CodeMirror compatibility
 import EditorFile from "./editorFile";
 import appSettings from "./settings";
 import {
@@ -55,6 +84,11 @@ async function EditorManager($header, $body) {
 		},
 	};
 	const $container = <div className="editor-container"></div>;
+	// Ensure the container participates well in flex layouts and can constrain the editor
+	$container.style.flex = "1 1 auto";
+	$container.style.minHeight = "0"; // allow child scroller to size correctly
+	$container.style.height = "100%";
+	$container.style.width = "100%";
 	const problemButton = SideButton({
 		text: strings.problems,
 		icon: "warningreport_problem",
@@ -64,7 +98,110 @@ async function EditorManager($header, $body) {
 			acode.exec("open", "problems");
 		},
 	});
-	const editor = ace.edit($container);
+
+	// Make CodeMirror fill the container height and manage scrolling internally
+	const fixedHeightTheme = EditorView.theme({
+		"&": { height: "100%" },
+		".cm-scroller": { height: "100%", overflow: "auto" },
+	});
+
+	// Create minimal CodeMirror editor
+	const editorState = EditorState.create({
+		doc: "",
+		extensions: [
+			basicSetup,
+			// Default theme
+			oneDark,
+			fixedHeightTheme,
+			// Emmet abbreviation tracker and common keybindings
+			abbreviationTracker(),
+			wrapWithAbbreviation(),
+			autocompletion(),
+			keymap.of([{ key: "Mod-e", run: expandAbbreviation }]),
+		],
+	});
+
+	const editor = new EditorView({
+		state: editorState,
+		parent: $container,
+	});
+
+	// Provide minimal Ace-like API compatibility used across the app
+	/**
+	 * Insert text at the current selection/cursor in the editor
+	 * @param {string} text
+	 * @returns {boolean} success
+	 */
+	editor.insert = function (text) {
+		try {
+			const { from, to } = editor.state.selection.main;
+			editor.dispatch({ changes: { from, to, insert: String(text ?? "") } });
+			return true;
+		} catch (_) {
+			return false;
+		}
+	};
+
+	// Helper: apply a file's content and language to the editor view
+	function applyFileToEditor(file) {
+		if (!file || file.type !== "editor") return;
+		const baseExtensions = [basicSetup, oneDark, fixedHeightTheme];
+		const exts = [...baseExtensions];
+		try {
+			const langExtFn = file.currentLanguageExtension;
+			if (typeof langExtFn === "function") {
+				exts.push(langExtFn());
+			}
+		} catch (e) {
+			// ignore language extension errors; fallback to plain text
+		}
+
+		// Emmet config: set syntax based on file/mode
+		const syntax = getEmmetSyntaxForFile(file);
+		exts.push(abbreviationTracker());
+		exts.push(wrapWithAbbreviation());
+		exts.push(keymap.of([{ key: "Mod-e", run: expandAbbreviation }]));
+		exts.push(emmetConfig.of({ syntax }));
+
+		// Color preview plugin when enabled
+		if (appSettings.value.colorPreview) {
+			exts.push(colorView(true));
+		}
+
+		// Apply read-only state based on file.editable/loading
+		try {
+			exts.push(EditorState.readOnly.of(!file.editable || !!file.loading));
+		} catch (e) {
+			// safe to ignore; editor will remain editable by default
+		}
+
+		const doc = file.session ? file.session.doc.toString() : "";
+		const state = EditorState.create({ doc, extensions: exts });
+		file.session = state; // keep file.session in sync
+		editor.setState(state);
+	}
+
+	function getEmmetSyntaxForFile(file) {
+		const mode = (file?.currentMode || "").toLowerCase();
+		const name = (file?.filename || "").toLowerCase();
+		const ext = name.includes(".") ? name.split(".").pop() : "";
+		if (ext === "xml" || mode.includes("xml")) return "xml";
+		if (ext === "jsx" || ext === "tsx") return "jsx";
+		if (mode.includes("javascript") && (ext === "jsx" || ext === "tsx"))
+			return "jsx";
+		if (ext === "css" || mode.includes("css")) return "css";
+		if (ext === "scss" || mode.includes("scss")) return "scss";
+		if (ext === "sass" || mode.includes("sass")) return "sass";
+		if (ext === "styl" || ext === "stylus" || mode.includes("styl"))
+			return "stylus";
+		if (ext === "php" || mode.includes("php")) return "html"; // treat PHP as HTML for Emmet
+		if (ext === "vue" || mode.includes("vue")) return "html"; // Emmet inside templates
+		if (ext === "html" || ext === "xhtml" || mode.includes("html"))
+			return "html";
+		// Defaults to html per Emmet docs
+		return "html";
+	}
+
 	const $vScrollbar = ScrollBar({
 		width: scrollbarSize,
 		onscroll: onscrollV,
@@ -131,9 +268,10 @@ async function EditorManager($header, $body) {
 		},
 	};
 
-	// set mode text
-	editor.setSession(ace.createEditSession("", "ace/mode/text"));
+	// TODO: Implement mode/language support for CodeMirror
+	// editor.setSession(ace.createEditSession("", "ace/mode/text"));
 	$body.append($container);
+	initModes(); // Initialize CodeMirror modes
 	await setupEditor();
 
 	$hScrollbar.onshow = $vScrollbar.onshow = updateFloatingButton.bind(
@@ -152,19 +290,23 @@ async function EditorManager($header, $body) {
 	});
 
 	appSettings.on("update:tabSize", function (value) {
-		manager.files.forEach((file) => file.session.setTabSize(value));
+		// TODO: Implement tab size setting for CodeMirror sessions
+		// manager.files.forEach((file) => file.session.setTabSize(value));
 	});
 
 	appSettings.on("update:softTab", function (value) {
-		manager.files.forEach((file) => file.session.setUseSoftTabs(value));
+		// TODO: Implement soft tabs setting for CodeMirror sessions
+		// manager.files.forEach((file) => file.session.setUseSoftTabs(value));
 	});
 
+	// TODO: Implement show invisibles for CodeMirror
 	appSettings.on("update:showSpaces", function (value) {
-		editor.setOption("showInvisibles", value);
+		// editor.setOption("showInvisibles", value);
 	});
 
+	// TODO: Implement font size setting for CodeMirror
 	appSettings.on("update:fontSize", function (value) {
-		editor.setFontSize(value);
+		// editor.setFontSize(value);
 	});
 
 	appSettings.on("update:openFileListPos", function (value) {
@@ -172,8 +314,9 @@ async function EditorManager($header, $body) {
 		$vScrollbar.resize();
 	});
 
+	// TODO: Implement print margin for CodeMirror
 	appSettings.on("update:showPrintMargin", function (value) {
-		editorManager.editor.setOption("showPrintMargin", value);
+		// manager.editor.setOption("showPrintMargin", value);
 	});
 
 	appSettings.on("update:scrollbarSize", function (value) {
@@ -181,21 +324,24 @@ async function EditorManager($header, $body) {
 		$hScrollbar.size = value;
 	});
 
+	// TODO: Implement live autocompletion for CodeMirror
 	appSettings.on("update:liveAutoCompletion", function (value) {
-		editor.setOption("enableLiveAutocompletion", value);
+		// editor.setOption("enableLiveAutocompletion", value);
 	});
 
 	appSettings.on("update:linenumbers", function (value) {
 		updateMargin(true);
-		editor.resize(true);
+		//editor.resize(true);
 	});
 
+	// TODO: Implement line height setting for CodeMirror
 	appSettings.on("update:lineHeight", function (value) {
-		editor.container.style.lineHeight = value;
+		// editor.container.style.lineHeight = value;
 	});
 
+	// TODO: Implement relative line numbers for CodeMirror
 	appSettings.on("update:relativeLineNumbers", function (value) {
-		editor.setOption("relativeLineNumbers", value);
+		// editor.setOption("relativeLineNumbers", value);
 	});
 
 	appSettings.on("update:elasticTabstops", function (value) {
@@ -214,12 +360,10 @@ async function EditorManager($header, $body) {
 		editor.setOption("printMarginColumn", value);
 	});
 
-	appSettings.on("update:colorPreview", function (value) {
-		if (value) {
-			return initColorView(editor, true);
-		}
-
-		deactivateColorView();
+	// TODO: Implement color preview for CodeMirror
+	appSettings.on("update:colorPreview", function () {
+		const file = manager.activeFile;
+		if (file?.type === "editor") applyFileToEditor(file);
 	});
 
 	appSettings.on("update:showSideButtons", function () {
@@ -231,8 +375,9 @@ async function EditorManager($header, $body) {
 		updateMargin(true);
 	});
 
+	// TODO: Implement fold widgets for CodeMirror
 	appSettings.on("update:fadeFoldWidgets", function (value) {
-		editor.setOption("fadeFoldWidgets", value);
+		// editor.setOption("fadeFoldWidgets", value);
 	});
 
 	return manager;
@@ -253,8 +398,8 @@ async function EditorManager($header, $body) {
 	 * @returns {Promise<void>} A promise that resolves once the editor is set up.
 	 */
 	async function setupEditor() {
-		const Emmet = ace.require("ace/ext/emmet");
-		const textInput = editor.textInput.getElement();
+		// TODO: Get input element from CodeMirror
+		// const textInput = editor.textInput.getElement();
 		const settings = appSettings.value;
 		const { leftMargin, textWrap, colorPreview, fontSize, lineHeight } =
 			appSettings.value;
@@ -267,184 +412,196 @@ async function EditorManager($header, $body) {
 		let autosaveTimeout;
 		let scrollTimeout;
 
-		editor.on("focus", async () => {
+		// TODO: Implement focus event for CodeMirror
+		// editor.on("focus", async () => {
+		//	const { activeFile } = manager;
+		//	activeFile.focused = true;
+		//	keyboardHandler.on("keyboardShow", scrollCursorIntoView);
+		//	if (isScrolling) return;
+		//	$hScrollbar.hide();
+		//	$vScrollbar.hide();
+		// });
+
+		// TODO: Implement blur event for CodeMirror
+		// editor.on("blur", async () => {
+		//	const { hardKeyboardHidden, keyboardHeight } =
+		//		await getSystemConfiguration();
+		//	const blur = () => {
+		//		const { activeFile } = manager;
+		//		activeFile.focused = false;
+		//		activeFile.focusedBefore = false;
+		//	};
+		//	if (
+		//		hardKeyboardHidden === HARDKEYBOARDHIDDEN_NO &&
+		//		keyboardHeight < 100
+		//	) {
+		//		// external keyboard
+		//		blur();
+		//		return;
+		//	}
+		//	const onKeyboardHide = () => {
+		//		keyboardHandler.off("keyboardHide", onKeyboardHide);
+		//		blur();
+		//	};
+		//	keyboardHandler.on("keyboardHide", onKeyboardHide);
+		// });
+
+		// TODO: Implement change event for CodeMirror
+		// editor.on("change", (e) => {
+		if (checkTimeout) clearTimeout(checkTimeout);
+		if (autosaveTimeout) clearTimeout(autosaveTimeout);
+
+		checkTimeout = setTimeout(async () => {
 			const { activeFile } = manager;
-			activeFile.focused = true;
-			keyboardHandler.on("keyboardShow", scrollCursorIntoView);
 
-			if (isScrolling) return;
+			if (activeFile.markChanged) {
+				const changed = await activeFile.isChanged();
+				activeFile.isUnsaved = changed;
+				activeFile.writeToCache();
+				events.emit("file-content-changed", activeFile);
+				manager.onupdate("file-changed");
+				manager.emit("update", "file-changed");
 
-			$hScrollbar.hide();
-			$vScrollbar.hide();
-		});
-
-		editor.on("blur", async () => {
-			const { hardKeyboardHidden, keyboardHeight } =
-				await getSystemConfiguration();
-			const blur = () => {
-				const { activeFile } = manager;
-				activeFile.focused = false;
-				activeFile.focusedBefore = false;
-			};
-
-			if (
-				hardKeyboardHidden === HARDKEYBOARDHIDDEN_NO &&
-				keyboardHeight < 100
-			) {
-				// external keyboard
-				blur();
-				return;
-			}
-
-			const onKeyboardHide = () => {
-				keyboardHandler.off("keyboardHide", onKeyboardHide);
-				blur();
-			};
-
-			keyboardHandler.on("keyboardHide", onKeyboardHide);
-		});
-
-		editor.on("change", (e) => {
-			if (checkTimeout) clearTimeout(checkTimeout);
-			if (autosaveTimeout) clearTimeout(autosaveTimeout);
-
-			checkTimeout = setTimeout(async () => {
-				const { activeFile } = manager;
-
-				if (activeFile.markChanged) {
-					const changed = await activeFile.isChanged();
-					activeFile.isUnsaved = changed;
-					activeFile.writeToCache();
-					events.emit("file-content-changed", activeFile);
-					manager.onupdate("file-changed");
-					manager.emit("update", "file-changed");
-
-					const { autosave } = appSettings.value;
-					if (activeFile.uri && changed && autosave) {
-						autosaveTimeout = setTimeout(() => {
-							acode.exec("save", false);
-						}, autosave);
-					}
+				const { autosave } = appSettings.value;
+				if (activeFile.uri && changed && autosave) {
+					autosaveTimeout = setTimeout(() => {
+						acode.exec("save", false);
+					}, autosave);
 				}
-				activeFile.markChanged = true;
-			}, TIMEOUT_VALUE);
-		});
-
-		editor.on("changeAnnotation", toggleProblemButton);
-
-		editor.on("scroll", () => {
-			clearTimeout(scrollTimeout);
-			isScrolling = true;
-			scrollTimeout = setTimeout(() => {
-				isScrolling = false;
-			}, 100);
-		});
-
-		editor.renderer.on("resize", () => {
-			$vScrollbar.resize($vScrollbar.visible);
-			$hScrollbar.resize($hScrollbar.visible);
-		});
-
-		editor.on("scrolltop", onscrolltop);
-		editor.on("scrollleft", onscrollleft);
-		textInput.addEventListener("keydown", (e) => {
-			if (e.key === "Escape") {
-				keydownState.esc = { value: true, target: textInput };
 			}
-		});
+			activeFile.markChanged = true;
+		}, TIMEOUT_VALUE);
+		// });
 
-		if (colorPreview) {
-			initColorView(editor);
-		}
+		// TODO: Implement change annotation event for CodeMirror
+		// editor.on("changeAnnotation", toggleProblemButton);
 
-		touchListeners(editor);
-		setCommands(editor);
-		await setKeyBindings(editor);
-		Emmet.setCore(window.emmet);
-		editor.setFontSize(fontSize);
-		editor.setHighlightSelectedWord(true);
-		editor.container.style.lineHeight = lineHeight;
+		// TODO: Implement scroll event for CodeMirror
+		// editor.on("scroll", () => {
+		//	clearTimeout(scrollTimeout);
+		//	isScrolling = true;
+		//	scrollTimeout = setTimeout(() => {
+		//		isScrolling = false;
+		//	}, 100);
+		// });
 
-		ace.require("ace/ext/language_tools");
-		editor.setOption("animatedScroll", false);
-		editor.setOption("tooltipFollowsMouse", false);
-		editor.setOption("theme", settings.editorTheme);
-		editor.setOption(
-			"showGutter",
-			settings.linenumbers || settings.showAnnotations,
-		);
-		editor.setOption("showLineNumbers", settings.linenumbers);
-		editor.setOption("enableEmmet", true);
-		editor.setOption("showInvisibles", settings.showSpaces);
-		editor.setOption("indentedSoftWrap", false);
-		editor.setOption("scrollPastEnd", 0.5);
-		editor.setOption("showPrintMargin", settings.showPrintMargin);
-		editor.setOption("relativeLineNumbers", settings.relativeLineNumbers);
-		editor.setOption("useElasticTabstops", settings.elasticTabstops);
-		editor.setOption("useTextareaForIME", settings.useTextareaForIME);
-		editor.setOption("rtlText", settings.rtlText);
-		editor.setOption("hardWrap", settings.hardWrap);
-		editor.setOption("spellCheck", settings.spellCheck);
-		editor.setOption("printMarginColumn", settings.printMargin);
-		editor.setOption("enableBasicAutocompletion", true);
-		editor.setOption("enableLiveAutocompletion", settings.liveAutoCompletion);
-		editor.setOption("copyWithEmptySelection", true);
-		editor.setOption("fadeFoldWidgets", settings.fadeFoldWidgets);
+		// TODO: Implement resize event for CodeMirror
+		// editor.renderer.on("resize", () => {
+		//	$vScrollbar.resize($vScrollbar.visible);
+		//	$hScrollbar.resize($hScrollbar.visible);
+		// });
+
+		// TODO: Implement scroll events for CodeMirror
+		// editor.on("scrolltop", onscrolltop);
+		// editor.on("scrollleft", onscrollleft);
+		// TODO: Add keydown listeners to CodeMirror
+		// textInput.addEventListener("keydown", (e) => {
+		//	if (e.key === "Escape") {
+		//		keydownState.esc = { value: true, target: textInput };
+		//	}
+		// });
+
+		// TODO: Implement color preview for CodeMirror
+		// if (colorPreview) {
+		//	initColorView(editor);
+		// }
+		// TODO: Implement touch listeners for CodeMirror
+		// touchListeners(editor);
+		// TODO: Implement commands for CodeMirror
+		// setCommands(editor);
+		// TODO: Implement key bindings for CodeMirror
+		// await setKeyBindings(editor);
+		// TODO: Implement Emmet for CodeMirror
+		// Emmet.setCore(window.emmet);
+		// TODO: Implement font size for CodeMirror
+		// editor.setFontSize(fontSize);
+		// TODO: Implement highlight selected word for CodeMirror
+		// editor.setHighlightSelectedWord(true);
+		// TODO: Implement line height for CodeMirror
+		// editor.container.style.lineHeight = lineHeight;
+
+		// TODO: Implement all editor options for CodeMirror
+		// ace.require("ace/ext/language_tools");
+		// editor.setOption("animatedScroll", false);
+		// editor.setOption("tooltipFollowsMouse", false);
+		// editor.setOption("theme", settings.editorTheme);
+		// editor.setOption("showGutter", settings.linenumbers || settings.showAnnotations);
+		// editor.setOption("showLineNumbers", settings.linenumbers);
+		// editor.setOption("enableEmmet", true);
+		// editor.setOption("showInvisibles", settings.showSpaces);
+		// editor.setOption("indentedSoftWrap", false);
+		// editor.setOption("scrollPastEnd", 0.5);
+		// editor.setOption("showPrintMargin", settings.showPrintMargin);
+		// editor.setOption("relativeLineNumbers", settings.relativeLineNumbers);
+		// editor.setOption("useElasticTabstops", settings.elasticTabstops);
+		// editor.setOption("useTextareaForIME", settings.useTextareaForIME);
+		// editor.setOption("rtlText", settings.rtlText);
+		// editor.setOption("hardWrap", settings.hardWrap);
+		// editor.setOption("spellCheck", settings.spellCheck);
+		// editor.setOption("printMarginColumn", settings.printMargin);
+		// editor.setOption("enableBasicAutocompletion", true);
+		// editor.setOption("enableLiveAutocompletion", settings.liveAutoCompletion);
+		// editor.setOption("copyWithEmptySelection", true);
+		// editor.setOption("fadeFoldWidgets", settings.fadeFoldWidgets);
 		// editor.setOption('enableInlineAutocompletion', settings.inlineAutoCompletion);
 
 		updateMargin(true);
 		updateSideButtonContainer();
-		editor.renderer.setScrollMargin(
-			scrollMarginTop,
-			scrollMarginBottom,
-			scrollMarginLeft,
-			scrollMarginRight,
-		);
+		// TODO: Implement scroll margin for CodeMirror
+		// editor.renderer.setScrollMargin(
+		//	scrollMarginTop,
+		//	scrollMarginBottom,
+		//	scrollMarginLeft,
+		//	scrollMarginRight,
+		// );
 	}
 
 	/**
 	 * Scrolls the cursor into view if it is not currently visible.
 	 */
+	// TODO: Implement cursor scrolling for CodeMirror
 	function scrollCursorIntoView() {
-		keyboardHandler.off("keyboardShow", scrollCursorIntoView);
-		if (isCursorVisible()) return;
-		const { teardropSize } = appSettings.value;
-		editor.renderer.scrollCursorIntoView();
-		editor.renderer.scrollBy(0, teardropSize + 10);
-		editor._emit("scroll-intoview");
+		// keyboardHandler.off("keyboardShow", scrollCursorIntoView);
+		// if (isCursorVisible()) return;
+		// const { teardropSize } = appSettings.value;
+		// editor.renderer.scrollCursorIntoView();
+		// editor.renderer.scrollBy(0, teardropSize + 10);
+		// editor._emit("scroll-intoview");
 	}
 
 	/**
 	 * Checks if the cursor is visible within the Ace editor.
 	 * @returns {boolean} - True if the cursor is visible, false otherwise.
 	 */
+	// TODO: Implement cursor visibility check for CodeMirror
 	function isCursorVisible() {
-		const { editor, container } = editorManager;
-		const { teardropSize } = appSettings.value;
-		const cursorPos = editor.getCursorPosition();
-		const contentTop = container.getBoundingClientRect().top;
-		const contentBottom = contentTop + container.clientHeight;
-		const cursorTop = editor.renderer.textToScreenCoordinates(
-			cursorPos.row,
-			cursorPos.column,
-		).pageY;
-		const cursorBottom = cursorTop + teardropSize + 10;
-		return cursorTop >= contentTop && cursorBottom <= contentBottom;
+		// const { editor, container } = manager;
+		// const { teardropSize } = appSettings.value;
+		// const cursorPos = editor.getCursorPosition();
+		// const contentTop = container.getBoundingClientRect().top;
+		// const contentBottom = contentTop + container.clientHeight;
+		// const cursorTop = editor.renderer.textToScreenCoordinates(
+		//	cursorPos.row,
+		//	cursorPos.column,
+		// ).pageY;
+		// const cursorBottom = cursorTop + teardropSize + 10;
+		// return cursorTop >= contentTop && cursorBottom <= contentBottom;
+		return true; // Placeholder
 	}
 
 	/**
 	 * Sets the vertical scroll value of the editor. This is called when the editor is scrolled horizontally using the scrollbar.
 	 * @param {Number} value
 	 */
+	// TODO: Implement vertical scrolling for CodeMirror
 	function onscrollV(value) {
-		preventScrollbarV = true;
-		const session = editor.getSession();
-		const editorHeight = getEditorHeight(editor);
-		const scroll = editorHeight * value;
-
-		session.setScrollTop(scroll);
-		editor._emit("scroll", editor);
-		cancelAnimationFrame(scrollAnimationFrame);
+		// preventScrollbarV = true;
+		// const session = editor.getSession();
+		// const editorHeight = getEditorHeight(editor);
+		// const scroll = editorHeight * value;
+		// session.setScrollTop(scroll);
+		// editor._emit("scroll", editor);
+		// cancelAnimationFrame(scrollAnimationFrame);
 	}
 
 	/**
@@ -458,15 +615,15 @@ async function EditorManager($header, $body) {
 	 * Sets the horizontal scroll value of the editor. This is called when the editor is scrolled vertically using the scrollbar.
 	 * @param {number} value - The scroll value.
 	 */
+	// TODO: Implement horizontal scrolling for CodeMirror
 	function onscrollH(value) {
-		preventScrollbarH = true;
-		const session = editor.getSession();
-		const editorWidth = getEditorWidth(editor);
-		const scroll = editorWidth * value;
-
-		session.setScrollLeft(scroll);
-		editor._emit("scroll", editor);
-		cancelAnimationFrame(scrollAnimationFrame);
+		// preventScrollbarH = true;
+		// const session = editor.getSession();
+		// const editorWidth = getEditorWidth(editor);
+		// const scroll = editorWidth * value;
+		// session.setScrollLeft(scroll);
+		// editor._emit("scroll", editor);
+		// cancelAnimationFrame(scrollAnimationFrame);
 	}
 
 	/**
@@ -479,55 +636,53 @@ async function EditorManager($header, $body) {
 	/**
 	 * Sets scrollbars value based on the editor's scroll position.
 	 */
+	// TODO: Implement horizontal scroll value for CodeMirror
 	function setHScrollValue() {
-		if (appSettings.value.textWrap || preventScrollbarH) return;
-		const session = editor.getSession();
-		const scrollLeft = session.getScrollLeft();
-
-		if (scrollLeft === lastScrollLeft) return;
-
-		const editorWidth = getEditorWidth(editor);
-		const factor = (scrollLeft / editorWidth).toFixed(2);
-
-		lastScrollLeft = scrollLeft;
-		$hScrollbar.value = factor;
-		editor._emit("scroll", "horizontal");
+		// if (appSettings.value.textWrap || preventScrollbarH) return;
+		// const session = editor.getSession();
+		// const scrollLeft = session.getScrollLeft();
+		// if (scrollLeft === lastScrollLeft) return;
+		// const editorWidth = getEditorWidth(editor);
+		// const factor = (scrollLeft / editorWidth).toFixed(2);
+		// lastScrollLeft = scrollLeft;
+		// $hScrollbar.value = factor;
+		// editor._emit("scroll", "horizontal");
 	}
 
 	/**
 	 * Handles the scroll left event.
 	 * Updates the horizontal scroll value and renders the horizontal scrollbar.
 	 */
+	// TODO: Implement scroll left handler for CodeMirror
 	function onscrollleft() {
-		setHScrollValue();
-		$hScrollbar.render();
+		// setHScrollValue();
+		// $hScrollbar.render();
 	}
 
 	/**
 	 * Sets scrollbars value based on the editor's scroll position.
 	 */
+	// TODO: Implement vertical scroll value for CodeMirror
 	function setVScrollValue() {
-		if (preventScrollbarV) return;
-		const session = editor.getSession();
-		const scrollTop = session.getScrollTop();
-
-		if (scrollTop === lastScrollTop) return;
-
-		const editorHeight = getEditorHeight(editor);
-		const factor = (scrollTop / editorHeight).toFixed(2);
-
-		lastScrollTop = scrollTop;
-		$vScrollbar.value = factor;
-		editor._emit("scroll", "vertical");
+		// if (preventScrollbarV) return;
+		// const session = editor.getSession();
+		// const scrollTop = session.getScrollTop();
+		// if (scrollTop === lastScrollTop) return;
+		// const editorHeight = getEditorHeight(editor);
+		// const factor = (scrollTop / editorHeight).toFixed(2);
+		// lastScrollTop = scrollTop;
+		// $vScrollbar.value = factor;
+		// editor._emit("scroll", "vertical");
 	}
 
 	/**
 	 * Handles the scroll top event.
 	 * Updates the vertical scroll value and renders the vertical scrollbar.
 	 */
+	// TODO: Implement scroll top handler for CodeMirror
 	function onscrolltop() {
-		setVScrollValue();
-		$vScrollbar.render();
+		// setVScrollValue();
+		// $vScrollbar.render();
 	}
 
 	/**
@@ -574,18 +729,18 @@ async function EditorManager($header, $body) {
 	/**
 	 * Toggles the visibility of the problem button based on the presence of annotations in the files.
 	 */
+	// TODO: Implement problem button toggle for CodeMirror
 	function toggleProblemButton() {
-		const fileWithProblems = manager.files.find((file) => {
-			if (file.type !== "editor") return false;
-			const annotations = file?.session?.getAnnotations();
-			return !!annotations.length;
-		});
-
-		if (fileWithProblems) {
-			problemButton.show();
-		} else {
-			problemButton.hide();
-		}
+		// const fileWithProblems = manager.files.find((file) => {
+		//	if (file.type !== "editor") return false;
+		//	const annotations = file?.session?.getAnnotations();
+		//	return !!annotations.length;
+		// });
+		// if (fileWithProblems) {
+		//	problemButton.show();
+		// } else {
+		//	problemButton.hide();
+		// }
 	}
 
 	/**
@@ -613,15 +768,15 @@ async function EditorManager($header, $body) {
 		const bottom = 0;
 		const right = showSideButtons ? 15 : 0;
 		const left = linenumbers ? (showAnnotations ? 0 : -16) : 0;
-
-		editor.renderer.setMargin(top, bottom, left, right);
+		// TODO
+		//editor.renderer.setMargin(top, bottom, left, right);
 
 		if (!updateGutter) return;
 
-		editor.setOptions({
-			showGutter: linenumbers || showAnnotations,
-			showLineNumbers: linenumbers,
-		});
+		// editor.setOptions({
+		// 	showGutter: linenumbers || showAnnotations,
+		// 	showLineNumbers: linenumbers,
+		// });
 	}
 
 	/**
@@ -644,8 +799,8 @@ async function EditorManager($header, $body) {
 		manager.activeFile = file;
 
 		if (file.type === "editor") {
-			editor.setSession(file.session);
-			editor.setReadOnly(!file.editable || !!file.loading);
+			// Apply active file content and language to CodeMirror
+			applyFileToEditor(file);
 			$container.style.display = "block";
 
 			$hScrollbar.hideImmediately();
@@ -663,8 +818,9 @@ async function EditorManager($header, $body) {
 					$container.parentElement.appendChild(file.content);
 				}
 			}
+			// TODO: Implement selection clearing for CodeMirror
 			if (manager.activeFile && manager.activeFile.type === "editor") {
-				manager.activeFile.session.selection.clearSelection();
+				// manager.activeFile.session.selection.clearSelection();
 			}
 		}
 
@@ -684,6 +840,20 @@ async function EditorManager($header, $body) {
 		manager.onupdate("switch-file");
 		events.emit("switch-file", file);
 	}
+
+	// When a file finishes loading its content, refresh the editor if it's active
+	manager.on(["file-loaded"], (file) => {
+		if (!file) return;
+		if (manager.activeFile?.id === file.id && file.type === "editor") {
+			applyFileToEditor(file);
+		}
+	});
+
+	// Re-apply state when read-only toggles on the active file
+	manager.on(["update:read-only"], () => {
+		const file = manager.activeFile;
+		if (file?.type === "editor") applyFileToEditor(file);
+	});
 
 	/**
 	 * Initializes the file tab container.
@@ -784,12 +954,18 @@ async function EditorManager($header, $body) {
 	 * @param {AceAjax.Editor} editor
 	 * @returns
 	 */
+	// TODO: Implement editor height calculation for CodeMirror
 	function getEditorHeight(editor) {
-		const { renderer, session } = editor;
-		const offset = (renderer.$size.scrollerHeight + renderer.lineHeight) * 0.5;
-		const editorHeight =
-			session.getScreenLength() * renderer.lineHeight - offset;
-		return editorHeight;
+		try {
+			const sd = editor?.scrollDOM;
+			if (!sd) return 0;
+			// Return the total vertical scrollable range
+			const total = sd.scrollHeight || 0;
+			const viewport = sd.clientHeight || 0;
+			return Math.max(total - viewport, 0);
+		} catch (_) {
+			return 0;
+		}
 	}
 
 	/**
@@ -797,15 +973,22 @@ async function EditorManager($header, $body) {
 	 * @param {AceAjax.Editor} editor
 	 * @returns
 	 */
+	// TODO: Implement editor width calculation for CodeMirror
 	function getEditorWidth(editor) {
-		const { renderer, session } = editor;
-		const offset = renderer.$size.scrollerWidth - renderer.characterWidth;
-		const editorWidth =
-			session.getScreenWidth() * renderer.characterWidth - offset;
-		if (appSettings.value.textWrap) {
-			return editorWidth;
-		} else {
-			return editorWidth + appSettings.value.leftMargin;
+		try {
+			const sd = editor?.scrollDOM;
+			if (!sd) return 0;
+			// Return the total horizontal scrollable range
+			const total = sd.scrollWidth || 0;
+			const viewport = sd.clientWidth || 0;
+			let width = Math.max(total - viewport, 0);
+			if (!appSettings.value.textWrap) {
+				const { leftMargin = 0 } = appSettings.value;
+				width += leftMargin || 0;
+			}
+			return width;
+		} catch (_) {
+			return 0;
 		}
 	}
 }

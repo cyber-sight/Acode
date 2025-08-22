@@ -1,7 +1,6 @@
 import fsOperation from "fileSystem";
 import sidebarApps from "sidebarApps";
 import ajax from "@deadlyjack/ajax";
-import { addMode, removeMode } from "ace/modelist";
 import Contextmenu from "components/contextmenu";
 import inputhints from "components/inputhints";
 import Page from "components/page";
@@ -43,6 +42,7 @@ import encodings, { decode, encode } from "utils/encodings";
 import helpers from "utils/helpers";
 import KeyboardEvent from "utils/keyboardEvent";
 import Url from "utils/Url";
+import { addMode, removeMode } from "../codemirror/modelist";
 import constants from "./constants";
 
 export default class Acode {
