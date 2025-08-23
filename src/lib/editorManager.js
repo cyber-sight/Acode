@@ -5,7 +5,7 @@ import sidebarApps from "sidebarApps";
 // TODO: Migrate touch handlers to CodeMirror
 // import touchListeners, { scrollAnimationFrame } from "ace/touchHandler";
 
-import { EditorState } from "@codemirror/state";
+import { Compartment, EditorState } from "@codemirror/state";
 import { oneDark } from "@codemirror/theme-one-dark";
 import { keymap } from "@codemirror/view";
 import {
@@ -36,6 +36,7 @@ import SideButton, { sideButtonContainer } from "components/sideButton";
 import keyboardHandler, { keydownState } from "handlers/keyboard";
 import actions from "handlers/quickTools";
 import colorView from "../codemirror/colorView";
+import themeRegistry, { getThemeById, getThemes } from "../codemirror/themes";
 // TODO: Update EditorFile for CodeMirror compatibility
 import EditorFile from "./editorFile";
 import appSettings from "./settings";
@@ -105,13 +106,16 @@ async function EditorManager($header, $body) {
 		".cm-scroller": { height: "100%", overflow: "auto" },
 	});
 
+	// Compartment to swap editor theme dynamically
+	const themeCompartment = new Compartment();
+
 	// Create minimal CodeMirror editor
 	const editorState = EditorState.create({
 		doc: "",
 		extensions: [
 			basicSetup,
 			// Default theme
-			oneDark,
+			themeCompartment.of(oneDark),
 			fixedHeightTheme,
 			// Emmet abbreviation tracker and common keybindings
 			abbreviationTracker(),
@@ -142,10 +146,28 @@ async function EditorManager($header, $body) {
 		}
 	};
 
+	// Set CodeMirror theme by id registered in our registry
+	editor.setTheme = function (themeId) {
+		try {
+			const id = String(themeId || "");
+			const theme = getThemeById(id) || getThemeById(id.replace(/-/g, "_"));
+			const ext = theme?.getExtension?.() || [oneDark];
+			editor.dispatch({ effects: themeCompartment.reconfigure(ext) });
+			return true;
+		} catch (_) {
+			return false;
+		}
+	};
+
 	// Helper: apply a file's content and language to the editor view
 	function applyFileToEditor(file) {
 		if (!file || file.type !== "editor") return;
-		const baseExtensions = [basicSetup, oneDark, fixedHeightTheme];
+		const baseExtensions = [
+			basicSetup,
+			// keep compartment in the state to allow dynamic theme changes later
+			themeCompartment.of(oneDark),
+			fixedHeightTheme,
+		];
 		const exts = [...baseExtensions];
 		try {
 			const langExtFn = file.currentLanguageExtension;
@@ -179,6 +201,9 @@ async function EditorManager($header, $body) {
 		const state = EditorState.create({ doc, extensions: exts });
 		file.session = state; // keep file.session in sync
 		editor.setState(state);
+		// Re-apply selected theme after state replacement
+		const desiredTheme = appSettings?.value?.editorTheme;
+		if (desiredTheme) editor.setTheme(desiredTheme);
 	}
 
 	function getEmmetSyntaxForFile(file) {
@@ -273,6 +298,12 @@ async function EditorManager($header, $body) {
 	$body.append($container);
 	initModes(); // Initialize CodeMirror modes
 	await setupEditor();
+
+	// Initialize theme from settings or fallback
+	try {
+		const desired = appSettings?.value?.editorTheme || "one_dark";
+		editor.setTheme(desired);
+	} catch (_) {}
 
 	$hScrollbar.onshow = $vScrollbar.onshow = updateFloatingButton.bind(
 		{},

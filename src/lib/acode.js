@@ -43,6 +43,7 @@ import helpers from "utils/helpers";
 import KeyboardEvent from "utils/keyboardEvent";
 import Url from "utils/Url";
 import { addMode, removeMode } from "../codemirror/modelist";
+import cmThemeRegistry from "../codemirror/themes";
 import constants from "./constants";
 
 export default class Acode {
@@ -79,6 +80,16 @@ export default class Acode {
 			update: themes.update,
 			// Deprecated, not supported anymore
 			apply: () => {},
+		};
+
+		// CodeMirror editor theme API for plugins
+		const editorThemesModule = {
+			register: (id, caption, isDark, getExtension) =>
+				cmThemeRegistry.addTheme(id, caption, isDark, getExtension),
+			unregister: (id) => cmThemeRegistry.removeTheme(id),
+			list: () => cmThemeRegistry.getThemes(),
+			apply: (id) => editorManager?.editor?.setTheme?.(id),
+			get: (id) => cmThemeRegistry.getThemeById(id),
 		};
 
 		const sidebarAppsModule = {
@@ -139,6 +150,7 @@ export default class Acode {
 		this.define("tutorial", tutorial);
 		this.define("aceModes", aceModes);
 		this.define("themes", themesModule);
+		this.define("editorThemes", editorThemesModule);
 		this.define("settings", appSettings);
 		this.define("sideButton", SideButton);
 		this.define("EditorFile", EditorFile);

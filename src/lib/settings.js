@@ -124,7 +124,7 @@ class Settings {
 			search: this.#searchSettings,
 			lang: "en-us",
 			fontSize: "12px",
-			editorTheme: "ace/theme/nord_dark",
+			editorTheme: "one_dark",
 			textWrap: true,
 			softTab: true,
 			tabSize: 2,
