@@ -56,6 +56,11 @@ export default function editorSettings() {
 			checkbox: values.linenumbers,
 		},
 		{
+			key: "textWrap",
+			text: strings["text wrap"],
+			checkbox: values.textWrap,
+		},
+		{
 			key: "lineHeight",
 			text: strings["line height"],
 			value: values.lineHeight,
@@ -91,24 +96,24 @@ export default function editorSettings() {
 			text: strings["live autocompletion"].capitalize(),
 			checkbox: values.liveAutoCompletion,
 		},
-		{
-			key: "showPrintMargin",
-			text: strings["show print margin"].capitalize(),
-			checkbox: values.showPrintMargin,
-		},
-		{
-			key: "printMargin",
-			text: strings["print margin"],
-			value: values.printMargin,
-			prompt: strings["print margin"],
-			promptType: "number",
-			promptOptions: {
-				test(value) {
-					value = Number.parseInt(value);
-					return value >= 10 && value <= 200;
-				},
-			},
-		},
+		// {
+		// 	key: "showPrintMargin",
+		// 	text: strings["show print margin"].capitalize(),
+		// 	checkbox: values.showPrintMargin,
+		// },
+		// {
+		// 	key: "printMargin",
+		// 	text: strings["print margin"],
+		// 	value: values.printMargin,
+		// 	prompt: strings["print margin"],
+		// 	promptType: "number",
+		// 	promptOptions: {
+		// 		test(value) {
+		// 			value = Number.parseInt(value);
+		// 			return value >= 10 && value <= 200;
+		// 		},
+		// 	},
+		// },
 		{
 			key: "teardropSize",
 			text: strings["cursor controller size"],
@@ -128,11 +133,11 @@ export default function editorSettings() {
 			text: strings["relative line numbers"],
 			checkbox: values.relativeLineNumbers,
 		},
-		{
-			key: "elasticTabstops",
-			text: strings["elastic tabstops"],
-			checkbox: values.elasticTabstops,
-		},
+		// {
+		// 	key: "elasticTabstops",
+		// 	text: strings["elastic tabstops"],
+		// 	checkbox: values.elasticTabstops,
+		// },
 		{
 			key: "rtlText",
 			text: strings["line based rtl switching"],
@@ -143,11 +148,11 @@ export default function editorSettings() {
 			text: strings["hard wrap"],
 			checkbox: values.hardWrap,
 		},
-		{
-			key: "useTextareaForIME",
-			text: strings["use textarea for ime"],
-			checkbox: values.useTextareaForIME,
-		},
+		// {
+		// 	key: "useTextareaForIME",
+		// 	text: strings["use textarea for ime"],
+		// 	checkbox: values.useTextareaForIME,
+		// },
 		{
 			key: "fadeFoldWidgets",
 			text: strings["fade fold widgets"],

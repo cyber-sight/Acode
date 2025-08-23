@@ -5,9 +5,16 @@ import sidebarApps from "sidebarApps";
 // TODO: Migrate touch handlers to CodeMirror
 // import touchListeners, { scrollAnimationFrame } from "ace/touchHandler";
 
+import { indentUnit } from "@codemirror/language";
 import { Compartment, EditorState } from "@codemirror/state";
 import { oneDark } from "@codemirror/theme-one-dark";
-import { keymap } from "@codemirror/view";
+import {
+	highlightActiveLineGutter,
+	highlightTrailingWhitespace,
+	highlightWhitespace,
+	keymap,
+	lineNumbers,
+} from "@codemirror/view";
 import {
 	abbreviationTracker,
 	emmetConfig,
@@ -108,6 +115,210 @@ async function EditorManager($header, $body) {
 
 	// Compartment to swap editor theme dynamically
 	const themeCompartment = new Compartment();
+	// Compartments to control indentation, tab width, and font styling dynamically
+	const indentUnitCompartment = new Compartment();
+	const tabSizeCompartment = new Compartment();
+	const fontStyleCompartment = new Compartment();
+	// Compartment for line wrapping
+	const wrapCompartment = new Compartment();
+	// Compartment for line numbers
+	const lineNumberCompartment = new Compartment();
+	// Compartment for text direction (RTL/LTR)
+	const rtlCompartment = new Compartment();
+	// Compartment for whitespace visualization
+	const whitespaceCompartment = new Compartment();
+	// Compartment for fold gutter theme (fade)
+	const foldThemeCompartment = new Compartment();
+	// Compartment for autocompletion behavior
+	const completionCompartment = new Compartment();
+
+	function getEditorFontFamily() {
+		const font = appSettings?.value?.editorFont || "Roboto Mono";
+		return `${font}, Noto Mono, Monaco, monospace`;
+	}
+
+	function makeFontTheme() {
+		const fontSize = appSettings?.value?.fontSize || "12px";
+		const lineHeight = appSettings?.value?.lineHeight || 1.6;
+		return EditorView.theme({
+			"&": { fontSize, lineHeight: String(lineHeight) },
+			".cm-content": { fontFamily: getEditorFontFamily() },
+			".cm-tooltip": { fontFamily: getEditorFontFamily() },
+		});
+	}
+
+	function makeWrapExtension() {
+		return appSettings?.value?.textWrap ? EditorView.lineWrapping : [];
+	}
+
+	function makeLineNumberExtension() {
+		const { linenumbers = true, relativeLineNumbers = false } =
+			appSettings?.value || {};
+		// When disabled, hide the default basicSetup line number gutter via theme
+		if (!linenumbers)
+			return EditorView.theme({
+				".cm-gutter.cm-lineNumbers": {
+					display: "none !important",
+					width: "0px !important",
+					minWidth: "0px !important",
+				},
+				".cm-lineNumbers .cm-gutterElement": {
+					display: "none !important",
+				},
+				".cm-gutters": {
+					width: "0px !important",
+					minWidth: "0px !important",
+					border: "none !important",
+				},
+			});
+		// When enabled (non-relative), rely on basicSetup's built-in lineNumbers
+		if (!relativeLineNumbers) return [];
+		// Relative numbering: override with custom formatter
+		return [
+			lineNumbers({
+				formatNumber: (lineNo, state) => {
+					try {
+						const cur = state.doc.lineAt(state.selection.main.head).number;
+						const diff = Math.abs(lineNo - cur);
+						return diff === 0 ? String(lineNo) : String(diff);
+					} catch (_) {
+						return String(lineNo);
+					}
+				},
+			}),
+			highlightActiveLineGutter(),
+		];
+	}
+
+	function makeIndentExtensions() {
+		const { softTab = true, tabSize = 2 } = appSettings?.value || {};
+		const unit = softTab ? " ".repeat(Math.max(1, Number(tabSize) || 2)) : "\t";
+		return {
+			indentExt: indentUnit.of(unit),
+			tabSizeExt: EditorState.tabSize.of(Math.max(1, Number(tabSize) || 2)),
+		};
+	}
+
+	// Centralised CodeMirror options registry for organized configuration
+	// Each spec declares related settings keys, its compartment(s), and a builder returning extension(s)
+	const cmOptionSpecs = [
+		{
+			keys: ["fontSize", "editorFont", "lineHeight"],
+			compartments: [fontStyleCompartment],
+			build() {
+				return makeFontTheme();
+			},
+		},
+		{
+			keys: ["textWrap"],
+			compartments: [wrapCompartment],
+			build() {
+				return makeWrapExtension();
+			},
+		},
+		{
+			keys: ["softTab", "tabSize"],
+			compartments: [indentUnitCompartment, tabSizeCompartment],
+			build() {
+				const { indentExt, tabSizeExt } = makeIndentExtensions();
+				return [indentExt, tabSizeExt];
+			},
+		},
+		{
+			keys: ["linenumbers", "relativeLineNumbers"],
+			compartments: [lineNumberCompartment],
+			build() {
+				return makeLineNumberExtension();
+			},
+		},
+		{
+			keys: ["rtlText"],
+			compartments: [rtlCompartment],
+			build() {
+				const rtl = !!appSettings?.value?.rtlText;
+				return EditorView.theme({
+					"&": { direction: rtl ? "rtl" : "ltr" },
+				});
+			},
+		},
+		{
+			keys: ["showSpaces"],
+			compartments: [whitespaceCompartment],
+			build() {
+				const show = !!appSettings?.value?.showSpaces;
+				return show
+					? [highlightWhitespace(), highlightTrailingWhitespace()]
+					: [];
+			},
+		},
+		{
+			keys: ["fadeFoldWidgets"],
+			compartments: [foldThemeCompartment],
+			build() {
+				const fade = !!appSettings?.value?.fadeFoldWidgets;
+				if (!fade) return [];
+				return EditorView.theme({
+					".cm-gutter.cm-foldGutter .cm-gutterElement": {
+						opacity: 0,
+						pointerEvents: "none",
+						transition: "opacity .12s ease",
+					},
+					".cm-gutter.cm-foldGutter:hover .cm-gutterElement, .cm-gutter.cm-foldGutter .cm-gutterElement:hover":
+						{
+							opacity: 1,
+							pointerEvents: "auto",
+						},
+				});
+			},
+		},
+		{
+			keys: ["liveAutoCompletion"],
+			compartments: [completionCompartment],
+			build() {
+				const live = !!appSettings?.value?.liveAutoCompletion;
+				return autocompletion({ activateOnTyping: live });
+			},
+		},
+	];
+
+	function getBaseExtensionsFromOptions() {
+		/** @type {import("@codemirror/state").Extension[]} */
+		const exts = [];
+		for (const spec of cmOptionSpecs) {
+			const built = spec.build();
+			if (spec.compartments.length === 1) {
+				exts.push(spec.compartments[0].of(built));
+			} else {
+				const arr = Array.isArray(built) ? built : [built];
+				for (let i = 0; i < spec.compartments.length; i++) {
+					const comp = spec.compartments[i];
+					const ext = arr[i];
+					if (ext !== undefined) exts.push(comp.of(ext));
+				}
+			}
+		}
+		return exts;
+	}
+
+	function applyOptions(keys) {
+		const filter = keys ? new Set(keys) : null;
+		for (const spec of cmOptionSpecs) {
+			if (filter && !spec.keys.some((k) => filter.has(k))) continue;
+			const built = spec.build();
+			const effects = [];
+			if (spec.compartments.length === 1) {
+				effects.push(spec.compartments[0].reconfigure(built));
+			} else {
+				const arr = Array.isArray(built) ? built : [built];
+				for (let i = 0; i < spec.compartments.length; i++) {
+					const comp = spec.compartments[i];
+					const ext = arr[i] ?? [];
+					effects.push(comp.reconfigure(ext));
+				}
+			}
+			editor.dispatch({ effects });
+		}
+	}
 
 	// Create minimal CodeMirror editor
 	const editorState = EditorState.create({
@@ -117,10 +328,11 @@ async function EditorManager($header, $body) {
 			// Default theme
 			themeCompartment.of(oneDark),
 			fixedHeightTheme,
+			// Editor options driven by settings via compartments
+			...getBaseExtensionsFromOptions(),
 			// Emmet abbreviation tracker and common keybindings
 			abbreviationTracker(),
 			wrapWithAbbreviation(),
-			autocompletion(),
 			keymap.of([{ key: "Mod-e", run: expandAbbreviation }]),
 		],
 	});
@@ -167,6 +379,8 @@ async function EditorManager($header, $body) {
 			// keep compartment in the state to allow dynamic theme changes later
 			themeCompartment.of(oneDark),
 			fixedHeightTheme,
+			// Keep dynamic compartments across state swaps
+			...getBaseExtensionsFromOptions(),
 		];
 		const exts = [...baseExtensions];
 		try {
@@ -204,6 +418,10 @@ async function EditorManager($header, $body) {
 		// Re-apply selected theme after state replacement
 		const desiredTheme = appSettings?.value?.editorTheme;
 		if (desiredTheme) editor.setTheme(desiredTheme);
+
+		// Ensure dynamic compartments reflect current settings
+		// Ensure dynamic compartments reflect current settings
+		applyOptions();
 	}
 
 	function getEmmetSyntaxForFile(file) {
@@ -305,39 +523,57 @@ async function EditorManager($header, $body) {
 		editor.setTheme(desired);
 	} catch (_) {}
 
+	// Ensure initial options reflect settings
+	applyOptions();
+
 	$hScrollbar.onshow = $vScrollbar.onshow = updateFloatingButton.bind(
 		{},
 		false,
 	);
 	$hScrollbar.onhide = $vScrollbar.onhide = updateFloatingButton.bind({}, true);
 
-	appSettings.on("update:textWrap", function (value) {
+	appSettings.on("update:textWrap", function () {
 		updateMargin();
-		for (let file of manager.files) {
-			file.session.setUseWrapMode(value);
-			if (!value) file.session.on("changeScrollLeft", onscrollleft);
-			else file.session.off("changeScrollLeft", onscrollleft);
-		}
+		applyOptions(["textWrap"]);
 	});
 
-	appSettings.on("update:tabSize", function (value) {
-		// TODO: Implement tab size setting for CodeMirror sessions
-		// manager.files.forEach((file) => file.session.setTabSize(value));
+	function updateEditorIndentationSettings() {
+		applyOptions(["softTab", "tabSize"]);
+	}
+
+	function updateEditorStyleFromSettings() {
+		applyOptions(["fontSize", "editorFont", "lineHeight"]);
+	}
+
+	function updateEditorWrapFromSettings() {
+		applyOptions(["textWrap"]);
+	}
+
+	function updateEditorLineNumbersFromSettings() {
+		applyOptions(["linenumbers", "relativeLineNumbers"]);
+	}
+
+	appSettings.on("update:tabSize", function () {
+		updateEditorIndentationSettings();
 	});
 
-	appSettings.on("update:softTab", function (value) {
-		// TODO: Implement soft tabs setting for CodeMirror sessions
-		// manager.files.forEach((file) => file.session.setUseSoftTabs(value));
+	appSettings.on("update:softTab", function () {
+		updateEditorIndentationSettings();
 	});
 
-	// TODO: Implement show invisibles for CodeMirror
-	appSettings.on("update:showSpaces", function (value) {
-		// editor.setOption("showInvisibles", value);
+	// Show spaces/tabs and trailing whitespace
+	appSettings.on("update:showSpaces", function () {
+		applyOptions(["showSpaces"]);
 	});
 
-	// TODO: Implement font size setting for CodeMirror
-	appSettings.on("update:fontSize", function (value) {
-		// editor.setFontSize(value);
+	// Font size update for CodeMirror
+	appSettings.on("update:fontSize", function () {
+		updateEditorStyleFromSettings();
+	});
+
+	// Font family update for CodeMirror
+	appSettings.on("update:editorFont", function () {
+		updateEditorStyleFromSettings();
 	});
 
 	appSettings.on("update:openFileListPos", function (value) {
@@ -345,53 +581,50 @@ async function EditorManager($header, $body) {
 		$vScrollbar.resize();
 	});
 
-	// TODO: Implement print margin for CodeMirror
-	appSettings.on("update:showPrintMargin", function (value) {
-		// manager.editor.setOption("showPrintMargin", value);
-	});
+	// appSettings.on("update:showPrintMargin", function (value) {
+	// 	// manager.editor.setOption("showPrintMargin", value);
+	// });
 
 	appSettings.on("update:scrollbarSize", function (value) {
 		$vScrollbar.size = value;
 		$hScrollbar.size = value;
 	});
 
-	// TODO: Implement live autocompletion for CodeMirror
-	appSettings.on("update:liveAutoCompletion", function (value) {
-		// editor.setOption("enableLiveAutocompletion", value);
+	// Live autocompletion (activateOnTyping)
+	appSettings.on("update:liveAutoCompletion", function () {
+		applyOptions(["liveAutoCompletion"]);
 	});
 
-	appSettings.on("update:linenumbers", function (value) {
+	appSettings.on("update:linenumbers", function () {
 		updateMargin(true);
-		//editor.resize(true);
+		updateEditorLineNumbersFromSettings();
 	});
 
-	// TODO: Implement line height setting for CodeMirror
-	appSettings.on("update:lineHeight", function (value) {
-		// editor.container.style.lineHeight = value;
+	// Line height update for CodeMirror
+	appSettings.on("update:lineHeight", function () {
+		updateEditorStyleFromSettings();
 	});
 
-	// TODO: Implement relative line numbers for CodeMirror
-	appSettings.on("update:relativeLineNumbers", function (value) {
-		// editor.setOption("relativeLineNumbers", value);
+	appSettings.on("update:relativeLineNumbers", function () {
+		updateEditorLineNumbersFromSettings();
 	});
 
-	appSettings.on("update:elasticTabstops", function (value) {
-		editor.setOption("useElasticTabstops", value);
+	// appSettings.on("update:elasticTabstops", function (_value) {
+	// 	// Not applicable in CodeMirror (Ace-era). No-op for now.
+	// });
+
+	appSettings.on("update:rtlText", function () {
+		applyOptions(["rtlText"]);
 	});
 
-	appSettings.on("update:rtlText", function (value) {
-		editor.setOption("rtlText", value);
-	});
+	// appSettings.on("update:hardWrap", function (_value) {
+	// 	// Not applicable in CodeMirror (Ace-era). No-op for now.
+	// });
 
-	appSettings.on("update:hardWrap", function (value) {
-		editor.setOption("hardWrap", value);
-	});
+	// appSettings.on("update:printMargin", function (_value) {
+	// 	// Not applicable in CodeMirror (Ace-era). No-op for now.
+	// });
 
-	appSettings.on("update:printMargin", function (value) {
-		editor.setOption("printMarginColumn", value);
-	});
-
-	// TODO: Implement color preview for CodeMirror
 	appSettings.on("update:colorPreview", function () {
 		const file = manager.activeFile;
 		if (file?.type === "editor") applyFileToEditor(file);
@@ -406,9 +639,8 @@ async function EditorManager($header, $body) {
 		updateMargin(true);
 	});
 
-	// TODO: Implement fold widgets for CodeMirror
-	appSettings.on("update:fadeFoldWidgets", function (value) {
-		// editor.setOption("fadeFoldWidgets", value);
+	appSettings.on("update:fadeFoldWidgets", function () {
+		applyOptions(["fadeFoldWidgets"]);
 	});
 
 	return manager;

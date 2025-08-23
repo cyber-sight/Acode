@@ -27,7 +27,7 @@ export default function prompt(
 	type = "text",
 	options = {},
 ) {
-	const commands = editorManager.editor.commands;
+	const commands = editorManager.editor?.commands;
 	const originalExec = commands.exec;
 	const { capitalize = true } = options;
 
