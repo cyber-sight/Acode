@@ -159,6 +159,11 @@ export default function editorSettings() {
 			checkbox: values.fadeFoldWidgets,
 		},
 		{
+			key: "rainbowBrackets",
+			text: strings["rainbow brackets"] || "Rainbow brackets",
+			checkbox: values.rainbowBrackets ?? true,
+		},
+		{
 			index: 0,
 			key: "scroll-settings",
 			text: strings["scroll settings"],

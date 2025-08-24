@@ -43,6 +43,7 @@ import SideButton, { sideButtonContainer } from "components/sideButton";
 import keyboardHandler, { keydownState } from "handlers/keyboard";
 import actions from "handlers/quickTools";
 import colorView from "../codemirror/colorView";
+import rainbowBrackets from "../codemirror/rainbowBrackets";
 import themeRegistry, { getThemeById, getThemes } from "../codemirror/themes";
 // TODO: Update EditorFile for CodeMirror compatibility
 import EditorFile from "./editorFile";
@@ -131,6 +132,8 @@ async function EditorManager($header, $body) {
 	const foldThemeCompartment = new Compartment();
 	// Compartment for autocompletion behavior
 	const completionCompartment = new Compartment();
+	// Compartment for rainbow bracket colorizer
+	const rainbowCompartment = new Compartment();
 
 	function getEditorFontFamily() {
 		const font = appSettings?.value?.editorFont || "Roboto Mono";
@@ -202,6 +205,15 @@ async function EditorManager($header, $body) {
 	// Centralised CodeMirror options registry for organized configuration
 	// Each spec declares related settings keys, its compartment(s), and a builder returning extension(s)
 	const cmOptionSpecs = [
+		{
+			keys: ["rainbowBrackets"],
+			compartments: [rainbowCompartment],
+			build() {
+				const enabled = appSettings?.value?.rainbowBrackets ?? true;
+				if (!enabled) return [];
+				return rainbowBrackets();
+			},
+		},
 		{
 			keys: ["fontSize", "editorFont", "lineHeight"],
 			compartments: [fontStyleCompartment],
@@ -930,6 +942,11 @@ async function EditorManager($header, $body) {
 
 	appSettings.on("update:fadeFoldWidgets", function () {
 		applyOptions(["fadeFoldWidgets"]);
+	});
+
+	// Toggle rainbow brackets
+	appSettings.on("update:rainbowBrackets", function () {
+		applyOptions(["rainbowBrackets"]);
 	});
 
 	return manager;

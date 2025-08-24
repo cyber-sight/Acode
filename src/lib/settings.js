@@ -175,6 +175,7 @@ class Settings {
 			showRetryToast: false,
 			showSideButtons: true,
 			showAnnotations: false,
+			rainbowBrackets: true,
 			pluginsDisabled: {}, // pluginId: true/false
 		};
 		this.value = structuredClone(this.#defaultSettings);
