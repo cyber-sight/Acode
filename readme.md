@@ -1,4 +1,7 @@
-# Acode - Code Editor for Android
+# Acode2 - Code Editor for Android
+
+> [!Important]
+> We are migrating Acode from **ace** to **codemirror**
 
 <p align="center">
   <img src='res/logo_1.png' width='250'>

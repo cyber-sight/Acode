@@ -371,6 +371,295 @@ async function EditorManager($header, $body) {
 		}
 	};
 
+	/**
+	 * Go to a specific line and column in the editor (CodeMirror implementation)
+	 * Supports multiple input formats:
+	 * - Simple line number: gotoLine(16) or gotoLine(16, 5)
+	 * - Relative offsets: gotoLine("+5") or gotoLine("-3")
+	 * - Percentages: gotoLine("50%") or gotoLine("25%")
+	 * - Line:column format: gotoLine("16:5")
+	 * - Mixed formats: gotoLine("+5:10") or gotoLine("50%:5")
+	 *
+	 * @param {number|string} line - Line number (1-based), or string with special formats
+	 * @param {number} column - Column number (0-based) - only used with numeric line parameter
+	 * @param {boolean} animate - Whether to animate (not used in CodeMirror, for compatibility)
+	 * @returns {boolean} success
+	 */
+	editor.gotoLine = function (line, column = 0, animate = false) {
+		try {
+			const { state } = editor;
+			const { doc } = state;
+
+			let targetLine,
+				targetColumn = column;
+
+			// If line is a string, parse it for special formats
+			if (typeof line === "string") {
+				const match = /^([+-])?(\d+)?(:\d+)?(%)?$/.exec(line.trim());
+				if (!match) {
+					console.warn("Invalid gotoLine format:", line);
+					return false;
+				}
+
+				const currentLine = doc.lineAt(state.selection.main.head);
+				const [, sign, lineNum, colonColumn, percent] = match;
+
+				// Parse column if specified in line:column format
+				if (colonColumn) {
+					targetColumn = Math.max(0, +colonColumn.slice(1) - 1); // Convert to 0-based
+				}
+
+				// Parse line number
+				let parsedLine = lineNum ? +lineNum : currentLine.number;
+
+				if (lineNum && percent) {
+					// Percentage format: "50%" or "+10%"
+					let percentage = parsedLine / 100;
+					if (sign) {
+						percentage =
+							percentage * (sign === "-" ? -1 : 1) +
+							currentLine.number / doc.lines;
+					}
+					targetLine = Math.round(doc.lines * percentage);
+				} else if (lineNum && sign) {
+					// Relative format: "+5" or "-3"
+					targetLine =
+						parsedLine * (sign === "-" ? -1 : 1) + currentLine.number;
+				} else if (lineNum) {
+					// Absolute line number
+					targetLine = parsedLine;
+				} else {
+					// No line number specified, stay on current line
+					targetLine = currentLine.number;
+				}
+			} else {
+				// Simple numeric line parameter
+				targetLine = line;
+			}
+
+			// Clamp line number to valid range
+			const lineNum = Math.max(1, Math.min(targetLine, doc.lines));
+			const docLine = doc.line(lineNum);
+
+			// Clamp column to line length
+			const col = Math.max(0, Math.min(targetColumn, docLine.length));
+			const pos = docLine.from + col;
+
+			// Move cursor and scroll into view
+			editor.dispatch({
+				selection: { anchor: pos, head: pos },
+				effects: EditorView.scrollIntoView(pos, { y: "center" }),
+			});
+			editor.focus();
+			return true;
+		} catch (error) {
+			console.error("Error in gotoLine:", error);
+			return false;
+		}
+	};
+
+	/**
+	 * Get current cursor position)
+	 * @returns {{row: number, column: number}} Cursor position
+	 */
+	editor.getCursorPosition = function () {
+		try {
+			const head = editor.state.selection.main.head;
+			const cursor = editor.state.doc.lineAt(head);
+			const line = cursor.number;
+			const col = head - cursor.from;
+			return { row: line, column: col };
+		} catch (_) {
+			return { row: 1, column: 0 };
+		}
+	};
+
+	/**
+	 * Compatibility object for session-related methods
+	 */
+	editor.session = {
+		/**
+		 * Get scroll top position
+		 * @returns {number} Scroll top value
+		 */
+		getScrollTop: function () {
+			try {
+				return editor.scrollDOM?.scrollTop || 0;
+			} catch (_) {
+				return 0;
+			}
+		},
+
+		/**
+		 * Get scroll left position
+		 * @returns {number} Scroll left value
+		 */
+		getScrollLeft: function () {
+			try {
+				return editor.scrollDOM?.scrollLeft || 0;
+			} catch (_) {
+				return 0;
+			}
+		},
+
+		/**
+		 * Get all folds
+		 * @returns {Array} Empty array for now
+		 */
+		getAllFolds: function () {
+			// TODO: Implement folding for CodeMirror
+			return [];
+		},
+
+		/**
+		 * Get line content by row number
+		 * @param {number} row - Row number (1-based to match getCursorPosition)
+		 * @returns {string} Line content
+		 */
+		getLine: function (row) {
+			try {
+				const lineNum = Math.max(1, row || 1);
+				const line = editor.state.doc.line(lineNum);
+				return line.text;
+			} catch (_) {
+				return "";
+			}
+		},
+
+		/**
+		 * Set value of the editor
+		 * @param {string} text - Text to set
+		 */
+		setValue: function (text) {
+			try {
+				editor.dispatch({
+					changes: {
+						from: 0,
+						to: editor.state.doc.length,
+						insert: String(text || ""),
+					},
+				});
+			} catch (_) {
+				// ignore
+			}
+		},
+
+		getValue: function () {
+			try {
+				return editor.state.doc.toString();
+			} catch (_) {
+				return "";
+			}
+		},
+
+		get doc() {
+			return {
+				...editor.state?.doc,
+				/**
+				 * Convert position to index
+				 * @param {number} position - Position to convert
+				 * @returns {number} Index
+				 */
+				positionToIndex: function (position) {
+					try {
+						return Math.max(0, Math.min(position, editor.state.doc.length));
+					} catch (_) {
+						return 0;
+					}
+				},
+			};
+		},
+	};
+
+	/**
+	 * Move cursor to specific position
+	 * @param {{row: number, column: number}} pos - Position to move to
+	 */
+	editor.moveCursorToPosition = function (pos) {
+		try {
+			const lineNum = Math.max(1, pos.row || 1);
+			const col = Math.max(0, pos.column || 0);
+			editor.gotoLine(lineNum, col);
+		} catch (_) {
+			// ignore
+		}
+	};
+
+	/**
+	 * Get the entire document value
+	 * @returns {string} Document content
+	 */
+	editor.getValue = function () {
+		try {
+			return editor.state.doc.toString();
+		} catch (_) {
+			return "";
+		}
+	};
+
+	/**
+	 * Compatibility object for selection-related methods
+	 */
+	editor.selection = {
+		/**
+		 * Get current selection anchor
+		 * @returns {number} Anchor position
+		 */
+		get anchor() {
+			try {
+				return editor.state.selection.main.anchor;
+			} catch (_) {
+				return 0;
+			}
+		},
+
+		/**
+		 * Get current selection range
+		 * @returns {{start: {row: number, column: number}, end: {row: number, column: number}}} Selection range
+		 */
+		getRange: function () {
+			try {
+				const { from, to } = editor.state.selection.main;
+				const fromLine = editor.state.doc.lineAt(from);
+				const toLine = editor.state.doc.lineAt(to);
+				return {
+					start: {
+						row: fromLine.number,
+						column: from - fromLine.from,
+					},
+					end: {
+						row: toLine.number,
+						column: to - toLine.from,
+					},
+				};
+			} catch (_) {
+				return { start: { row: 1, column: 0 }, end: { row: 1, column: 0 } }; // Default to line 1
+			}
+		},
+
+		/**
+		 * Get cursor position
+		 * @returns {{row: number, column: number}} Cursor position
+		 */
+		getCursor: function () {
+			return editor.getCursorPosition();
+		},
+	};
+
+	/**
+	 * Get selected text or text under cursor (CodeMirror implementation)
+	 * @returns {string} Selected text
+	 */
+	editor.getCopyText = function () {
+		try {
+			const { from, to } = editor.state.selection.main;
+			if (from === to) return ""; // No selection
+			return editor.state.doc.sliceString(from, to);
+		} catch (_) {
+			return "";
+		}
+	};
+
 	// Helper: apply a file's content and language to the editor view
 	function applyFileToEditor(file) {
 		if (!file || file.type !== "editor") return;

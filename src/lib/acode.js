@@ -56,10 +56,21 @@ export default class Acode {
 			name: "Default",
 			exts: ["*"],
 			format: async () => {
-				const { beautify } = ace.require("ace/ext/beautify");
-				const cursorPos = editorManager.editor.getCursorPosition();
-				beautify(editorManager.editor.session);
-				editorManager.editor.gotoLine(cursorPos.row + 1, cursorPos.column);
+				// TODO: Implement code formatting for CodeMirror
+				// const { beautify } = ace.require("ace/ext/beautify");
+				// const cursorPos = editorManager.editor.getCursorPosition();
+				// beautify(editorManager.editor.session);
+				// editorManager.editor.gotoLine(cursorPos.row + 1, cursorPos.column);
+
+				// Placeholder for CodeMirror formatting
+				// For now, we'll just maintain cursor position without formatting
+				const { editor } = editorManager;
+				const head = editor.state.selection.main.head;
+				const cursor = editor.state.doc.lineAt(head);
+				const line = cursor.number;
+				const col = head - cursor.from;
+				// Restore cursor position after any potential formatting
+				editor.gotoLine(line, col);
 			},
 		},
 	];

@@ -147,7 +147,6 @@ export default {
 		const pos = line.from + col;
 		editor.dispatch({ selection: { anchor: pos }, scrollIntoView: true });
 		editor.focus();
-		editor.gotoLine(line, col, true);
 	},
 	async "new-file"() {
 		let filename = await prompt(strings["enter file name"], "", "filename", {
@@ -392,7 +391,8 @@ export default {
 		const pos = editor.getCursorPosition();
 
 		await acode.format(selectIfNull);
-		editor.selection.moveCursorToPosition(pos);
+		// Restore cursor position after formatting (pos.row is now 1-based)
+		editor.gotoLine(pos.row, pos.column);
 	},
 	async eol() {
 		const eol = await select(strings["new line mode"], ["unix", "windows"], {
