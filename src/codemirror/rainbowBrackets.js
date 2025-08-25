@@ -140,19 +140,43 @@ export function rainbowBrackets(options = {}) {
 				if (!colorCount) return builder.finish();
 
 				const margin = 200;
+				const windows = [];
 				for (const { from, to } of view.visibleRanges) {
 					const start = Math.max(0, from - margin);
 					const end = Math.min(view.state.doc.length, to + margin);
+					if (start < end) windows.push({ from: start, to: end });
+				}
+				windows.sort((a, b) => a.from - b.from || a.to - b.to);
+				const merged = [];
+				for (const w of windows) {
+					if (!merged.length || w.from > merged[merged.length - 1].to) {
+						merged.push({ ...w });
+					} else {
+						merged[merged.length - 1].to = Math.max(
+							merged[merged.length - 1].to,
+							w.to,
+						);
+					}
+				}
 
-					const startLine = view.state.doc.lineAt(start);
+				for (const { from: winStart, to: winEnd } of merged) {
+					// Start scanning exactly at window start to keep builder.add calls sorted
+					const startLine = view.state.doc.lineAt(winStart);
 					let depth = cache.prefixDepth[startLine.number - 1];
-					let pos = startLine.from;
-					while (pos < end) {
+					// Adjust depth if starting mid-line
+					const startOffset = winStart - startLine.from;
+					if (startOffset > 0) {
+						depth += lineBalance(startLine.text.slice(0, startOffset));
+					}
+
+					let pos = winStart;
+					while (pos < winEnd) {
 						const line = view.state.doc.lineAt(pos);
 						const text = line.text;
 						const lineStart = line.from;
-						const upto = Math.min(line.to, end);
-						for (let i = 0, n = upto - lineStart; i < n; i++) {
+						const upto = Math.min(line.to, winEnd);
+						const iStart = Math.max(0, pos - lineStart);
+						for (let i = iStart, n = upto - lineStart; i < n; i++) {
 							const ch = text.charCodeAt(i);
 							if (ch === 40 || ch === 91 || ch === 123) {
 								const clsIndex =
