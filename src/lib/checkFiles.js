@@ -72,7 +72,7 @@ export default async function checkFiles() {
 			}
 
 			const text = await fs.readFile(file.encoding);
-			const loadedText = file.session.getValue();
+			const loadedText = file.session.doc.toString();
 
 			if (text !== loadedText) {
 				try {
