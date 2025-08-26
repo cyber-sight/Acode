@@ -759,6 +759,13 @@ export default class EditorFile {
 				),
 			});
 		} catch (_) {}
+
+		// Sync internal flags and header
+		this.readOnly = !!value;
+		this.#editable = !this.readOnly;
+		if (editorManager.activeFile?.id === this.id) {
+			editorManager.header.subText = this.#getTitle();
+		}
 	}
 
 	/**
