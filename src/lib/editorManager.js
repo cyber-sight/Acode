@@ -6,7 +6,7 @@ import sidebarApps from "sidebarApps";
 // import touchListeners, { scrollAnimationFrame } from "ace/touchHandler";
 
 import { indentUnit } from "@codemirror/language";
-import { Compartment, EditorState } from "@codemirror/state";
+import { Compartment, EditorState, StateEffect } from "@codemirror/state";
 import { oneDark } from "@codemirror/theme-one-dark";
 import {
 	highlightActiveLineGutter,
@@ -43,6 +43,12 @@ import SideButton, { sideButtonContainer } from "components/sideButton";
 import keyboardHandler, { keydownState } from "handlers/keyboard";
 import actions from "handlers/quickTools";
 import colorView from "../codemirror/colorView";
+import {
+	getAllFolds,
+	restoreFolds,
+	restoreSelection,
+	setScrollPosition,
+} from "../codemirror/editorUtils";
 import rainbowBrackets from "../codemirror/rainbowBrackets";
 import themeRegistry, { getThemeById, getThemes } from "../codemirror/themes";
 // TODO: Update EditorFile for CodeMirror compatibility
@@ -73,6 +79,10 @@ async function EditorManager($header, $body) {
 	let isScrolling = false;
 	let lastScrollTop = 0;
 	let lastScrollLeft = 0;
+
+	// Debounce timers for CodeMirror change handling
+	let checkTimeout = null;
+	let autosaveTimeout = null;
 
 	const { scrollbarSize } = appSettings.value;
 	const events = {
@@ -717,7 +727,13 @@ async function EditorManager($header, $body) {
 			// safe to ignore; editor will remain editable by default
 		}
 
-		const doc = file.session ? file.session.doc.toString() : "";
+		// Keep file.session in sync and handle caching/autosave
+		exts.push(getDocSyncListener());
+
+		// Preserve previous state for restoring selection/folds after swap
+		const prevState = file.session || null;
+
+		const doc = prevState ? prevState.doc.toString() : "";
 		const state = EditorState.create({ doc, extensions: exts });
 		file.session = state; // keep file.session in sync
 		editor.setState(state);
@@ -726,8 +742,33 @@ async function EditorManager($header, $body) {
 		if (desiredTheme) editor.setTheme(desiredTheme);
 
 		// Ensure dynamic compartments reflect current settings
-		// Ensure dynamic compartments reflect current settings
 		applyOptions();
+
+		// Restore selection from previous state if available
+		try {
+			const sel = prevState?.selection;
+			if (sel && Array.isArray(sel.ranges)) {
+				const ranges = sel.ranges.map((r) => ({ from: r.from, to: r.to }));
+				const mainIndex = sel.mainIndex ?? 0;
+				restoreSelection(editor, { ranges, mainIndex });
+			}
+		} catch (_) {}
+
+		// Restore folds from previous state if available
+		try {
+			const folds = prevState ? getAllFolds(prevState) : [];
+			if (folds && folds.length) {
+				restoreFolds(editor, folds);
+			}
+		} catch (_) {}
+
+		// Restore last known scroll position if present
+		if (
+			typeof file.lastScrollTop === "number" ||
+			typeof file.lastScrollLeft === "number"
+		) {
+			setScrollPosition(editor, file.lastScrollTop, file.lastScrollLeft);
+		}
 	}
 
 	function getEmmetSyntaxForFile(file) {
@@ -955,6 +996,76 @@ async function EditorManager($header, $body) {
 		applyOptions(["rainbowBrackets"]);
 	});
 
+	// Keep file.session and cache in sync on every edit
+	function getDocSyncListener() {
+		return EditorView.updateListener.of((update) => {
+			const file = manager.activeFile;
+			if (!file || file.type !== "editor") return;
+
+			// Only run expensive work when the document actually changed
+			if (!update.docChanged) return;
+
+			// Mirror latest state only on doc changes to avoid clobbering async loads
+			try {
+				file.session = update.state;
+			} catch (_) {}
+
+			// Debounced change handling (unsaved flag, cache, autosave)
+			if (checkTimeout) clearTimeout(checkTimeout);
+			if (autosaveTimeout) clearTimeout(autosaveTimeout);
+
+			checkTimeout = setTimeout(async () => {
+				const changed = await file.isChanged();
+				file.isUnsaved = changed;
+				try {
+					await file.writeToCache();
+				} catch (_) {}
+
+				events.emit("file-content-changed", file);
+				manager.onupdate("file-changed");
+				manager.emit("update", "file-changed");
+
+				const { autosave } = appSettings.value;
+				if (file.uri && changed && autosave) {
+					autosaveTimeout = setTimeout(() => {
+						acode.exec("save", false);
+					}, autosave);
+				}
+
+				file.markChanged = true;
+			}, TIMEOUT_VALUE);
+		});
+	}
+
+	// Register critical listeners
+	manager.on(["file-loaded"], (file) => {
+		if (!file) return;
+		if (manager.activeFile?.id === file.id && file.type === "editor") {
+			applyFileToEditor(file);
+		}
+	});
+
+	manager.on(["update:read-only"], () => {
+		const file = manager.activeFile;
+		if (file?.type !== "editor") return;
+		try {
+			const ro = !file.editable || !!file.loading;
+			editor.dispatch({
+				effects: readOnlyCompartment.reconfigure(EditorState.readOnly.of(ro)),
+			});
+		} catch (_) {
+			// Fallback: full re-apply
+			applyFileToEditor(file);
+		}
+	});
+
+	// Attach doc-sync listener to the current editor instance
+	try {
+		editor.dispatch({
+			effects: StateEffect.appendConfig.of(getDocSyncListener()),
+		});
+	} catch (_) {}
+
 	return manager;
 
 	/**
@@ -1021,32 +1132,7 @@ async function EditorManager($header, $body) {
 		//	keyboardHandler.on("keyboardHide", onKeyboardHide);
 		// });
 
-		// TODO: Implement change event for CodeMirror
-		// editor.on("change", (e) => {
-		if (checkTimeout) clearTimeout(checkTimeout);
-		if (autosaveTimeout) clearTimeout(autosaveTimeout);
-
-		checkTimeout = setTimeout(async () => {
-			const { activeFile } = manager;
-
-			if (activeFile.markChanged) {
-				const changed = await activeFile.isChanged();
-				activeFile.isUnsaved = changed;
-				activeFile.writeToCache();
-				events.emit("file-content-changed", activeFile);
-				manager.onupdate("file-changed");
-				manager.emit("update", "file-changed");
-
-				const { autosave } = appSettings.value;
-				if (activeFile.uri && changed && autosave) {
-					autosaveTimeout = setTimeout(() => {
-						acode.exec("save", false);
-					}, autosave);
-				}
-			}
-			activeFile.markChanged = true;
-		}, TIMEOUT_VALUE);
-		// });
+		// Change handling is implemented via CodeMirror updateListener (see getDocSyncListener())
 
 		// TODO: Implement change annotation event for CodeMirror
 		// editor.on("changeAnnotation", toggleProblemButton);
@@ -1371,6 +1457,18 @@ async function EditorManager($header, $body) {
 			manager.activeFile.content.style.display = "none";
 		}
 
+		// Persist the previous editor's state before switching away
+		const prev = manager.activeFile;
+		if (prev?.type === "editor") {
+			try {
+				prev.session = editor.state;
+			} catch (_) {}
+			try {
+				prev.lastScrollTop = editor.scrollDOM?.scrollTop || 0;
+				prev.lastScrollLeft = editor.scrollDOM?.scrollLeft || 0;
+			} catch (_) {}
+		}
+
 		manager.activeFile = file;
 
 		if (file.type === "editor") {
@@ -1415,29 +1513,6 @@ async function EditorManager($header, $body) {
 		manager.onupdate("switch-file");
 		events.emit("switch-file", file);
 	}
-
-	// When a file finishes loading its content, refresh the editor if it's active
-	manager.on(["file-loaded"], (file) => {
-		if (!file) return;
-		if (manager.activeFile?.id === file.id && file.type === "editor") {
-			applyFileToEditor(file);
-		}
-	});
-
-	// Re-apply state when read-only toggles on the active file
-	manager.on(["update:read-only"], () => {
-		const file = manager.activeFile;
-		if (file?.type !== "editor") return;
-		try {
-			const ro = !file.editable || !!file.loading;
-			editor.dispatch({
-				effects: readOnlyCompartment.reconfigure(EditorState.readOnly.of(ro)),
-			});
-		} catch (_) {
-			// Fallback: re-apply full state if something goes wrong
-			applyFileToEditor(file);
-		}
-	});
 
 	/**
 	 * Initializes the file tab container.

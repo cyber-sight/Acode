@@ -1052,6 +1052,14 @@ export default class EditorFile {
 			},
 		}).state;
 
+		// Immediately reflect "loading..." in the visible editor if this tab is active
+		try {
+			const { activeFile, emit } = editorManager;
+			if (activeFile?.id === this.id) {
+				emit("file-loaded", this);
+			}
+		} catch (_) {}
+
 		try {
 			const cacheFs = fsOperation(this.cacheFile);
 			const cacheExists = await cacheFs.exists();

@@ -20,6 +20,39 @@ export default () => {
 		if (file.id === constants.DEFAULT_FILE_SESSION) return;
 		if (file.SAFMode === "single") return;
 
+		// Selection per file:
+		// - Active file uses live EditorView selection
+		// - Inactive files use their persisted EditorState selection
+		let cursorPos;
+		if (activeFile?.id === file.id) {
+			cursorPos = getSelection(editor);
+		} else {
+			const sel = file.session?.selection;
+			if (sel) {
+				cursorPos = {
+					ranges: sel.ranges.map((r) => ({ from: r.from, to: r.to })),
+					mainIndex: sel.mainIndex ?? 0,
+				};
+			} else {
+				cursorPos = null;
+			}
+		}
+
+		// Scroll per file:
+		// - Active file uses live scroll from EditorView
+		// - Inactive files use lastScrollTop/Left captured on tab switch
+		let scrollTop, scrollLeft;
+		if (activeFile?.id === file.id) {
+			const sp = getScrollPosition(editor);
+			scrollTop = sp.scrollTop;
+			scrollLeft = sp.scrollLeft;
+		} else {
+			scrollTop =
+				typeof file.lastScrollTop === "number" ? file.lastScrollTop : 0;
+			scrollLeft =
+				typeof file.lastScrollLeft === "number" ? file.lastScrollLeft : 0;
+		}
+
 		const fileJson = {
 			id: file.id,
 			uri: file.uri,
@@ -29,12 +62,12 @@ export default () => {
 			readOnly: file.readOnly,
 			SAFMode: file.SAFMode,
 			deletedFile: file.deletedFile,
-			cursorPos: getSelection(editor),
-			scrollTop: getScrollPosition(editor).scrollTop,
-			scrollLeft: getScrollPosition(editor).scrollLeft,
+			cursorPos,
+			scrollTop,
+			scrollLeft,
 			editable: file.editable,
 			encoding: file.encoding,
-			render: activeFile.id === file.id,
+			render: activeFile?.id === file.id,
 			folds: getAllFolds(file.session),
 		};
 
