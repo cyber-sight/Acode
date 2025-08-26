@@ -11,6 +11,11 @@ import mimeTypes from "mime-types";
 import helpers from "utils/helpers";
 import Path from "utils/Path";
 import Url from "utils/Url";
+import {
+	restoreFolds,
+	restoreSelection,
+	setScrollPosition,
+} from "../codemirror/editorUtils";
 import { getModeForPath } from "../codemirror/modelist";
 import constants from "./constants";
 import openFolder from "./openFolder";
@@ -528,7 +533,7 @@ export default class EditorFile {
 	 */
 	set editable(value) {
 		if (this.#editable === value) return;
-		editorManager.editor.setReadOnly(!value);
+		this.setReadOnly(!value);
 		editorManager.onupdate("read-only");
 		editorManager.emit("update", "read-only");
 		this.#editable = value;
@@ -741,6 +746,19 @@ export default class EditorFile {
 	saveAs() {
 		if (this.type !== "editor") return Promise.resolve(false);
 		return this.#save(true);
+	}
+
+	setReadOnly(value) {
+		try {
+			const { editor, readOnlyCompartment } = editorManager;
+			if (!editor) return;
+			if (!readOnlyCompartment) return;
+			editor.dispatch({
+				effects: readOnlyCompartment.reconfigure(
+					EditorState.readOnly.of(!!value),
+				),
+			});
+		} catch (_) {}
 	}
 
 	/**
@@ -1022,14 +1040,17 @@ export default class EditorFile {
 
 		this.#loadOptions = null;
 
-		editor.state.readOnly = true;
+		this.setReadOnly(true);
 		this.loading = true;
 		this.markChanged = false;
 		this.#emit("loadstart", createFileEvent(this));
-		this.session = EditorState.create({
-			doc: strings["loading..."],
-			extensions: this.session.extensions,
-		});
+		this.session = this.session.update({
+			changes: {
+				from: 0,
+				to: this.session.doc.length,
+				insert: strings["loading..."],
+			},
+		}).state;
 
 		try {
 			const cacheFs = fsOperation(this.cacheFile);
@@ -1054,33 +1075,28 @@ export default class EditorFile {
 			}
 
 			this.markChanged = false;
-			this.session = EditorState.create({
-				doc: value,
-				extensions: this.session.extensions,
-			});
+			this.session = this.session.update({
+				changes: { from: 0, to: this.session.doc.length, insert: value },
+			}).state;
 			this.loaded = true;
 			this.loading = false;
 
 			const { activeFile, emit } = editorManager;
 			if (activeFile.id === this.id) {
-				editor.state.readOnly = false;
+				this.setReadOnly(false);
 			}
 
 			setTimeout(() => {
 				this.#emit("load", createFileEvent(this));
 				emit("file-loaded", this);
-				// TODO: Implement cursor positioning and scrolling for CodeMirror
-				// if (cursorPos)
-				// 	this.session.selection.moveCursorTo(cursorPos.row, cursorPos.column);
-				// if (scrollTop) this.session.setScrollTop(scrollTop);
-				// if (scrollLeft) this.session.setScrollLeft(scrollLeft);
+				if (cursorPos) {
+					restoreSelection(editor, cursorPos);
+				}
+				if (scrollTop || scrollLeft) {
+					setScrollPosition(editor, scrollTop, scrollLeft);
+				}
 				if (editable !== undefined) this.editable = editable;
-
-				// TODO: Implement folding for CodeMirror
-				// if (Array.isArray(folds)) {
-				// 	const parsedFolds = EditorFile.#parseFolds(folds);
-				// 	this.session?.addFolds(parsedFolds);
-				// }
+				restoreFolds(editor, folds);
 			}, 0);
 		} catch (error) {
 			this.#emit("loaderror", createFileEvent(this));
@@ -1105,16 +1121,6 @@ export default class EditorFile {
 	// static #onscrollleft(e) {
 	// 	editorManager.editor._emit("scrollleft", e);
 	// }
-
-	/**
-	 * Parse folds - TODO: Update for CodeMirror folding system
-	 * @param {Array} folds
-	 */
-	static #parseFolds(folds) {
-		if (!Array.isArray(folds)) return [];
-		// TODO: Implement CodeMirror fold parsing
-		return [];
-	}
 
 	#save(as) {
 		const event = createFileEvent(this);

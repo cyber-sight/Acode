@@ -1,3 +1,8 @@
+import {
+	getAllFolds,
+	getScrollPosition,
+	getSelection,
+} from "../codemirror/editorUtils";
 import constants from "./constants";
 import { addedFolder } from "./openFolder";
 import appSettings from "./settings";
@@ -24,13 +29,13 @@ export default () => {
 			readOnly: file.readOnly,
 			SAFMode: file.SAFMode,
 			deletedFile: file.deletedFile,
-			cursorPos: editor.getCursorPosition(),
-			scrollTop: editor.session.getScrollTop(),
-			scrollLeft: editor.session.getScrollLeft(),
+			cursorPos: getSelection(editor),
+			scrollTop: getScrollPosition(editor).scrollTop,
+			scrollLeft: getScrollPosition(editor).scrollLeft,
 			editable: file.editable,
 			encoding: file.encoding,
 			render: activeFile.id === file.id,
-			folds: parseFolds(file.session.getAllFolds()),
+			folds: getAllFolds(file.session),
 		};
 
 		if (settings.rememberFiles || fileJson.isUnsaved)
@@ -55,20 +60,3 @@ export default () => {
 	localStorage.files = JSON.stringify(filesToSave);
 	localStorage.folders = JSON.stringify(folders);
 };
-
-function parseFolds(folds) {
-	if (!Array.isArray(folds)) return [];
-
-	return folds
-		.map((fold) => {
-			if (!fold || !fold.range) return null;
-
-			const { range, ranges, placeholder } = fold;
-			return {
-				range,
-				ranges: parseFolds(ranges || []),
-				placeholder,
-			};
-		})
-		.filter(Boolean);
-}

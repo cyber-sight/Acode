@@ -134,6 +134,8 @@ async function EditorManager($header, $body) {
 	const completionCompartment = new Compartment();
 	// Compartment for rainbow bracket colorizer
 	const rainbowCompartment = new Compartment();
+	// Compartment for read-only toggling
+	const readOnlyCompartment = new Compartment();
 
 	function getEditorFontFamily() {
 		const font = appSettings?.value?.editorFont || "Roboto Mono";
@@ -340,6 +342,8 @@ async function EditorManager($header, $body) {
 			// Default theme
 			themeCompartment.of(oneDark),
 			fixedHeightTheme,
+			// Ensure read-only can be toggled later via compartment
+			readOnlyCompartment.of(EditorState.readOnly.of(false)),
 			// Editor options driven by settings via compartments
 			...getBaseExtensionsFromOptions(),
 			// Emmet abbreviation tracker and common keybindings
@@ -705,9 +709,10 @@ async function EditorManager($header, $body) {
 			exts.push(colorView(true));
 		}
 
-		// Apply read-only state based on file.editable/loading
+		// Apply read-only state based on file.editable/loading using Compartment
 		try {
-			exts.push(EditorState.readOnly.of(!file.editable || !!file.loading));
+			const ro = !file.editable || !!file.loading;
+			exts.push(readOnlyCompartment.of(EditorState.readOnly.of(ro)));
 		} catch (e) {
 			// safe to ignore; editor will remain editable by default
 		}
@@ -765,6 +770,7 @@ async function EditorManager($header, $body) {
 		activeFile: null,
 		addFile,
 		editor,
+		readOnlyCompartment,
 		getFile,
 		switchFile,
 		hasUnsavedFiles,
@@ -1421,7 +1427,16 @@ async function EditorManager($header, $body) {
 	// Re-apply state when read-only toggles on the active file
 	manager.on(["update:read-only"], () => {
 		const file = manager.activeFile;
-		if (file?.type === "editor") applyFileToEditor(file);
+		if (file?.type !== "editor") return;
+		try {
+			const ro = !file.editable || !!file.loading;
+			editor.dispatch({
+				effects: readOnlyCompartment.reconfigure(EditorState.readOnly.of(ro)),
+			});
+		} catch (_) {
+			// Fallback: re-apply full state if something goes wrong
+			applyFileToEditor(file);
+		}
 	});
 
 	/**
