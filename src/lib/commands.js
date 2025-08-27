@@ -138,15 +138,8 @@ export default {
 
 		if (!res) return;
 		const [lineStr, colStr] = String(res).split(".");
-		const lineNum = Math.max(1, Number.parseInt(lineStr || "1", 10) || 1);
-		const colNum = Math.max(1, Number.parseInt(colStr || "1", 10) || 1);
 		const { editor } = editorManager;
-		const { doc } = editor.state;
-		const line = doc.line(Math.min(lineNum, doc.lines));
-		const col = Math.min(colNum - 1, Math.max(0, line.length));
-		const pos = line.from + col;
-		editor.dispatch({ selection: { anchor: pos }, scrollIntoView: true });
-		editor.focus();
+		editor.gotoLine(lineStr, colStr);
 	},
 	async "new-file"() {
 		let filename = await prompt(strings["enter file name"], "", "filename", {
@@ -310,7 +303,15 @@ export default {
 	async "insert-color"() {
 		const { editor } = editorManager;
 		const range = getColorRange();
-		let defaultColor = range ? editor.session.getTextRange(range) : "";
+		let defaultColor = "";
+
+		if (range) {
+			try {
+				defaultColor = editor.state.doc.sliceString(range.from, range.to);
+			} catch (_) {
+				defaultColor = "";
+			}
+		}
 
 		editor.contentDOM.blur();
 		const wasFocused = editorManager.activeFile.focused;
@@ -321,7 +322,9 @@ export default {
 		});
 
 		if (range) {
-			editor.session.replace(range, res);
+			editor.dispatch({
+				changes: { from: range.from, to: range.to, insert: res },
+			});
 			return;
 		}
 		editor.insert(res);
