@@ -131,6 +131,17 @@ export function restoreFolds(view, folds) {
 	}
 }
 
+export function clearSelection(view) {
+	view.dispatch({
+		selection: EditorSelection.single(view.state.selection.main.head), // keep cursor where the main selection head is
+		scrollIntoView: true,
+	});
+	// Also clear the global DOM selection to prevent native selection handles/menus persisting across tab switches
+	try {
+		document.getSelection()?.removeAllRanges();
+	} catch (_) {}
+}
+
 export default {
 	getAllFolds,
 	getSelection,
@@ -138,4 +149,5 @@ export default {
 	setScrollPosition,
 	restoreSelection,
 	restoreFolds,
+	clearSelection,
 };

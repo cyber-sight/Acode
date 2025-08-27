@@ -12,6 +12,7 @@ import helpers from "utils/helpers";
 import Path from "utils/Path";
 import Url from "utils/Url";
 import {
+	clearSelection,
 	restoreFolds,
 	restoreSelection,
 	setScrollPosition,
@@ -827,6 +828,10 @@ export default class EditorFile {
 				editor.focus();
 			} else {
 				editor.contentDOM.blur();
+				// Ensure any native DOM selection is cleared on blur to avoid sticky selection handles
+				try {
+					document.getSelection()?.removeAllRanges();
+				} catch (_) {}
 			}
 		} else {
 			editorManager.container.style.display = "none";
@@ -836,10 +841,10 @@ export default class EditorFile {
 					editorManager.container.parentElement.appendChild(this.content);
 				}
 			}
-			// TODO: Implement selection clearing for CodeMirror
-			// if (activeFile && activeFile.type === "editor") {
-			// 	activeFile.session.selection.clearSelection();
-			// }
+
+			if (activeFile && activeFile.type === "editor") {
+				clearSelection(editorManager.editor);
+			}
 		}
 
 		this.#tab.classList.add("active");
