@@ -1,4 +1,5 @@
 import fsOperation from "fileSystem";
+import { selectAll } from "@codemirror/commands";
 import Sidebar from "components/sidebar";
 import { TerminalManager } from "components/terminal";
 import color from "dialogs/color";
@@ -340,8 +341,7 @@ export default {
 	},
 	"select-all"() {
 		const { editor } = editorManager;
-		editor.execCommand("selectall");
-		editor.scrollToRow(Number.POSITIVE_INFINITY);
+		selectAll(editor);
 	},
 	async rename(file) {
 		file = file || editorManager.activeFile;
