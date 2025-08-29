@@ -14,7 +14,9 @@ export function initModes() {
  * @param {string} name name of the mode
  * @param {string|Array<string>} extensions extensions of the mode
  * @param {string} [caption] display name of the mode
- * @param {Function} [languageExtension] CodeMirror language extension function
+ * @param {Function} [languageExtension] CodeMirror language provider function.
+ *   This function may return an Extension synchronously or a Promise resolving
+ *   to an Extension.
  */
 export function addMode(name, extensions, caption, languageExtension = null) {
 	const filename = name.toLowerCase();
@@ -149,7 +151,7 @@ class Mode {
 
 	/**
 	 * Get the CodeMirror language extension
-	 * @returns {Function|null} The language extension function or null if not available
+	 * @returns {Function|null} The language provider function or null if not available
 	 */
 	getExtension() {
 		return this.languageExtension;

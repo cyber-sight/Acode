@@ -1,58 +1,50 @@
-import { cpp } from "@codemirror/lang-cpp";
-
-// Import CodeMirror language extensions that are bundled with the app
-import { css } from "@codemirror/lang-css";
-import { go } from "@codemirror/lang-go";
-import { html } from "@codemirror/lang-html";
-import { java } from "@codemirror/lang-java";
-import { javascript } from "@codemirror/lang-javascript";
-import { json } from "@codemirror/lang-json";
-import { markdown } from "@codemirror/lang-markdown";
-import { php } from "@codemirror/lang-php";
-import { python } from "@codemirror/lang-python";
-import { rust } from "@codemirror/lang-rust";
-import { sass } from "@codemirror/lang-sass";
-import { vue } from "@codemirror/lang-vue";
-import { xml } from "@codemirror/lang-xml";
-import { yaml } from "@codemirror/lang-yaml";
+import { languages } from "@codemirror/language-data";
 import { addMode } from "./modelist";
 
-const modeList = {
-	// Plain text (fallback/selectable)
-	Text: { extensions: "txt|text|log|plain", extension: null },
-	CSS: { extensions: "css", extension: css },
-	Cpp: { extensions: "cpp|c|cc|cxx|h|hh|hpp|ino", extension: cpp },
-	golang: { extensions: "go", extension: go },
-	HTML: { extensions: "html|htm|xhtml|we|wpy", extension: html },
-	Java: { extensions: "java", extension: java },
-	JavaScript: { extensions: "js|jsm|jsx|cjs|mjs", extension: javascript },
-	JSON: { extensions: "json", extension: json },
-	Markdown: { extensions: "md|markdown", extension: markdown },
-	PHP: {
-		extensions: "php|inc|phtml|shtml|php3|php4|php5|phps|phpt|aw|ctp|module",
-		extension: php,
-	},
-	Python: { extensions: "py", extension: python },
-	Rust: { extensions: "rs", extension: rust },
-	Sass: { extensions: "sass|scss", extension: sass },
-	Vue: { extensions: "vue", extension: vue },
-	XML: {
-		extensions: "xml|rdf|rss|wsdl|xslt|atom|mathml|mml|xul|xbl|xaml",
-		extension: xml,
-	},
-	YAML: { extensions: "yaml|yml", extension: yaml },
-};
+// 1) Always register a plain text fallback
+addMode("Text", "txt|text|log|plain", "Plain Text", () => []);
 
-const languageNames = {
-	golang: "Go",
-	JavaScript: "JavaScript/JSX",
-	Cpp: "C/C++",
-	Text: "Plain Text",
-};
+// 2) Register all languages provided by @codemirror/language-data
+//    We convert extensions like [".js", ".mjs"] into a modelist pattern: "js|mjs"
+//    and include anchored filename patterns like "^Dockerfile" when present.
+for (const lang of languages) {
+	try {
+		const name = String(lang?.name || "").trim();
+		if (!name) continue;
 
-Object.keys(modeList).forEach((key) => {
-	const { extensions, extension } = modeList[key];
-	const caption = languageNames[key] || key;
-	// Pass null extension for Text; modelist will still register it
-	addMode(key, extensions, caption, extension || null);
-});
+		/** @type {string[]} */
+		const parts = [];
+		// File extensions
+		if (Array.isArray(lang.extensions)) {
+			for (const e of lang.extensions) {
+				if (typeof e !== "string") continue;
+				const cleaned = e.replace(/^\./, "").trim();
+				if (cleaned) parts.push(cleaned);
+			}
+		}
+		// Exact filenames (dockerfile, makefile, etc.)
+		const filenames = Array.isArray(lang.filenames)
+			? lang.filenames
+			: lang.filename
+				? [lang.filename]
+				: [];
+		for (const fn of filenames) {
+			if (typeof fn !== "string") continue;
+			const cleaned = fn.trim();
+			if (cleaned) parts.push(`^${cleaned}`);
+		}
+
+		// Skip if we have no way to match the language
+		if (parts.length === 0) continue;
+
+		const pattern = parts.join("|");
+
+		// Wrap language-data loader as our modelist language provider
+		// lang.load() returns a Promise<Extension>; we let the editor handle async loading
+		const loader = typeof lang.load === "function" ? () => lang.load() : null;
+
+		addMode(name, pattern, name, loader);
+	} catch (_) {
+		// Ignore faulty entries to avoid breaking the whole registration
+	}
+}

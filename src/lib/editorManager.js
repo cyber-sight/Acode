@@ -146,6 +146,8 @@ async function EditorManager($header, $body) {
 	const rainbowCompartment = new Compartment();
 	// Compartment for read-only toggling
 	const readOnlyCompartment = new Compartment();
+	// Compartment for language mode (allows async loading/reconfigure)
+	const languageCompartment = new Compartment();
 
 	function getEditorFontFamily() {
 		const font = appSettings?.value?.editorFont || "Roboto Mono";
@@ -700,9 +702,34 @@ async function EditorManager($header, $body) {
 		const exts = [...baseExtensions];
 		try {
 			const langExtFn = file.currentLanguageExtension;
+			let initialLang = [];
 			if (typeof langExtFn === "function") {
-				exts.push(langExtFn());
+				let result;
+				try {
+					result = langExtFn();
+				} catch (_) {
+					result = [];
+				}
+				// If the loader returns a Promise, reconfigure when it resolves
+				if (result && typeof result.then === "function") {
+					initialLang = [];
+					result
+						.then((ext) => {
+							try {
+								editor.dispatch({
+									effects: languageCompartment.reconfigure(ext || []),
+								});
+							} catch (_) {}
+						})
+						.catch(() => {
+							// ignore load errors; remain in plain text
+						});
+				} else {
+					initialLang = result || [];
+				}
 			}
+			// Ensure language compartment is present (empty -> plain text)
+			exts.push(languageCompartment.of(initialLang));
 		} catch (e) {
 			// ignore language extension errors; fallback to plain text
 		}

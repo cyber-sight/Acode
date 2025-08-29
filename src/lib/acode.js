@@ -114,6 +114,15 @@ export default class Acode {
 			removeMode,
 		};
 
+		// Preferred CodeMirror language registration API for plugins
+		const editorLanguages = {
+			// name: string, extensions: string|Array<string>, caption?: string,
+			// loader?: () => Extension | Promise<Extension>
+			register: (name, extensions, caption, loader) =>
+				addMode(name, extensions, caption, loader),
+			unregister: (name) => removeMode(name),
+		};
+
 		const intent = {
 			addHandler: addIntentHandler,
 			removeHandler: removeIntentHandler,
@@ -161,6 +170,7 @@ export default class Acode {
 		this.define("tutorial", tutorial);
 		this.define("aceModes", aceModes);
 		this.define("themes", themesModule);
+		this.define("editorLanguages", editorLanguages);
 		this.define("editorThemes", editorThemesModule);
 		this.define("settings", appSettings);
 		this.define("sideButton", SideButton);
