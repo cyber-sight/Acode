@@ -71,8 +71,8 @@ export default function keyboardHandler(e) {
 		altKey,
 		metaKey,
 	});
-	const editor = editorManager.editor.textInput.getElement();
-	editor.dispatchEvent(event);
+	const target = editorManager?.editor?.contentDOM;
+	target?.dispatchEvent?.(event);
 }
 
 document.addEventListener("admob.banner.size", async (event) => {

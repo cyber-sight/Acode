@@ -370,7 +370,7 @@ async function EditorManager($header, $body) {
 		parent: $container,
 	});
 
-	// Provide minimal Ace-like API compatibility used across the app
+	// Provide minimal Ace-like API compatibility used by plugins
 	/**
 	 * Insert text at the current selection/cursor in the editor
 	 * @param {string} text
@@ -379,7 +379,15 @@ async function EditorManager($header, $body) {
 	editor.insert = function (text) {
 		try {
 			const { from, to } = editor.state.selection.main;
-			editor.dispatch({ changes: { from, to, insert: String(text ?? "") } });
+			const insertText = String(text ?? "");
+			// Replace current selection and move cursor to end of inserted text
+			editor.dispatch({
+				changes: { from, to, insert: insertText },
+				selection: {
+					anchor: from + insertText.length,
+					head: from + insertText.length,
+				},
+			});
 			return true;
 		} catch (_) {
 			return false;
@@ -500,103 +508,6 @@ async function EditorManager($header, $body) {
 		} catch (_) {
 			return { row: 1, column: 0 };
 		}
-	};
-
-	/**
-	 * Compatibility object for session-related methods
-	 */
-	editor.session = {
-		/**
-		 * Get scroll top position
-		 * @returns {number} Scroll top value
-		 */
-		getScrollTop: function () {
-			try {
-				return editor.scrollDOM?.scrollTop || 0;
-			} catch (_) {
-				return 0;
-			}
-		},
-
-		/**
-		 * Get scroll left position
-		 * @returns {number} Scroll left value
-		 */
-		getScrollLeft: function () {
-			try {
-				return editor.scrollDOM?.scrollLeft || 0;
-			} catch (_) {
-				return 0;
-			}
-		},
-
-		/**
-		 * Get all folds
-		 * @returns {Array} Empty array for now
-		 */
-		getAllFolds: function () {
-			// TODO: Implement folding for CodeMirror
-			return [];
-		},
-
-		/**
-		 * Get line content by row number
-		 * @param {number} row - Row number (1-based to match getCursorPosition)
-		 * @returns {string} Line content
-		 */
-		getLine: function (row) {
-			try {
-				const lineNum = Math.max(1, row || 1);
-				const line = editor.state.doc.line(lineNum);
-				return line.text;
-			} catch (_) {
-				return "";
-			}
-		},
-
-		/**
-		 * Set value of the editor
-		 * @param {string} text - Text to set
-		 */
-		setValue: function (text) {
-			try {
-				editor.dispatch({
-					changes: {
-						from: 0,
-						to: editor.state.doc.length,
-						insert: String(text || ""),
-					},
-				});
-			} catch (_) {
-				// ignore
-			}
-		},
-
-		getValue: function () {
-			try {
-				return editor.state.doc.toString();
-			} catch (_) {
-				return "";
-			}
-		},
-
-		get doc() {
-			return {
-				...editor.state?.doc,
-				/**
-				 * Convert position to index
-				 * @param {number} position - Position to convert
-				 * @returns {number} Index
-				 */
-				positionToIndex: function (position) {
-					try {
-						return Math.max(0, Math.min(position, editor.state.doc.length));
-					} catch (_) {
-						return 0;
-					}
-				},
-			};
-		},
 	};
 
 	/**
