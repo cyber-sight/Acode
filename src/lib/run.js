@@ -216,7 +216,7 @@ async function run(
 				break;
 
 			case EXECUTING_SCRIPT: {
-				const text = activeFile?.session.getValue() || "";
+				const text = activeFile?.session?.doc?.toString() || "";
 				sendText(text, reqId, "application/javascript");
 				break;
 			}
@@ -255,7 +255,7 @@ async function run(
 			if (activeFile.mode === "single") {
 				if (filename === reqPath) {
 					sendText(
-						activeFile.session.getValue(),
+						activeFile.session?.doc?.toString(),
 						reqId,
 						mimeType.lookup(filename),
 					);
@@ -380,7 +380,7 @@ async function run(
 				case ".htm":
 				case ".html":
 					if (file && file.loaded && file.isUnsaved) {
-						sendHTML(file.session.getValue(), reqId);
+						sendHTML(file.session?.doc?.toString(), reqId);
 					} else {
 						sendFileContent(url, reqId, MIMETYPE_HTML);
 					}
@@ -399,7 +399,7 @@ async function run(
 							})
 							.use(markdownItTaskLists)
 							.use(markdownItFootnote)
-							.render(file.session.getValue());
+							.render(file.session?.doc?.toString());
 						const doc = mustache.render($_markdown, {
 							html,
 							filename,
@@ -412,10 +412,10 @@ async function run(
 				default:
 					if (file && file.loaded && file.isUnsaved) {
 						if (file.filename.endsWith(".html")) {
-							sendHTML(file.session.getValue(), reqId);
+							sendHTML(file.session?.doc?.toString(), reqId);
 						} else {
 							sendText(
-								file.session.getValue(),
+								file.session?.doc?.toString(),
 								reqId,
 								mimeType.lookup(file.filename),
 							);
