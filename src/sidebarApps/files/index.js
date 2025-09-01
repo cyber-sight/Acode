@@ -105,10 +105,10 @@ export function fixHeight(target) {
 
 		if (target === activeFileList) {
 			if (list.collapsed) {
-                list.style.removeProperty("max-height");
-		        list.style.removeProperty("height");
+				list.style.removeProperty("max-height");
+				list.style.removeProperty("height");
 				return;
-			};
+			}
 			target = list;
 		}
 
@@ -119,10 +119,10 @@ export function fixHeight(target) {
 		}
 
 		if (list.collapsed) {
-            list.style.removeProperty("max-height");
-		    list.style.removeProperty("height");
+			list.style.removeProperty("max-height");
+			list.style.removeProperty("height");
 			return;
-		};
+		}
 
 		list.collapse();
 		list.style.removeProperty("max-height");
