@@ -39,7 +39,7 @@ else
   tmpdir=""
 fi
 
-if [[ "$fdroidFlag" == "fdroid" ]]; then
+if [ "$fdroidFlag" = "fdroid" ]; then
   if [ -n "$tmpdir" ]; then
     echo "true" > "$tmpdir/fdroid.bool"
   fi
