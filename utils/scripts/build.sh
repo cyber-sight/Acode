@@ -35,17 +35,22 @@ if [ -n "$TMPDIR" ] && [ -r "$TMPDIR" ] && [ -w "$TMPDIR" ]; then
 elif [ -r "/tmp" ] && [ -w "/tmp" ]; then
   tmpdir="/tmp"
 else
-  echo "Error: No usable temporary directory found (TMPDIR or /tmp not accessible)." >&2
-  exit 1
+  echo "Warning: No usable temporary directory found (TMPDIR or /tmp not accessible). Skipping fdroid.bool file." >&2
+  tmpdir=""
 fi
 
 if [[ "$fdroidFlag" == "fdroid" ]]; then
-  echo "true" > "$tmpdir/fdroid.bool"
+  if [ -n "$tmpdir" ]; then
+    echo "true" > "$tmpdir/fdroid.bool"
+  fi
   cordova plugin remove com.foxdebug.acode.rk.exec.proot
 else
-  echo "false" > "$tmpdir/fdroid.bool"
+  if [ -n "$tmpdir" ]; then
+    echo "false" > "$tmpdir/fdroid.bool"
+  fi
   cordova plugin add src/plugins/proot/
 fi
+
 
 # Normalize mode values
 if [ "$mode" = "p" ] || [ "$mode" = "prod" ]

@@ -50,8 +50,9 @@ function getTmpDir() {
     fs.accessSync("/tmp", fs.constants.R_OK | fs.constants.W_OK);
     return "/tmp";
   } catch {
-    console.error("Error: No usable temporary directory found (TMPDIR or /tmp not accessible).");
-    process.exit(1);
+    console.log("Error: No usable temporary directory found (TMPDIR or /tmp not accessible).");
+    return null;
+    // process.exit(1);
   }
 }
 
@@ -78,8 +79,12 @@ function patchTargetSdkVersion() {
         api = "28";
       }
     } else {
-      console.error(`${getTmpDir()}/fdroid.bool not found`);
-      process.exit(1);
+      console.warn("---------------------------------------------------------------------------------\n\n\n\n");
+      console.warn(`⚠️ ${getTmpDir()}/fdroid.bool not found`);
+      console.warn("⚠️ Fdroid flavour will be built");
+      api = "28";
+      console.warn("\n\n\n\n---------------------------------------------------------------------------------");
+      //process.exit(1);
     }
 
     content = content.replace(sdkRegex, 'targetSdkVersion ' + api);
