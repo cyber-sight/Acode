@@ -43,13 +43,22 @@ if [[ "$fdroidFlag" == "fdroid" ]]; then
   if [ -n "$tmpdir" ]; then
     echo "true" > "$tmpdir/fdroid.bool"
   fi
-  cordova plugin remove com.foxdebug.acode.rk.exec.proot
+
+  # Remove only if installed
+  if [ -d "plugins/com.foxdebug.acode.rk.exec.proot" ]; then
+    cordova plugin remove com.foxdebug.acode.rk.exec.proot
+  fi
 else
   if [ -n "$tmpdir" ]; then
     echo "false" > "$tmpdir/fdroid.bool"
   fi
-  cordova plugin add src/plugins/proot/
+
+  # Add only if the src exists and not already installed
+  if [ -d "src/plugins/proot" ] && [ ! -d "plugins/com.foxdebug.acode.rk.exec.proot" ]; then
+    cordova plugin add src/plugins/proot/
+  fi
 fi
+
 
 
 # Normalize mode values
