@@ -61,7 +61,7 @@ cordovamode="--release"
 fi
 
 # Set build target based on buildType
-if [ "$buildType" = "aar" ]; then
+if [ "$buildType" = "bundle" ]; then
     echo "Building AAR library file..."
 else
     echo "Building APK file..."

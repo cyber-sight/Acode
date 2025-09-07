@@ -71,21 +71,31 @@ function patchTargetSdkVersion() {
 
   if (sdkRegex.test(content)) {
     let api = "35";
-    const froidFlag = path.join(getTmpDir(), 'fdroid.bool');
-
-    if (fs.existsSync(froidFlag)) {
-      const fdroid = fs.readFileSync(froidFlag, 'utf-8').trim();
-      if (fdroid == "true") {
-        api = "28";
-      }
-    } else {
+    const tmp = getTmpDir();
+    if (tmp == null) {
       console.warn("---------------------------------------------------------------------------------\n\n\n\n");
-      console.warn(`⚠️ ${getTmpDir()}/fdroid.bool not found`);
+      console.warn(`⚠️ fdroid.bool not found`);
       console.warn("⚠️ Fdroid flavour will be built");
       api = "28";
       console.warn("\n\n\n\n---------------------------------------------------------------------------------");
-      //process.exit(1);
+    } else {
+      const froidFlag = path.join(getTmpDir(), 'fdroid.bool');
+
+      if (fs.existsSync(froidFlag)) {
+        const fdroid = fs.readFileSync(froidFlag, 'utf-8').trim();
+        if (fdroid == "true") {
+          api = "28";
+        }
+      } else {
+        console.warn("---------------------------------------------------------------------------------\n\n\n\n");
+        console.warn(`⚠️ fdroid.bool not found`);
+        console.warn("⚠️ Fdroid flavour will be built");
+        api = "28";
+        console.warn("\n\n\n\n---------------------------------------------------------------------------------");
+        //process.exit(1);
+      }
     }
+
 
     content = content.replace(sdkRegex, 'targetSdkVersion ' + api);
     fs.writeFileSync(gradleFile, content, 'utf-8');
