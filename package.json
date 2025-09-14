@@ -37,7 +37,8 @@
       "cordova-plugin-buildinfo": {},
       "cordova-plugin-browser": {},
       "cordova-plugin-system": {},
-      "com.foxdebug.acode.rk.exec.terminal": {}
+      "com.foxdebug.acode.rk.exec.terminal": {},
+      "com.foxdebug.acode.rk.exec.proot": {}
     },
     "platforms": [
       "android"
