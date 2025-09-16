@@ -6,6 +6,7 @@ import sidebarApps from "sidebarApps";
 // import touchListeners, { scrollAnimationFrame } from "ace/touchHandler";
 
 import { indentUnit } from "@codemirror/language";
+import { search } from "@codemirror/search";
 import { Compartment, EditorState, StateEffect } from "@codemirror/state";
 import { oneDark } from "@codemirror/theme-one-dark";
 import {
@@ -354,6 +355,7 @@ async function EditorManager($header, $body) {
 			// Default theme
 			themeCompartment.of(oneDark),
 			fixedHeightTheme,
+			search(),
 			// Ensure read-only can be toggled later via compartment
 			readOnlyCompartment.of(EditorState.readOnly.of(false)),
 			// Editor options driven by settings via compartments
@@ -607,6 +609,7 @@ async function EditorManager($header, $body) {
 			// keep compartment in the state to allow dynamic theme changes later
 			themeCompartment.of(oneDark),
 			fixedHeightTheme,
+			search(),
 			// Keep dynamic compartments across state swaps
 			...getBaseExtensionsFromOptions(),
 		];
