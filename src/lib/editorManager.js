@@ -836,6 +836,9 @@ async function EditorManager($header, $body) {
 
 	function updateEditorWrapFromSettings() {
 		applyOptions(["textWrap"]);
+		if (appSettings.value.textWrap) {
+			$hScrollbar.hide();
+		}
 	}
 
 	function updateEditorLineNumbersFromSettings() {
@@ -1038,6 +1041,21 @@ async function EditorManager($header, $body) {
 		let checkTimeout = null;
 		let autosaveTimeout;
 		let scrollTimeout;
+		const scroller = editor.scrollDOM;
+
+		function handleEditorScroll() {
+			if (!scroller) return;
+			onscrolltop();
+			onscrollleft();
+			clearTimeout(scrollTimeout);
+			isScrolling = true;
+			scrollTimeout = setTimeout(() => {
+				isScrolling = false;
+			}, 100);
+		}
+
+		scroller?.addEventListener("scroll", handleEditorScroll, { passive: true });
+		handleEditorScroll();
 
 		// TODO: Implement focus event for CodeMirror
 		// editor.on("focus", async () => {
@@ -1078,14 +1096,6 @@ async function EditorManager($header, $body) {
 		// TODO: Implement change annotation event for CodeMirror
 		// editor.on("changeAnnotation", toggleProblemButton);
 
-		// TODO: Implement scroll event for CodeMirror
-		// editor.on("scroll", () => {
-		//	clearTimeout(scrollTimeout);
-		//	isScrolling = true;
-		//	scrollTimeout = setTimeout(() => {
-		//		isScrolling = false;
-		//	}, 100);
-		// });
 
 		// TODO: Implement resize event for CodeMirror
 		// editor.renderer.on("resize", () => {
@@ -1195,15 +1205,14 @@ async function EditorManager($header, $body) {
 	 * Sets the vertical scroll value of the editor. This is called when the editor is scrolled horizontally using the scrollbar.
 	 * @param {Number} value
 	 */
-	// TODO: Implement vertical scrolling for CodeMirror
 	function onscrollV(value) {
-		// preventScrollbarV = true;
-		// const session = editor.getSession();
-		// const editorHeight = getEditorHeight(editor);
-		// const scroll = editorHeight * value;
-		// session.setScrollTop(scroll);
-		// editor._emit("scroll", editor);
-		// cancelAnimationFrame(scrollAnimationFrame);
+		const scroller = editor?.scrollDOM;
+		if (!scroller) return;
+		const normalized = clamp01(value);
+		const maxScroll = Math.max(scroller.scrollHeight - scroller.clientHeight, 0);
+		preventScrollbarV = true;
+		scroller.scrollTop = normalized * maxScroll;
+		lastScrollTop = scroller.scrollTop;
 	}
 
 	/**
@@ -1211,21 +1220,22 @@ async function EditorManager($header, $body) {
 	 */
 	function onscrollVend() {
 		preventScrollbarV = false;
+		setVScrollValue();
 	}
 
 	/**
 	 * Sets the horizontal scroll value of the editor. This is called when the editor is scrolled vertically using the scrollbar.
 	 * @param {number} value - The scroll value.
 	 */
-	// TODO: Implement horizontal scrolling for CodeMirror
 	function onscrollH(value) {
-		// preventScrollbarH = true;
-		// const session = editor.getSession();
-		// const editorWidth = getEditorWidth(editor);
-		// const scroll = editorWidth * value;
-		// session.setScrollLeft(scroll);
-		// editor._emit("scroll", editor);
-		// cancelAnimationFrame(scrollAnimationFrame);
+		if (appSettings.value.textWrap) return;
+		const scroller = editor?.scrollDOM;
+		if (!scroller) return;
+		const normalized = clamp01(value);
+		const maxScroll = Math.max(scroller.scrollWidth - scroller.clientWidth, 0);
+		preventScrollbarH = true;
+		scroller.scrollLeft = normalized * maxScroll;
+		lastScrollLeft = scroller.scrollLeft;
 	}
 
 	/**
@@ -1233,58 +1243,93 @@ async function EditorManager($header, $body) {
 	 */
 	function onscrollHEnd() {
 		preventScrollbarH = false;
+		setHScrollValue();
 	}
 
 	/**
 	 * Sets scrollbars value based on the editor's scroll position.
 	 */
-	// TODO: Implement horizontal scroll value for CodeMirror
 	function setHScrollValue() {
-		// if (appSettings.value.textWrap || preventScrollbarH) return;
-		// const session = editor.getSession();
-		// const scrollLeft = session.getScrollLeft();
-		// if (scrollLeft === lastScrollLeft) return;
-		// const editorWidth = getEditorWidth(editor);
-		// const factor = (scrollLeft / editorWidth).toFixed(2);
-		// lastScrollLeft = scrollLeft;
-		// $hScrollbar.value = factor;
-		// editor._emit("scroll", "horizontal");
+		if (appSettings.value.textWrap || preventScrollbarH) return;
+		const scroller = editor?.scrollDOM;
+		if (!scroller) return;
+		const maxScroll = Math.max(scroller.scrollWidth - scroller.clientWidth, 0);
+		if (maxScroll <= 0) {
+			lastScrollLeft = 0;
+			$hScrollbar.value = 0;
+			return;
+		}
+		const scrollLeft = scroller.scrollLeft;
+		if (scrollLeft === lastScrollLeft) return;
+		lastScrollLeft = scrollLeft;
+		const factor = scrollLeft / maxScroll;
+		$hScrollbar.value = clamp01(factor);
 	}
 
 	/**
 	 * Handles the scroll left event.
 	 * Updates the horizontal scroll value and renders the horizontal scrollbar.
 	 */
-	// TODO: Implement scroll left handler for CodeMirror
 	function onscrollleft() {
-		// setHScrollValue();
-		// $hScrollbar.render();
+		if (appSettings.value.textWrap) {
+			$hScrollbar.hide();
+			return;
+		}
+		const scroller = editor?.scrollDOM;
+		if (!scroller) return;
+		const maxScroll = Math.max(scroller.scrollWidth - scroller.clientWidth, 0);
+		if (maxScroll <= 0) {
+			$hScrollbar.hide();
+			lastScrollLeft = 0;
+			$hScrollbar.value = 0;
+			return;
+		}
+		setHScrollValue();
+		$hScrollbar.render();
 	}
 
 	/**
 	 * Sets scrollbars value based on the editor's scroll position.
 	 */
-	// TODO: Implement vertical scroll value for CodeMirror
 	function setVScrollValue() {
-		// if (preventScrollbarV) return;
-		// const session = editor.getSession();
-		// const scrollTop = session.getScrollTop();
-		// if (scrollTop === lastScrollTop) return;
-		// const editorHeight = getEditorHeight(editor);
-		// const factor = (scrollTop / editorHeight).toFixed(2);
-		// lastScrollTop = scrollTop;
-		// $vScrollbar.value = factor;
-		// editor._emit("scroll", "vertical");
+		if (preventScrollbarV) return;
+		const scroller = editor?.scrollDOM;
+		if (!scroller) return;
+		const maxScroll = Math.max(scroller.scrollHeight - scroller.clientHeight, 0);
+		if (maxScroll <= 0) {
+			lastScrollTop = 0;
+			$vScrollbar.value = 0;
+			return;
+		}
+		const scrollTop = scroller.scrollTop;
+		if (scrollTop === lastScrollTop) return;
+		lastScrollTop = scrollTop;
+		const factor = scrollTop / maxScroll;
+		$vScrollbar.value = clamp01(factor);
 	}
 
 	/**
 	 * Handles the scroll top event.
 	 * Updates the vertical scroll value and renders the vertical scrollbar.
 	 */
-	// TODO: Implement scroll top handler for CodeMirror
 	function onscrolltop() {
-		// setVScrollValue();
-		// $vScrollbar.render();
+		const scroller = editor?.scrollDOM;
+		if (!scroller) return;
+		const maxScroll = Math.max(scroller.scrollHeight - scroller.clientHeight, 0);
+		if (maxScroll <= 0) {
+			$vScrollbar.hide();
+			lastScrollTop = 0;
+			$vScrollbar.value = 0;
+			return;
+		}
+		setVScrollValue();
+		$vScrollbar.render();
+	}
+
+	function clamp01(value) {
+		if (value <= 0) return 0;
+		if (value >= 1) return 1;
+		return value;
 	}
 
 	/**
