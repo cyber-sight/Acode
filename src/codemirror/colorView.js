@@ -17,6 +17,87 @@ const RGBG = new RegExp(colorRegex.anyGlobal);
 
 const enumColorType = { hex: "hex", rgb: "rgb", hsl: "hsl", named: "named" };
 
+const disallowedBoundaryBefore = new Set(["-", ".", "/", "#"]);
+const disallowedBoundaryAfter = new Set(["-", ".", "/"]);
+const ignoredLeadingWords = new Set(["url"]);
+
+function isWhitespace(char) {
+	return (
+		char === " " ||
+		char === "\t" ||
+		char === "\n" ||
+		char === "\r" ||
+		char === "\f"
+	);
+}
+
+function isAlpha(char) {
+	if (!char) return false;
+	const code = char.charCodeAt(0);
+	return (
+		(code >= 65 && code <= 90) || // A-Z
+		(code >= 97 && code <= 122)
+	);
+}
+
+function charAt(doc, index) {
+	if (index < 0 || index >= doc.length) return "";
+	return doc.sliceString(index, index + 1);
+}
+
+function findPrevNonWhitespace(doc, index) {
+	for (let i = index - 1; i >= 0; i--) {
+		if (!isWhitespace(charAt(doc, i))) return i;
+	}
+	return -1;
+}
+
+function findNextNonWhitespace(doc, index) {
+	for (let i = index; i < doc.length; i++) {
+		if (!isWhitespace(charAt(doc, i))) return i;
+	}
+	return doc.length;
+}
+
+function readWordBefore(doc, index) {
+	let pos = index;
+	while (pos >= 0 && isWhitespace(charAt(doc, pos))) pos--;
+	if (pos < 0) return "";
+	if (charAt(doc, pos) === "(") {
+		pos--;
+	}
+	while (pos >= 0 && isWhitespace(charAt(doc, pos))) pos--;
+	let end = pos;
+	while (pos >= 0 && isAlpha(charAt(doc, pos))) pos--;
+	const start = pos + 1;
+	if (end < start) return "";
+	return doc.sliceString(start, end + 1).toLowerCase();
+}
+
+function shouldRenderColor(doc, start, end) {
+	const immediatePrev = charAt(doc, start - 1);
+	if (disallowedBoundaryBefore.has(immediatePrev)) return false;
+
+	const immediateNext = charAt(doc, end);
+	if (disallowedBoundaryAfter.has(immediateNext)) return false;
+
+	const prevNonWhitespaceIndex = findPrevNonWhitespace(doc, start);
+	if (prevNonWhitespaceIndex !== -1) {
+		const prevNonWhitespaceChar = charAt(doc, prevNonWhitespaceIndex);
+		if (disallowedBoundaryBefore.has(prevNonWhitespaceChar)) return false;
+		const prevWord = readWordBefore(doc, prevNonWhitespaceIndex);
+		if (ignoredLeadingWords.has(prevWord)) return false;
+	}
+
+	const nextNonWhitespaceIndex = findNextNonWhitespace(doc, end);
+	if (nextNonWhitespaceIndex < doc.length) {
+		const nextNonWhitespaceChar = charAt(doc, nextNonWhitespaceIndex);
+		if (disallowedBoundaryAfter.has(nextNonWhitespaceChar)) return false;
+	}
+
+	return true;
+}
+
 class ColorWidget extends WidgetType {
 	constructor({ color, colorRaw, ...state }) {
 		super();
@@ -59,14 +140,16 @@ class ColorWidget extends WidgetType {
 function colorDecorations(view) {
 	const deco = [];
 	const ranges = view.visibleRanges;
+	const doc = view.state.doc;
 	for (const { from, to } of ranges) {
-		const text = view.state.doc.sliceString(from, to);
+		const text = doc.sliceString(from, to);
 		// Any color using global matcher from utils (captures named/rgb/rgba/hsl/hsla/hex)
 		RGBG.lastIndex = 0;
 		for (let m; (m = RGBG.exec(text)); ) {
 			const raw = m[2];
 			const start = from + m.index + m[1].length;
 			const end = start + raw.length;
+			if (!shouldRenderColor(doc, start, end)) continue;
 			const c = color(raw);
 			const colorHex = c.hex.toString(false);
 			deco.push(

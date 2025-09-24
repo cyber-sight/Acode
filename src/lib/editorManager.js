@@ -1096,7 +1096,6 @@ async function EditorManager($header, $body) {
 		// TODO: Implement change annotation event for CodeMirror
 		// editor.on("changeAnnotation", toggleProblemButton);
 
-
 		// TODO: Implement resize event for CodeMirror
 		// editor.renderer.on("resize", () => {
 		//	$vScrollbar.resize($vScrollbar.visible);
@@ -1209,7 +1208,10 @@ async function EditorManager($header, $body) {
 		const scroller = editor?.scrollDOM;
 		if (!scroller) return;
 		const normalized = clamp01(value);
-		const maxScroll = Math.max(scroller.scrollHeight - scroller.clientHeight, 0);
+		const maxScroll = Math.max(
+			scroller.scrollHeight - scroller.clientHeight,
+			0,
+		);
 		preventScrollbarV = true;
 		scroller.scrollTop = normalized * maxScroll;
 		lastScrollTop = scroller.scrollTop;
@@ -1295,7 +1297,10 @@ async function EditorManager($header, $body) {
 		if (preventScrollbarV) return;
 		const scroller = editor?.scrollDOM;
 		if (!scroller) return;
-		const maxScroll = Math.max(scroller.scrollHeight - scroller.clientHeight, 0);
+		const maxScroll = Math.max(
+			scroller.scrollHeight - scroller.clientHeight,
+			0,
+		);
 		if (maxScroll <= 0) {
 			lastScrollTop = 0;
 			$vScrollbar.value = 0;
@@ -1315,7 +1320,10 @@ async function EditorManager($header, $body) {
 	function onscrolltop() {
 		const scroller = editor?.scrollDOM;
 		if (!scroller) return;
-		const maxScroll = Math.max(scroller.scrollHeight - scroller.clientHeight, 0);
+		const maxScroll = Math.max(
+			scroller.scrollHeight - scroller.clientHeight,
+			0,
+		);
 		if (maxScroll <= 0) {
 			$vScrollbar.hide();
 			lastScrollTop = 0;
