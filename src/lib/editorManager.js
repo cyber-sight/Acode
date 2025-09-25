@@ -14,7 +14,7 @@ import {
 
 import { indentUnit } from "@codemirror/language";
 import { search } from "@codemirror/search";
-import { Compartment, EditorState, StateEffect } from "@codemirror/state";
+import { Compartment, EditorState, Prec, StateEffect } from "@codemirror/state";
 import { oneDark } from "@codemirror/theme-one-dark";
 import {
 	EditorView,
@@ -26,6 +26,8 @@ import {
 } from "@codemirror/view";
 import {
 	abbreviationTracker,
+	EmmetKnownSyntax,
+	emmetCompletionSource,
 	emmetConfig,
 	expandAbbreviation,
 	wrapWithAbbreviation,
@@ -321,6 +323,30 @@ async function EditorManager($header, $body) {
 		return exts;
 	}
 
+	function createEmmetExtensionSet({
+		syntax = EmmetKnownSyntax.html,
+		tracker = {},
+		config: emmetOverrides = {},
+	} = {}) {
+		const trackerExtension = abbreviationTracker({
+			syntax,
+			...tracker,
+		});
+		const { autocompleteTab = ["markup", "stylesheet"], ...restOverrides } =
+			emmetOverrides || {};
+		const emmetConfigExtension = emmetConfig.of({
+			syntax,
+			autocompleteTab,
+			...restOverrides,
+		});
+		return [
+			Prec.high(trackerExtension),
+			wrapWithAbbreviation(),
+			keymap.of([{ key: "Mod-e", run: expandAbbreviation }]),
+			emmetConfigExtension,
+		];
+	}
+
 	function applyOptions(keys) {
 		const filter = keys ? new Set(keys) : null;
 		for (const spec of cmOptionSpecs) {
@@ -341,10 +367,32 @@ async function EditorManager($header, $body) {
 		}
 	}
 
+	// Plugin already wires CSS completions; attach extras for related syntaxes.
+	const emmetCompletionSyntaxes = new Set([
+		EmmetKnownSyntax.scss,
+		EmmetKnownSyntax.less,
+		EmmetKnownSyntax.sass,
+		EmmetKnownSyntax.sss,
+		EmmetKnownSyntax.stylus,
+		EmmetKnownSyntax.postcss,
+	]);
+
+	function maybeAttachEmmetCompletions(targetExtensions, syntax) {
+		if (emmetCompletionSyntaxes.has(syntax)) {
+			targetExtensions.push(
+				EditorState.languageData.of(() => [
+					{ autocomplete: emmetCompletionSource },
+				]),
+			);
+		}
+	}
+
 	// Create minimal CodeMirror editor
 	const editorState = EditorState.create({
 		doc: "",
 		extensions: [
+			// Emmet needs highest precedence so place before default keymaps
+			...createEmmetExtensionSet({ syntax: EmmetKnownSyntax.html }),
 			...createBaseExtensions(),
 			getCommandKeymapExtension(),
 			// Default theme
@@ -355,10 +403,6 @@ async function EditorManager($header, $body) {
 			readOnlyCompartment.of(EditorState.readOnly.of(false)),
 			// Editor options driven by settings via compartments
 			...getBaseExtensionsFromOptions(),
-			// Emmet abbreviation tracker and common keybindings
-			abbreviationTracker(),
-			wrapWithAbbreviation(),
-			keymap.of([{ key: "Mod-e", run: expandAbbreviation }]),
 		],
 	});
 
@@ -629,7 +673,10 @@ async function EditorManager($header, $body) {
 	// Helper: apply a file's content and language to the editor view
 	function applyFileToEditor(file) {
 		if (!file || file.type !== "editor") return;
+		const syntax = getEmmetSyntaxForFile(file);
 		const baseExtensions = [
+			// Emmet needs to precede default keymaps so tracker Tab wins over indent
+			...createEmmetExtensionSet({ syntax }),
 			...createBaseExtensions(),
 			getCommandKeymapExtension(),
 			// keep compartment in the state to allow dynamic theme changes later
@@ -640,6 +687,7 @@ async function EditorManager($header, $body) {
 			...getBaseExtensionsFromOptions(),
 		];
 		const exts = [...baseExtensions];
+		maybeAttachEmmetCompletions(exts, syntax);
 		try {
 			const langExtFn = file.currentLanguageExtension;
 			let initialLang = [];
@@ -673,13 +721,6 @@ async function EditorManager($header, $body) {
 		} catch (e) {
 			// ignore language extension errors; fallback to plain text
 		}
-
-		// Emmet config: set syntax based on file/mode
-		const syntax = getEmmetSyntaxForFile(file);
-		exts.push(abbreviationTracker());
-		exts.push(wrapWithAbbreviation());
-		exts.push(keymap.of([{ key: "Mod-e", run: expandAbbreviation }]));
-		exts.push(emmetConfig.of({ syntax }));
 
 		// Color preview plugin when enabled
 		if (appSettings.value.colorPreview) {
@@ -742,21 +783,37 @@ async function EditorManager($header, $body) {
 		const mode = (file?.currentMode || "").toLowerCase();
 		const name = (file?.filename || "").toLowerCase();
 		const ext = name.includes(".") ? name.split(".").pop() : "";
-		if (ext === "xml" || mode.includes("xml")) return "xml";
-		if (ext === "jsx" || ext === "tsx") return "jsx";
-		if (mode.includes("javascript") && (ext === "jsx" || ext === "tsx"))
-			return "jsx";
-		if (ext === "css" || mode.includes("css")) return "css";
-		if (ext === "scss" || mode.includes("scss")) return "scss";
-		if (ext === "sass" || mode.includes("sass")) return "sass";
+		if (ext === "tsx" || mode.includes("tsx")) return EmmetKnownSyntax.tsx;
+		if (ext === "jsx" || mode.includes("jsx")) return EmmetKnownSyntax.jsx;
+		if (mode.includes("javascript") && (ext === "jsx" || ext === "tsx")) {
+			return ext === "tsx" ? EmmetKnownSyntax.tsx : EmmetKnownSyntax.jsx;
+		}
+		if (ext === "css" || mode.includes("css")) return EmmetKnownSyntax.css;
+		if (ext === "scss" || mode.includes("scss")) return EmmetKnownSyntax.scss;
+		if (ext === "sass" || mode.includes("sass")) return EmmetKnownSyntax.sass;
+		if (ext === "less" || mode.includes("less")) return EmmetKnownSyntax.less;
+		if (ext === "sss" || mode.includes("sss")) return EmmetKnownSyntax.sss;
 		if (ext === "styl" || ext === "stylus" || mode.includes("styl"))
-			return "stylus";
-		if (ext === "php" || mode.includes("php")) return "html"; // treat PHP as HTML for Emmet
-		if (ext === "vue" || mode.includes("vue")) return "html"; // Emmet inside templates
+			return EmmetKnownSyntax.stylus;
+		if (ext === "postcss" || mode.includes("postcss"))
+			return EmmetKnownSyntax.postcss;
+		if (ext === "xml" || mode.includes("xml")) return EmmetKnownSyntax.xml;
+		if (ext === "xsl" || mode.includes("xsl")) return EmmetKnownSyntax.xsl;
+		if (ext === "haml" || mode.includes("haml")) return EmmetKnownSyntax.haml;
+		if (
+			ext === "pug" ||
+			ext === "jade" ||
+			mode.includes("pug") ||
+			mode.includes("jade")
+		)
+			return EmmetKnownSyntax.pug;
+		if (ext === "slim" || mode.includes("slim")) return EmmetKnownSyntax.slim;
+		if (ext === "vue" || mode.includes("vue")) return EmmetKnownSyntax.vue;
+		if (ext === "php" || mode.includes("php")) return EmmetKnownSyntax.html;
 		if (ext === "html" || ext === "xhtml" || mode.includes("html"))
-			return "html";
+			return EmmetKnownSyntax.html;
 		// Defaults to html per Emmet docs
-		return "html";
+		return EmmetKnownSyntax.html;
 	}
 
 	const $vScrollbar = ScrollBar({
