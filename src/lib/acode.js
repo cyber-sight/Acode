@@ -1,6 +1,15 @@
 import fsOperation from "fileSystem";
 import sidebarApps from "sidebarApps";
 import ajax from "@deadlyjack/ajax";
+import {
+	getRegisteredCommands as listRegisteredCommands,
+	refreshCommandKeymap,
+	registerExternalCommand,
+	removeExternalCommand,
+	executeCommand as runCommand,
+} from "cm/commandRegistry";
+import { addMode, removeMode } from "cm/modelist";
+import cmThemeRegistry from "cm/themes";
 import Contextmenu from "components/contextmenu";
 import inputhints from "components/inputhints";
 import Page from "components/page";
@@ -42,15 +51,6 @@ import encodings, { decode, encode } from "utils/encodings";
 import helpers from "utils/helpers";
 import KeyboardEvent from "utils/keyboardEvent";
 import Url from "utils/Url";
-import {
-	getRegisteredCommands as listRegisteredCommands,
-	refreshCommandKeymap,
-	registerExternalCommand,
-	removeExternalCommand,
-	executeCommand as runCommand,
-} from "../codemirror/commandRegistry";
-import { addMode, removeMode } from "../codemirror/modelist";
-import cmThemeRegistry from "../codemirror/themes";
 import constants from "./constants";
 
 export default class Acode {

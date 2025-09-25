@@ -3,6 +3,7 @@ import { javascript } from "@codemirror/lang-javascript";
 // For CodeMirror preview
 import { EditorState } from "@codemirror/state";
 import { oneDark } from "@codemirror/theme-one-dark";
+import { getThemeById, getThemes } from "cm/themes";
 import { basicSetup, EditorView } from "codemirror";
 import Page from "components/page";
 import searchBar from "components/searchbar";
@@ -16,7 +17,6 @@ import CustomTheme from "pages/customTheme";
 import ThemeBuilder from "theme/builder";
 import themes from "theme/list";
 import helpers from "utils/helpers";
-import { getThemeById, getThemes } from "../../codemirror/themes";
 
 export default function () {
 	const $page = Page(strings.theme.capitalize());

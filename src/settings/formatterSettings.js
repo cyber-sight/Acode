@@ -1,6 +1,6 @@
+import { getModes } from "cm/modelist";
 import settingsPage from "components/settingsPage";
 import appSettings from "lib/settings";
-import { getModes } from "../codemirror/modelist";
 
 export default function formatterSettings(languageName) {
 	const title = strings.formatter;

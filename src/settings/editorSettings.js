@@ -56,11 +56,6 @@ export default function editorSettings() {
 			checkbox: values.linenumbers,
 		},
 		{
-			key: "textWrap",
-			text: strings["text wrap"],
-			checkbox: values.textWrap,
-		},
-		{
 			key: "lineHeight",
 			text: strings["line height"],
 			value: values.lineHeight,

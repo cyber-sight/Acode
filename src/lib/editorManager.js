@@ -8,7 +8,7 @@ import {
 	refreshCommandKeymap,
 	registerExternalCommand,
 	removeExternalCommand,
-} from "../codemirror/commandRegistry";
+} from "cm/commandRegistry";
 // TODO: Migrate touch handlers to CodeMirror
 // import touchListeners, { scrollAnimationFrame } from "ace/touchHandler";
 
@@ -30,31 +30,31 @@ import {
 	expandAbbreviation,
 	wrapWithAbbreviation,
 } from "@emmetio/codemirror6-plugin";
-import createBaseExtensions from "../codemirror/baseExtensions";
+import createBaseExtensions from "cm/baseExtensions";
 // CodeMirror mode management
 import {
 	getModeForPath,
 	getModes,
 	getModesByName,
 	initModes,
-} from "../codemirror/modelist";
-import "../codemirror/supportedModes";
+} from "cm/modelist";
+import "cm/supportedModes";
 import { autocompletion } from "@codemirror/autocomplete";
+import colorView from "cm/colorView";
+import {
+	getAllFolds,
+	restoreFolds,
+	restoreSelection,
+	setScrollPosition,
+} from "cm/editorUtils";
+import rainbowBrackets from "cm/rainbowBrackets";
+import themeRegistry, { getThemeById, getThemes } from "cm/themes";
 import list from "components/collapsableList";
 import quickTools from "components/quickTools";
 import ScrollBar from "components/scrollbar";
 import SideButton, { sideButtonContainer } from "components/sideButton";
 import keyboardHandler, { keydownState } from "handlers/keyboard";
 import actions from "handlers/quickTools";
-import colorView from "../codemirror/colorView";
-import {
-	getAllFolds,
-	restoreFolds,
-	restoreSelection,
-	setScrollPosition,
-} from "../codemirror/editorUtils";
-import rainbowBrackets from "../codemirror/rainbowBrackets";
-import themeRegistry, { getThemeById, getThemes } from "../codemirror/themes";
 // TODO: Update EditorFile for CodeMirror compatibility
 import EditorFile from "./editorFile";
 import appSettings from "./settings";

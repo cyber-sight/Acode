@@ -1,6 +1,13 @@
 import fsOperation from "fileSystem";
 // CodeMirror imports for document state management
 import { EditorState, Text } from "@codemirror/state";
+import {
+	clearSelection,
+	restoreFolds,
+	restoreSelection,
+	setScrollPosition,
+} from "cm/editorUtils";
+import { getModeForPath } from "cm/modelist";
 import Sidebar from "components/sidebar";
 import tile from "components/tile";
 import confirm from "dialogs/confirm";
@@ -11,13 +18,6 @@ import mimeTypes from "mime-types";
 import helpers from "utils/helpers";
 import Path from "utils/Path";
 import Url from "utils/Url";
-import {
-	clearSelection,
-	restoreFolds,
-	restoreSelection,
-	setScrollPosition,
-} from "../codemirror/editorUtils";
-import { getModeForPath } from "../codemirror/modelist";
 import constants from "./constants";
 import openFolder from "./openFolder";
 import run from "./run";

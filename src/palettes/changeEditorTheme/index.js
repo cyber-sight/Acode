@@ -1,6 +1,6 @@
+import { getThemes } from "cm/themes";
 import palette from "components/palette";
 import appSettings from "lib/settings";
-import { getThemes } from "../../codemirror/themes";
 
 export default function changeEditorTheme() {
 	palette(generateHints, onselect, strings["editor theme"]);

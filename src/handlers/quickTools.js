@@ -7,13 +7,13 @@ import {
 	SearchQuery,
 	setSearchQuery,
 } from "@codemirror/search";
+import { executeCommand } from "cm/commandRegistry";
 import quickTools from "components/quickTools";
 import actionStack from "lib/actionStack";
 import searchHistory from "lib/searchHistory";
 import appSettings from "lib/settings";
 import searchSettings from "settings/searchSettings";
 import KeyboardEvent from "utils/keyboardEvent";
-import { executeCommand } from "../codemirror/commandRegistry";
 
 /**@type {HTMLInputElement | HTMLTextAreaElement} */
 let input;

@@ -1,8 +1,4 @@
-import {
-	getAllFolds,
-	getScrollPosition,
-	getSelection,
-} from "../codemirror/editorUtils";
+import { getAllFolds, getScrollPosition, getSelection } from "cm/editorUtils";
 import constants from "./constants";
 import { addedFolder } from "./openFolder";
 import appSettings from "./settings";

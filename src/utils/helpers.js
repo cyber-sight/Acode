@@ -1,9 +1,9 @@
 import fsOperation from "fileSystem";
 import ajax from "@deadlyjack/ajax";
+import { getModeForPath as getCMModeForPath } from "cm/modelist";
 import alert from "dialogs/alert";
 import escapeStringRegexp from "escape-string-regexp";
 import constants from "lib/constants";
-import { getModeForPath as getCMModeForPath } from "../codemirror/modelist";
 import path from "./Path";
 import Uri from "./Uri";
 import Url from "./Url";

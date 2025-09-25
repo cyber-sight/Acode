@@ -1,9 +1,6 @@
+import { executeCommand, getRegisteredCommands } from "cm/commandRegistry";
 import palette from "components/palette";
 import helpers from "utils/helpers";
-import {
-	executeCommand,
-	getRegisteredCommands,
-} from "../../codemirror/commandRegistry";
 
 export default async function commandPalette() {
 	const recentCommands = RecentlyUsedCommands();
