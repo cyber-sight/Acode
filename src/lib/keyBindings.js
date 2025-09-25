@@ -375,7 +375,7 @@ const APP_BINDING_CONFIG = [
 		name: "indent",
 		description: "Indent",
 		key: "Tab",
-		readOnly: true,
+		readOnly: false,
 		editorOnly: true,
 	},
 	{

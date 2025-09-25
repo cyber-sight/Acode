@@ -53,6 +53,7 @@ import {
 	toggleBlockComment,
 	undo,
 } from "@codemirror/commands";
+import { indentUnit as indentUnitFacet } from "@codemirror/language";
 import { Compartment, EditorSelection } from "@codemirror/state";
 import { keymap } from "@codemirror/view";
 import prompt from "dialogs/prompt";
@@ -668,7 +669,24 @@ function registerCoreCommands() {
 		run(view) {
 			const resolvedView = resolveView(view);
 			if (!resolvedView) return false;
-			return indentMore(resolvedView);
+			const { state } = resolvedView;
+			const hasSelection = state.selection.ranges.some((range) => !range.empty);
+			if (hasSelection) {
+				return indentMore(resolvedView);
+			}
+			const indentString =
+				state.facet(indentUnitFacet) ||
+				(settings?.value?.softTab
+					? " ".repeat(Math.max(1, Number(settings?.value?.tabSize) || 2))
+					: "\t");
+			const insert = indentString && indentString.length ? indentString : "\t";
+			resolvedView.dispatch(
+				state.changeByRange((range) => ({
+					changes: { from: range.from, to: range.to, insert },
+					range: EditorSelection.cursor(range.from + insert.length),
+				})),
+			);
+			return true;
 		},
 	});
 	addCommand({
