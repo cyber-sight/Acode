@@ -38,6 +38,7 @@ import loadPlugins from "lib/loadPlugins";
 import Logger from "lib/logger";
 import NotificationManager from "lib/notificationManager";
 import openFolder, { addedFolder } from "lib/openFolder";
+import { registerPrettierFormatter } from "lib/prettierFormatter";
 import restoreFiles from "lib/restoreFiles";
 import settings from "lib/settings";
 import startAd from "lib/startAd";
@@ -212,6 +213,8 @@ async function onDeviceReady() {
 	acode.setLoadingMessage("Loading settings...");
 	await settings.init();
 	themes.init();
+
+	registerPrettierFormatter();
 
 	acode.setLoadingMessage("Loading language...");
 	await lang.set(settings.value.lang);

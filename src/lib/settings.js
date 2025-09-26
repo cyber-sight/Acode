@@ -113,6 +113,7 @@ class Settings {
 			autosave: 0,
 			fileBrowser: this.#fileBrowserSettings,
 			formatter: {},
+			prettier: {},
 			maxFileSize: 12,
 			serverPort: constants.SERVER_PORT,
 			previewPort: constants.PREVIEW_PORT,
