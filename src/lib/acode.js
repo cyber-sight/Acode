@@ -8,7 +8,7 @@ import {
 	removeExternalCommand,
 	executeCommand as runCommand,
 } from "cm/commandRegistry";
-import { addMode, removeMode } from "cm/modelist";
+import { addMode, getModeForPath, removeMode } from "cm/modelist";
 import cmThemeRegistry from "cm/themes";
 import Contextmenu from "components/contextmenu";
 import inputhints from "components/inputhints";
@@ -57,30 +57,8 @@ export default class Acode {
 	#modules = {};
 	#pluginsInit = {};
 	#pluginUnmount = {};
-	#formatter = [
-		{
-			id: "default",
-			name: "Default",
-			exts: ["*"],
-			format: async () => {
-				// TODO: Implement code formatting for CodeMirror
-				// const { beautify } = ace.require("ace/ext/beautify");
-				// const cursorPos = editorManager.editor.getCursorPosition();
-				// beautify(editorManager.editor.session);
-				// editorManager.editor.gotoLine(cursorPos.row + 1, cursorPos.column);
-
-				// Placeholder for CodeMirror formatting
-				// For now, we'll just maintain cursor position without formatting
-				const { editor } = editorManager;
-				const head = editor.state.selection.main.head;
-				const cursor = editor.state.doc.lineAt(head);
-				const line = cursor.number;
-				const col = head - cursor.from;
-				// Restore cursor position after any potential formatting
-				editor.gotoLine(line, col);
-			},
-		},
-	];
+	// Registered formatter implementations (populated by plugins)
+	#formatter = [];
 
 	constructor() {
 		const encodingsModule = {
@@ -493,10 +471,20 @@ export default class Acode {
 		delete appSettings.uiSettings[`plugin-${id}`];
 	}
 
-	registerFormatter(id, extensions, format) {
+	registerFormatter(id, extensions, format, displayName) {
+		let exts;
+		if (Array.isArray(extensions)) {
+			exts = extensions.filter(Boolean);
+			if (!exts.length) exts = ["*"];
+		} else if (typeof extensions === "string" && extensions) {
+			exts = [extensions];
+		} else {
+			exts = ["*"];
+		}
 		this.#formatter.unshift({
 			id,
-			exts: extensions,
+			name: displayName,
+			exts: exts,
 			format,
 		});
 	}
@@ -516,19 +504,42 @@ export default class Acode {
 
 	async format(selectIfNull = true) {
 		const file = editorManager.activeFile;
-		const name = (file.session.getMode().$id || "").split("/").pop();
-		const formatterId = appSettings.value.formatter[name];
+		if (!file || file.type !== "editor") return false;
+
+		let resolvedMode = file.currentMode;
+		if (!resolvedMode) {
+			try {
+				resolvedMode = getModeForPath(file.filename)?.name;
+			} catch (_) {
+				resolvedMode = null;
+			}
+		}
+		const modeName = resolvedMode || "text";
+		const formatterMap = appSettings.value.formatter || {};
+		const formatterId = formatterMap[modeName];
 		const formatter = this.#formatter.find(({ id }) => id === formatterId);
 
-		await formatter?.format();
+		if (!formatter) {
+			if (formatterId) {
+				delete formatterMap[modeName];
+				await appSettings.update(false);
+			}
 
-		if (!formatter && selectIfNull) {
-			formatterSettings(name);
-			this.#afterSelectFormatter(name);
-			return;
+			if (selectIfNull) {
+				formatterSettings(modeName);
+				this.#afterSelectFormatter(modeName);
+			} else {
+				toast(strings["please select a formatter"]);
+			}
+			return false;
 		}
-		if (!formatter && !selectIfNull) {
-			toast(strings["please select a formatter"]);
+
+		try {
+			await formatter.format();
+			return true;
+		} catch (error) {
+			helpers.error(error);
+			return false;
 		}
 	}
 

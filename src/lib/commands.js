@@ -393,9 +393,11 @@ export default {
 		const { editor } = editorManager;
 		const pos = editor.getCursorPosition();
 
-		await acode.format(selectIfNull);
-		// Restore cursor position after formatting (pos.row is now 1-based)
-		editor.gotoLine(pos.row, pos.column);
+		const didFormat = await acode.format(selectIfNull);
+		if (didFormat) {
+			// Restore cursor position after formatting (pos.row is now 1-based)
+			editor.gotoLine(pos.row, pos.column);
+		}
 	},
 	async eol() {
 		const eol = await select(strings["new line mode"], ["unix", "windows"], {
