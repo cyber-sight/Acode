@@ -18,6 +18,7 @@ import { setKeyBindings } from "cm/commandRegistry";
 import { initModes } from "cm/modelist";
 import Contextmenu from "components/contextmenu";
 import Sidebar from "components/sidebar";
+import { TerminalManager } from "components/terminal";
 import tile from "components/tile";
 import toast from "components/toast";
 import tutorial from "components/tutorial";
@@ -489,6 +490,10 @@ async function loadApp() {
 	}
 
 	initFileList();
+
+	TerminalManager.restorePersistedSessions().catch((error) => {
+		console.error("Terminal restoration failed:", error);
+	});
 
 	/**
 	 *

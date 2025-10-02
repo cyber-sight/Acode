@@ -25,7 +25,6 @@
       "cordova-clipboard": {},
       "cordova-plugin-device": {},
       "cordova-plugin-file": {},
-      "cordova-plugin-sftp": {},
       "cordova-plugin-server": {},
       "cordova-plugin-ftp": {},
       "cordova-plugin-sdcard": {},
@@ -37,7 +36,9 @@
       "cordova-plugin-buildinfo": {},
       "cordova-plugin-system": {},
       "cordova-plugin-browser": {},
-      "com.foxdebug.acode.rk.exec.terminal": {}
+      "com.foxdebug.acode.rk.exec.terminal": {},
+      "com.foxdebug.acode.rk.exec.proot": {},
+      "cordova-plugin-sftp": {}
     },
     "platforms": [
       "android"
