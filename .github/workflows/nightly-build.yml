@@ -34,6 +34,9 @@
     group: ${{ github.workflow }}-${{ github.ref_name }}-${{ github.ref_name == 'main' && github.sha || 'anysha' }}-${{ inputs.is_PR && 'is_PR' || 'not_PR'}}
     cancel-in-progress: true
 
+  permissions:
+    contents: read
+
   env:
     STORE_FILE_PATH: /tmp/app-debug.keystore
     BUILD_JSON_PATH: build.json
@@ -44,7 +47,13 @@
       timeout-minutes: 60
       runs-on: ubuntu-latest
       if: github.repository_owner == 'Acode-Foundation'
-      
+
+      permissions:
+#        contents write is needed to create Nightly Releases.
+        contents: write
+        issues: write
+        pull-requests: write
+
       outputs:
          release_output_url: ${{ steps.release.outputs.url }} 
          updated_version: ${{ steps.update-version.outputs.UPDATED_VERSION}} 

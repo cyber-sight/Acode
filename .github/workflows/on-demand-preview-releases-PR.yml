@@ -7,7 +7,7 @@ on:
 #      - '.github/**'
     types: [labeled, synchronize]
 
-
+# defined at workflow-level as the workflow, Requires these permissions to function.
 permissions:
   contents: write
   pull-requests: write
@@ -23,7 +23,8 @@ jobs:
   job_trigger:
     name: Trigger Preview Release (if conditions met)
     if: |
-        (github.repository_owner == 'Acode-Foundation'
+        github.event.pull_request.draft == false
+        && (github.repository_owner == 'Acode-Foundation'
         && (!contains(github.event.pull_request.labels.*.name, 'DO NOT PREVIEW RELEASE') 
         && (contains(github.event.pull_request.labels.*.name, 'Bypass check - PREVIEW RELEASE') 
         || contains(github.event.pull_request.labels.*.name, 'CI: RUN ON-DEMAND PREVIEW RELEASES')))
