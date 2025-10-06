@@ -210,7 +210,8 @@
               platforms/android/app/build/outputs/apk/debug/app-debug.apk
             body: |
               Automated Nightly (pre-release) Releases for Today
-              \n\n[Compare Changes](https://github.com/${{ github.repository }}/compare/${{ env.TAG_COMMIT }}...${{ github.sha }})
+              
+              [Compare Changes](https://github.com/${{ github.repository }}/compare/${{ env.TAG_COMMIT }}...${{ github.sha }})
 
         - name: Update Last Comment by bot (If ran in PR)
           if: inputs.is_PR
