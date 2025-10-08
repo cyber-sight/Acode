@@ -97,7 +97,8 @@
           uses: actions/checkout@v4
           with:
             fetch-depth: 0 # Required for tags
-            persist-credentials: false
+            # persists credentials locally if tagging and releases are not skipped.
+            persist-credentials: ${{ ! inputs.skip_tagging_and_releases }}
             ref: ${{ (inputs.is_PR && inputs.PR_NUMBER) && github.event.pull_request.head.sha || '' }}
 
         - name: Set up Java 21
