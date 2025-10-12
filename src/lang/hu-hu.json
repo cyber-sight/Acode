@@ -429,7 +429,7 @@
 	"quicktools:hyphen": "Kötőjel beszúrása",
 	"check for app updates": "Alkalmazásfrissítések ellenőrzése",
 	"prompt update check consent message": "Internetkapcsolat esetén az Acode ellenőrizheti az új alkalmazásfrissítéseket. Engedélyezi a frissítések ellenőrzését?",
-	"keywords": "Keywords",
-	"author": "Author",
-	"filtered by": "Filtered by"
+	"keywords": "Kulcsszavak",
+	"author": "Szerző",
+	"filtered by": "Szűrési szempont"
 }
