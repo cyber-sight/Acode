@@ -453,5 +453,6 @@
 	"prompt update check consent message": "Acode kann nach neuen App-Updates suchen, wenn Sie online sind. Update-Prüfungen aktivieren?",
 	"keywords": "Schlüsselwörter",
 	"author": "Autor",
-	"filtered by": "Gefiltert nach"
+	"filtered by": "Gefiltert nach",
+	"clean install state": "Clean Install State"
 }

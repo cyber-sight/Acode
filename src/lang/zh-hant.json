@@ -453,5 +453,6 @@
 	"prompt update check consent message": "Acode 能夠在有網時檢查更新。啟用更新檢查？",
 	"keywords": "關鍵字",
 	"author": "作者",
-	"filtered by": "篩選條件"
+	"filtered by": "篩選條件",
+	"clean install state": "Clean Install State"
 }

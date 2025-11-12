@@ -454,5 +454,6 @@
 	"prompt update check consent message": "Acode dapat memeriksa pembaruan aplikasi baru saat Anda online. Aktifkan pemeriksaan pembaruan?",
 	"keywords": "Kata kunci",
 	"author": "Pembuat",
-	"filtered by": "Disaring oleh"
+	"filtered by": "Disaring oleh",
+	"clean install state": "Clean Install State"
 }

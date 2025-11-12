@@ -454,5 +454,6 @@
 	"prompt update check consent message": "Acode can check for new app updates when you're online. Enable update checks?",
 	"keywords": "Keywords",
 	"author": "Author",
-	"filtered by": "Filtered by"
+	"filtered by": "Filtered by",
+	"clean install state": "Clean Install State"
 }

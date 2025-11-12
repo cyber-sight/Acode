@@ -63,4 +63,5 @@ jobs:
       - name: Translation Files Check (if changed)
         if: steps.file-changes.outputs.translation == 'true'
         run: |
-            npm run lint check
+            npm ci --no-audit --no-fund
+            npm run lang check

@@ -453,5 +453,6 @@
 	"prompt update check consent message": "Acode 能够在有网时检查更新。启用更新检查？",
 	"keywords": "关键字",
 	"author": "作者",
-	"filtered by": "过滤条件"
+	"filtered by": "过滤条件",
+	"clean install state": "Clean Install State"
 }
