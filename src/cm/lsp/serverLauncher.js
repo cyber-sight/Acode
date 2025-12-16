@@ -4,6 +4,7 @@ import loader from "dialogs/loader";
 
 const managedServers = new Map();
 const checkedCommands = new Map();
+const pendingInstallChecks = new Map();
 const announcedServers = new Set();
 
 const STATUS_PRESENT = "present";
@@ -89,10 +90,29 @@ async function ensureInstalled(server) {
 	if (!launcher?.checkCommand) return true;
 
 	const cacheKey = `${server.id}:${launcher.checkCommand}`;
+
+	// Return cached result if already checked
 	if (checkedCommands.has(cacheKey)) {
 		return checkedCommands.get(cacheKey) === STATUS_PRESENT;
 	}
 
+	// If there's already a pending check for this server, wait for it
+	if (pendingInstallChecks.has(cacheKey)) {
+		return pendingInstallChecks.get(cacheKey);
+	}
+
+	// Create and track the pending promise
+	const checkPromise = performInstallCheck(server, launcher, cacheKey);
+	pendingInstallChecks.set(cacheKey, checkPromise);
+
+	try {
+		return await checkPromise;
+	} finally {
+		pendingInstallChecks.delete(cacheKey);
+	}
+}
+
+async function performInstallCheck(server, launcher, cacheKey) {
 	try {
 		await runCommand(launcher.checkCommand);
 		checkedCommands.set(cacheKey, STATUS_PRESENT);
