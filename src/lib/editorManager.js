@@ -33,6 +33,15 @@ import {
 	wrapWithAbbreviation,
 } from "@emmetio/codemirror6-plugin";
 import createBaseExtensions from "cm/baseExtensions";
+import lspClientManager from "cm/lsp/clientManager";
+import {
+	getLspDiagnostics,
+	LSP_DIAGNOSTICS_EVENT,
+	lspDiagnosticsClientExtension,
+	lspDiagnosticsUiExtension,
+} from "cm/lsp/diagnostics";
+import { stopManagedServer } from "cm/lsp/serverLauncher";
+import serverRegistry from "cm/lsp/serverRegistry";
 // CodeMirror mode management
 import {
 	getModeForPath,
@@ -59,6 +68,8 @@ import keyboardHandler, { keydownState } from "handlers/keyboard";
 import actions from "handlers/quickTools";
 // TODO: Update EditorFile for CodeMirror compatibility
 import EditorFile from "./editorFile";
+import openFile from "./openFile";
+import { addedFolder } from "./openFolder";
 import appSettings from "./settings";
 import {
 	getSystemConfiguration,
@@ -130,6 +141,24 @@ async function EditorManager($header, $body) {
 		".cm-scroller": { height: "100%", overflow: "auto" },
 	});
 
+	const pointerCursorVisibilityExtension = EditorView.updateListener.of(
+		(update) => {
+			if (!update.selectionSet) return;
+			const pointerTriggered = update.transactions.some(
+				(tr) =>
+					tr.isUserEvent("pointer") ||
+					tr.isUserEvent("select.pointer") ||
+					tr.isUserEvent("touch") ||
+					tr.isUserEvent("select.touch"),
+			);
+			if (!pointerTriggered) return;
+			if (isCursorVisible()) return;
+			requestAnimationFrame(() => {
+				if (!isCursorVisible()) scrollCursorIntoView({ behavior: "instant" });
+			});
+		},
+	);
+
 	// Compartment to swap editor theme dynamically
 	const themeCompartment = new Compartment();
 	// Compartments to control indentation, tab width, and font styling dynamically
@@ -154,6 +183,14 @@ async function EditorManager($header, $body) {
 	const readOnlyCompartment = new Compartment();
 	// Compartment for language mode (allows async loading/reconfigure)
 	const languageCompartment = new Compartment();
+	// Compartment for LSP extensions so we can swap per file
+	const lspCompartment = new Compartment();
+	const diagnosticsClientExt = lspDiagnosticsClientExtension();
+	const buildDiagnosticsUiExt = () =>
+		lspDiagnosticsUiExtension(appSettings?.value?.lintGutter !== false);
+	let lspRequestToken = 0;
+	let lastLspUri = null;
+	const UNTITLED_URI_PREFIX = "untitled://acode/";
 
 	function getEditorFontFamily() {
 		const font = appSettings?.value?.editorFont || "Roboto Mono";
@@ -163,10 +200,12 @@ async function EditorManager($header, $body) {
 	function makeFontTheme() {
 		const fontSize = appSettings?.value?.fontSize || "12px";
 		const lineHeight = appSettings?.value?.lineHeight || 1.6;
+		const fontFamily = getEditorFontFamily();
 		return EditorView.theme({
 			"&": { fontSize, lineHeight: String(lineHeight) },
-			".cm-content": { fontFamily: getEditorFontFamily() },
-			".cm-tooltip": { fontFamily: getEditorFontFamily() },
+			".cm-content": { fontFamily },
+			".cm-gutter": { fontFamily },
+			".cm-tooltip, .cm-tooltip *": { fontFamily },
 		});
 	}
 
@@ -187,8 +226,8 @@ async function EditorManager($header, $body) {
 				},
 			});
 		if (!relativeLineNumbers)
-			return [lineNumbers(), highlightActiveLineGutter()];
-		return [
+			return Prec.highest([lineNumbers(), highlightActiveLineGutter()]);
+		return Prec.highest([
 			lineNumbers({
 				formatNumber: (lineNo, state) => {
 					try {
@@ -201,7 +240,7 @@ async function EditorManager($header, $body) {
 				},
 			}),
 			highlightActiveLineGutter(),
-		];
+		]);
 	}
 
 	function makeIndentExtensions() {
@@ -216,6 +255,13 @@ async function EditorManager($header, $body) {
 	// Centralised CodeMirror options registry for organized configuration
 	// Each spec declares related settings keys, its compartment(s), and a builder returning extension(s)
 	const cmOptionSpecs = [
+		{
+			keys: ["linenumbers", "relativeLineNumbers"],
+			compartments: [lineNumberCompartment],
+			build() {
+				return makeLineNumberExtension();
+			},
+		},
 		{
 			keys: ["rainbowBrackets"],
 			compartments: [rainbowCompartment],
@@ -245,13 +291,6 @@ async function EditorManager($header, $body) {
 			build() {
 				const { indentExt, tabSizeExt } = makeIndentExtensions();
 				return [indentExt, tabSizeExt];
-			},
-		},
-		{
-			keys: ["linenumbers", "relativeLineNumbers"],
-			compartments: [lineNumberCompartment],
-			build() {
-				return makeLineNumberExtension();
 			},
 		},
 		{
@@ -324,18 +363,21 @@ async function EditorManager($header, $body) {
 	}
 
 	function createEmmetExtensionSet({
-		syntax = EmmetKnownSyntax.html,
+		syntax,
 		tracker = {},
 		config: emmetOverrides = {},
 	} = {}) {
+		const resolvedSyntax =
+			syntax === undefined ? EmmetKnownSyntax.html : syntax;
+		if (!resolvedSyntax) return [];
 		const trackerExtension = abbreviationTracker({
-			syntax,
+			syntax: resolvedSyntax,
 			...tracker,
 		});
 		const { autocompleteTab = ["markup", "stylesheet"], ...restOverrides } =
 			emmetOverrides || {};
 		const emmetConfigExtension = emmetConfig.of({
-			syntax,
+			syntax: resolvedSyntax,
 			autocompleteTab,
 			...restOverrides,
 		});
@@ -367,6 +409,68 @@ async function EditorManager($header, $body) {
 		}
 	}
 
+	function buildLspMetadata(file) {
+		if (!file || file.type !== "editor") return null;
+		const uri = getFileLspUri(file);
+		if (!uri) return null;
+		const languageId = getFileLanguageId(file);
+		return {
+			uri,
+			languageId,
+			languageName: file.currentMode || file.mode || languageId,
+			view: editor,
+			file,
+			rootUri: resolveRootUriForContext({ uri, file }),
+		};
+	}
+
+	async function configureLspForFile(file) {
+		const metadata = buildLspMetadata(file);
+		const token = ++lspRequestToken;
+		if (!metadata) {
+			detachActiveLsp();
+			editor.dispatch({ effects: lspCompartment.reconfigure([]) });
+			return;
+		}
+		if (metadata.uri !== lastLspUri) {
+			detachActiveLsp();
+		}
+		try {
+			const extensions =
+				(await lspClientManager.getExtensionsForFile(metadata)) || [];
+			if (token !== lspRequestToken) return;
+			if (!extensions.length) {
+				lastLspUri = null;
+				editor.dispatch({ effects: lspCompartment.reconfigure([]) });
+				return;
+			}
+			lastLspUri = metadata.uri;
+			editor.dispatch({
+				effects: lspCompartment.reconfigure(extensions),
+			});
+		} catch (error) {
+			if (token !== lspRequestToken) return;
+			console.error("Failed to configure LSP", error);
+			lastLspUri = null;
+			editor.dispatch({ effects: lspCompartment.reconfigure([]) });
+		}
+	}
+
+	function detachLspForFile(file) {
+		if (!file || file.type !== "editor") return;
+		const uri = getFileLspUri(file);
+		if (!uri) return;
+		try {
+			lspClientManager.detach(uri);
+		} catch (error) {
+			console.warn(`Failed to detach LSP client for ${uri}`, error);
+		}
+		if (uri === lastLspUri && manager.activeFile?.id === file.id) {
+			lastLspUri = null;
+			editor.dispatch({ effects: lspCompartment.reconfigure([]) });
+		}
+	}
+
 	// Plugin already wires CSS completions; attach extras for related syntaxes.
 	const emmetCompletionSyntaxes = new Set([
 		EmmetKnownSyntax.scss,
@@ -387,6 +491,134 @@ async function EditorManager($header, $body) {
 		}
 	}
 
+	function getFileLspUri(file) {
+		if (!file) return null;
+		if (file.uri) return file.uri;
+		return `${UNTITLED_URI_PREFIX}${file.id}`;
+	}
+
+	function getFileLanguageId(file) {
+		if (!file) return "plaintext";
+		const mode = file.currentMode || file.mode;
+		if (mode) return String(mode).toLowerCase();
+		try {
+			const guess = getModeForPath(file.filename || file.name || "");
+			if (guess?.name) return String(guess.name).toLowerCase();
+		} catch (_) {}
+		return "plaintext";
+	}
+
+	function resolveRootUriForContext(context = {}) {
+		const uri = context.uri || context.file?.uri;
+		if (!uri) return null;
+		for (const folder of addedFolder) {
+			try {
+				const base = folder?.url;
+				if (!base) continue;
+				if (uri.startsWith(base)) return base;
+			} catch (_) {}
+		}
+		return uri;
+	}
+
+	function detachActiveLsp() {
+		if (!lastLspUri) return;
+		try {
+			lspClientManager.detach(lastLspUri, editor);
+		} catch (error) {
+			console.warn(`Failed to detach LSP session for ${lastLspUri}`, error);
+		}
+		lastLspUri = null;
+	}
+
+	function applyLspSettings() {
+		const { lsp } = appSettings.value || {};
+		if (!lsp) return;
+		const overrides = lsp.servers || {};
+		for (const [id, config] of Object.entries(overrides)) {
+			if (!config || typeof config !== "object") continue;
+			const key = String(id || "")
+				.trim()
+				.toLowerCase();
+			if (!key) continue;
+			const existing = serverRegistry.getServer(key);
+			if (existing) {
+				serverRegistry.updateServer(key, (current) => {
+					const next = { ...current };
+					if (Array.isArray(config.languages) && config.languages.length) {
+						next.languages = config.languages.map((lang) =>
+							String(lang).toLowerCase(),
+						);
+					}
+					if (config.transport && typeof config.transport === "object") {
+						next.transport = { ...current.transport, ...config.transport };
+						delete next.transport.protocols;
+					}
+					if (config.clientConfig && typeof config.clientConfig === "object") {
+						next.clientConfig = {
+							...current.clientConfig,
+							...config.clientConfig,
+						};
+					}
+					if (
+						config.initializationOptions &&
+						typeof config.initializationOptions === "object"
+					) {
+						next.initializationOptions = {
+							...current.initializationOptions,
+							...config.initializationOptions,
+						};
+					}
+					if (config.launcher && typeof config.launcher === "object") {
+						next.launcher = { ...current.launcher, ...config.launcher };
+					}
+					if (Object.prototype.hasOwnProperty.call(config, "enabled")) {
+						next.enabled = !!config.enabled;
+					}
+					return next;
+				});
+				if (config.enabled === false) {
+					stopManagedServer(key);
+				}
+			} else if (
+				Array.isArray(config.languages) &&
+				config.languages.length &&
+				config.transport &&
+				typeof config.transport === "object"
+			) {
+				try {
+					serverRegistry.registerServer({
+						id: key,
+						label: config.label || key,
+						languages: config.languages,
+						transport: config.transport,
+						clientConfig: config.clientConfig,
+						initializationOptions: config.initializationOptions,
+						launcher: config.launcher,
+						enabled: config.enabled !== false,
+					});
+					serverRegistry.updateServer(key, (current) => {
+						if (current.transport?.protocols) {
+							const updated = { ...current };
+							updated.transport = { ...current.transport };
+							delete updated.transport.protocols;
+							return updated;
+						}
+						return current;
+					});
+					if (config.enabled === false) {
+						stopManagedServer(key);
+					}
+				} catch (error) {
+					console.warn(
+						`Failed to register LSP server override for ${key}`,
+						error,
+					);
+				}
+			}
+		}
+	}
+
 	// Create minimal CodeMirror editor
 	const editorState = EditorState.create({
 		doc: "",
@@ -398,6 +630,7 @@ async function EditorManager($header, $body) {
 			// Default theme
 			themeCompartment.of(oneDark),
 			fixedHeightTheme,
+			pointerCursorVisibilityExtension,
 			search(),
 			// Ensure read-only can be toggled later via compartment
 			readOnlyCompartment.of(EditorState.readOnly.of(false)),
@@ -682,6 +915,7 @@ async function EditorManager($header, $body) {
 			// keep compartment in the state to allow dynamic theme changes later
 			themeCompartment.of(oneDark),
 			fixedHeightTheme,
+			pointerCursorVisibilityExtension,
 			search(),
 			// Keep dynamic compartments across state swaps
 			...getBaseExtensionsFromOptions(),
@@ -737,6 +971,7 @@ async function EditorManager($header, $body) {
 
 		// Keep file.session in sync and handle caching/autosave
 		exts.push(getDocSyncListener());
+		exts.push(lspCompartment.of([]));
 
 		// Preserve previous state for restoring selection/folds after swap
 		const prevState = file.session || null;
@@ -777,6 +1012,8 @@ async function EditorManager($header, $body) {
 		) {
 			setScrollPosition(editor, file.lastScrollTop, file.lastScrollLeft);
 		}
+
+		void configureLspForFile(file);
 	}
 
 	function getEmmetSyntaxForFile(file) {
@@ -810,10 +1047,14 @@ async function EditorManager($header, $body) {
 		if (ext === "slim" || mode.includes("slim")) return EmmetKnownSyntax.slim;
 		if (ext === "vue" || mode.includes("vue")) return EmmetKnownSyntax.vue;
 		if (ext === "php" || mode.includes("php")) return EmmetKnownSyntax.html;
-		if (ext === "html" || ext === "xhtml" || mode.includes("html"))
+		if (
+			ext === "htm" ||
+			ext === "html" ||
+			ext === "xhtml" ||
+			mode.includes("html")
+		)
 			return EmmetKnownSyntax.html;
-		// Defaults to html per Emmet docs
-		return EmmetKnownSyntax.html;
+		return null;
 	}
 
 	const $vScrollbar = ScrollBar({
@@ -843,6 +1084,7 @@ async function EditorManager($header, $body) {
 		getEditorWidth,
 		header: $header,
 		container: $container,
+		getLspMetadata: buildLspMetadata,
 		get isScrolling() {
 			return isScrolling;
 		},
@@ -882,6 +1124,58 @@ async function EditorManager($header, $body) {
 			}
 		},
 	};
+
+	if (typeof document !== "undefined") {
+		const globalTarget =
+			typeof globalThis !== "undefined" ? globalThis : document;
+		const diagnosticsListenerKey = "__acodeDiagnosticsListener";
+		const existing = globalTarget?.[diagnosticsListenerKey];
+		if (typeof existing === "function") {
+			document.removeEventListener(LSP_DIAGNOSTICS_EVENT, existing);
+		}
+		const listener = () => {
+			const active = manager.activeFile;
+			if (active?.type === "editor") {
+				try {
+					active.session = editor.state;
+				} catch (_) {}
+			}
+			toggleProblemButton();
+		};
+		document.addEventListener(LSP_DIAGNOSTICS_EVENT, listener);
+		if (globalTarget) {
+			globalTarget[diagnosticsListenerKey] = listener;
+		}
+	}
+
+	lspClientManager.setOptions({
+		resolveRoot: resolveRootUriForContext,
+		onClientIdle: ({ server }) => {
+			if (server?.id) stopManagedServer(server.id);
+		},
+		displayFile: async (targetUri) => {
+			if (!targetUri) return null;
+			const existing = manager.getFile(targetUri, "uri");
+			if (existing?.type === "editor") {
+				existing.makeActive();
+				return editor;
+			}
+			try {
+				await openFile(targetUri, { render: true });
+				const opened = manager.getFile(targetUri, "uri");
+				if (opened?.type === "editor") {
+					opened.makeActive();
+					return editor;
+				}
+			} catch (error) {
+				console.error("Failed to open file for LSP navigation", error);
+			}
+			return null;
+		},
+		clientExtensions: [diagnosticsClientExt],
+		diagnosticsUiExtension: buildDiagnosticsUiExt(),
+	});
+	applyLspSettings();
 
 	// TODO: Implement mode/language support for CodeMirror
 	// editor.setSession(ace.createEditSession("", "ace/mode/text"));
@@ -951,6 +1245,18 @@ async function EditorManager($header, $body) {
 		updateEditorStyleFromSettings();
 	});
 
+	appSettings.on("update:lsp", async function () {
+		applyLspSettings();
+		const active = manager.activeFile;
+		if (active?.type === "editor") {
+			void configureLspForFile(active);
+		} else {
+			detachActiveLsp();
+			editor.dispatch({ effects: lspCompartment.reconfigure([]) });
+			await lspClientManager.dispose();
+		}
+	});
+
 	appSettings.on("update:openFileListPos", function (value) {
 		initFileTabContainer();
 		$vScrollbar.resize();
@@ -984,6 +1290,16 @@ async function EditorManager($header, $body) {
 		updateEditorLineNumbersFromSettings();
 	});
 
+	appSettings.on("update:lintGutter", function (value) {
+		lspClientManager.setOptions({
+			diagnosticsUiExtension: lspDiagnosticsUiExtension(value !== false),
+		});
+		const active = manager.activeFile;
+		if (active?.type === "editor") {
+			void configureLspForFile(active);
+		}
+	});
+
 	// appSettings.on("update:elasticTabstops", function (_value) {
 	// 	// Not applicable in CodeMirror (Ace-era). No-op for now.
 	// });
@@ -1008,6 +1324,7 @@ async function EditorManager($header, $body) {
 	appSettings.on("update:showSideButtons", function () {
 		updateMargin();
 		updateSideButtonContainer();
+		toggleProblemButton();
 	});
 
 	appSettings.on("update:showAnnotations", function () {
@@ -1051,6 +1368,7 @@ async function EditorManager($header, $body) {
 				events.emit("file-content-changed", file);
 				manager.onupdate("file-changed");
 				manager.emit("update", "file-changed");
+				toggleProblemButton();
 
 				const { autosave } = appSettings.value;
 				if (file.uri && changed && autosave) {
@@ -1086,6 +1404,18 @@ async function EditorManager($header, $body) {
 		}
 	});
 
+	manager.on(["remove-file"], (file) => {
+		detachLspForFile(file);
+		toggleProblemButton();
+	});
+
+	manager.on(["rename-file"], (file) => {
+		if (file?.type !== "editor") return;
+		if (manager.activeFile?.id === file.id) {
+			void configureLspForFile(file);
+		}
+	});
+
 	// Attach doc-sync listener to the current editor instance
 	try {
 		editor.dispatch({
@@ -1104,6 +1434,7 @@ async function EditorManager($header, $body) {
 		manager.files.push(file);
 		manager.openFileList.append(file.tab);
 		$header.text = file.name;
+		toggleProblemButton();
 	}
 
 	/**
@@ -1140,15 +1471,12 @@ async function EditorManager($header, $body) {
 		scroller?.addEventListener("scroll", handleEditorScroll, { passive: true });
 		handleEditorScroll();
 
-		// TODO: Implement focus event for CodeMirror
-		// editor.on("focus", async () => {
-		//	const { activeFile } = manager;
-		//	activeFile.focused = true;
-		//	keyboardHandler.on("keyboardShow", scrollCursorIntoView);
-		//	if (isScrolling) return;
-		//	$hScrollbar.hide();
-		//	$vScrollbar.hide();
-		// });
+		keyboardHandler.on("keyboardShowStart", () => {
+			requestAnimationFrame(() => {
+				scrollCursorIntoView({ behavior: "instant" });
+			});
+		});
+		keyboardHandler.on("keyboardShow", scrollCursorIntoView);
 
 		// TODO: Implement blur event for CodeMirror
 		// editor.on("blur", async () => {
@@ -1241,6 +1569,7 @@ async function EditorManager($header, $body) {
 
 		updateMargin(true);
 		updateSideButtonContainer();
+		toggleProblemButton();
 		// TODO: Implement scroll margin for CodeMirror
 		// editor.renderer.setScrollMargin(
 		//	scrollMarginTop,
@@ -1253,34 +1582,51 @@ async function EditorManager($header, $body) {
 	/**
 	 * Scrolls the cursor into view if it is not currently visible.
 	 */
-	// TODO: Implement cursor scrolling for CodeMirror
-	function scrollCursorIntoView() {
-		// keyboardHandler.off("keyboardShow", scrollCursorIntoView);
-		// if (isCursorVisible()) return;
-		// const { teardropSize } = appSettings.value;
-		// editor.renderer.scrollCursorIntoView();
-		// editor.renderer.scrollBy(0, teardropSize + 10);
-		// editor._emit("scroll-intoview");
+	function scrollCursorIntoView(options = {}) {
+		const view = editor;
+		const scroller = view?.scrollDOM;
+		if (!view || !scroller) return;
+
+		const { behavior = "smooth" } = options;
+		const { head } = view.state.selection.main;
+		const caret = view.coordsAtPos(head);
+		if (!caret) return;
+
+		const scrollerRect = scroller.getBoundingClientRect();
+		const relativeTop = caret.top - scrollerRect.top + scroller.scrollTop;
+		const relativeBottom = caret.bottom - scrollerRect.top + scroller.scrollTop;
+		const topMargin = 16;
+		const bottomMargin = (appSettings.value?.teardropSize || 24) + 12;
+
+		const scrollTop = scroller.scrollTop;
+		const visibleTop = scrollTop + topMargin;
+		const visibleBottom = scrollTop + scroller.clientHeight - bottomMargin;
+
+		if (relativeTop < visibleTop) {
+			const nextTop = Math.max(relativeTop - topMargin, 0);
+			scroller.scrollTo({ top: nextTop, behavior });
+		} else if (relativeBottom > visibleBottom) {
+			const delta = relativeBottom - visibleBottom;
+			scroller.scrollTo({ top: scrollTop + delta, behavior });
+		}
 	}
 
 	/**
-	 * Checks if the cursor is visible within the Ace editor.
+	 * Checks if the cursor is visible within the CodeMirror viewport.
 	 * @returns {boolean} - True if the cursor is visible, false otherwise.
 	 */
 	// TODO: Implement cursor visibility check for CodeMirror
 	function isCursorVisible() {
-		// const { editor, container } = manager;
-		// const { teardropSize } = appSettings.value;
-		// const cursorPos = editor.getCursorPosition();
-		// const contentTop = container.getBoundingClientRect().top;
-		// const contentBottom = contentTop + container.clientHeight;
-		// const cursorTop = editor.renderer.textToScreenCoordinates(
-		//	cursorPos.row,
-		//	cursorPos.column,
-		// ).pageY;
-		// const cursorBottom = cursorTop + teardropSize + 10;
-		// return cursorTop >= contentTop && cursorBottom <= contentBottom;
-		return true; // Placeholder
+		const view = editor;
+		const scroller = view?.scrollDOM;
+		if (!view || !scroller) return true;
+
+		const { head } = view.state.selection.main;
+		const caret = view.coordsAtPos(head);
+		if (!caret) return true;
+
+		const scrollerRect = scroller.getBoundingClientRect();
+		return caret.top >= scrollerRect.top && caret.bottom <= scrollerRect.bottom;
 	}
 
 	/**
@@ -1467,18 +1813,48 @@ async function EditorManager($header, $body) {
 	/**
 	 * Toggles the visibility of the problem button based on the presence of annotations in the files.
 	 */
-	// TODO: Implement problem button toggle for CodeMirror
+	function fileHasProblems(file) {
+		const state = getDiagnosticStateForFile(file);
+		if (!state) return false;
+
+		const session = file.session;
+		if (session && typeof session.getAnnotations === "function") {
+			try {
+				const annotations = session.getAnnotations() || [];
+				if (annotations.length) return true;
+			} catch (_) {}
+		}
+
+		if (typeof state.field !== "function") return false;
+		try {
+			const diagnostics = getLspDiagnostics(state);
+			return diagnostics.length > 0;
+		} catch (_) {}
+
+		return false;
+	}
+
 	function toggleProblemButton() {
-		// const fileWithProblems = manager.files.find((file) => {
-		//	if (file.type !== "editor") return false;
-		//	const annotations = file?.session?.getAnnotations();
-		//	return !!annotations.length;
-		// });
-		// if (fileWithProblems) {
-		//	problemButton.show();
-		// } else {
-		//	problemButton.hide();
-		// }
+		const { showSideButtons } = appSettings.value;
+		if (!showSideButtons) {
+			problemButton.hide();
+			return;
+		}
+
+		const hasProblems = manager.files.some((file) => fileHasProblems(file));
+		if (hasProblems) {
+			problemButton.show();
+		} else {
+			problemButton.hide();
+		}
+	}
+
+	function getDiagnosticStateForFile(file) {
+		if (!file || file.type !== "editor") return null;
+		if (manager.activeFile?.id === file.id && editor?.state) {
+			return editor.state;
+		}
+		return file.session || null;
 	}
 
 	/**
@@ -1594,6 +1970,8 @@ async function EditorManager($header, $body) {
 		$header.subText = file.headerSubtitle || "";
 		manager.onupdate("switch-file");
 		events.emit("switch-file", file);
+
+		toggleProblemButton();
 	}
 
 	/**
