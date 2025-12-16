@@ -10,7 +10,7 @@ export default function editorSettings() {
 	const items = [
 		{
 			key: "autosave",
-			text: strings.autosave.capitalize(),
+			text: strings.autosave,
 			value: values.autosave,
 			valueText: (value) => (value ? value : strings.no),
 			prompt: strings.delay + " (>=1000 || 0)",
@@ -56,6 +56,11 @@ export default function editorSettings() {
 			checkbox: values.linenumbers,
 		},
 		{
+			key: "lintGutter",
+			text: strings["lint gutter"] || "Show lint gutter",
+			checkbox: values.lintGutter ?? true,
+		},
+		{
 			key: "lineHeight",
 			text: strings["line height"],
 			value: values.lineHeight,
@@ -88,7 +93,7 @@ export default function editorSettings() {
 		},
 		{
 			key: "liveAutoCompletion",
-			text: strings["live autocompletion"].capitalize(),
+			text: strings["live autocompletion"],
 			checkbox: values.liveAutoCompletion,
 		},
 		// {
@@ -109,6 +114,11 @@ export default function editorSettings() {
 		// 		},
 		// 	},
 		// },
+		{
+			key: "textWrap",
+			text: strings["text wrap"],
+			checkbox: values.textWrap,
+		},
 		{
 			key: "teardropSize",
 			text: strings["cursor controller size"],
