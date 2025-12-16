@@ -1177,8 +1177,6 @@ async function EditorManager($header, $body) {
 	});
 	applyLspSettings();
 
-	// TODO: Implement mode/language support for CodeMirror
-	// editor.setSession(ace.createEditSession("", "ace/mode/text"));
 	$body.append($container);
 	initModes(); // Initialize CodeMirror modes
 	await setupEditor();
@@ -1442,8 +1440,6 @@ async function EditorManager($header, $body) {
 	 * @returns {Promise<void>} A promise that resolves once the editor is set up.
 	 */
 	async function setupEditor() {
-		// TODO: Get input element from CodeMirror
-		// const textInput = editor.textInput.getElement();
 		const settings = appSettings.value;
 		const { leftMargin, textWrap, colorPreview, fontSize, lineHeight } =
 			appSettings.value;
@@ -1502,17 +1498,6 @@ async function EditorManager($header, $body) {
 		//	keyboardHandler.on("keyboardHide", onKeyboardHide);
 		// });
 
-		// Change handling is implemented via CodeMirror updateListener (see getDocSyncListener())
-
-		// TODO: Implement change annotation event for CodeMirror
-		// editor.on("changeAnnotation", toggleProblemButton);
-
-		// TODO: Implement resize event for CodeMirror
-		// editor.renderer.on("resize", () => {
-		//	$vScrollbar.resize($vScrollbar.visible);
-		//	$hScrollbar.resize($hScrollbar.visible);
-		// });
-
 		// TODO: Implement scroll events for CodeMirror
 		// editor.on("scrolltop", onscrolltop);
 		// editor.on("scrollleft", onscrollleft);
@@ -1523,60 +1508,9 @@ async function EditorManager($header, $body) {
 		//	}
 		// });
 
-		// TODO: Implement color preview for CodeMirror
-		// if (colorPreview) {
-		//	initColorView(editor);
-		// }
-		// TODO: Implement touch listeners for CodeMirror
-		// touchListeners(editor);
-		// TODO: Implement commands for CodeMirror
-		// setCommands(editor);
-		// TODO: Implement key bindings for CodeMirror
-		// await setKeyBindings(editor);
-		// TODO: Implement Emmet for CodeMirror
-		// Emmet.setCore(window.emmet);
-		// TODO: Implement font size for CodeMirror
-		// editor.setFontSize(fontSize);
-		// TODO: Implement highlight selected word for CodeMirror
-		// editor.setHighlightSelectedWord(true);
-		// TODO: Implement line height for CodeMirror
-		// editor.container.style.lineHeight = lineHeight;
-
-		// TODO: Implement all editor options for CodeMirror
-		// ace.require("ace/ext/language_tools");
-		// editor.setOption("animatedScroll", false);
-		// editor.setOption("tooltipFollowsMouse", false);
-		// editor.setOption("theme", settings.editorTheme);
-		// editor.setOption("showGutter", settings.linenumbers || settings.showAnnotations);
-		// editor.setOption("showLineNumbers", settings.linenumbers);
-		// editor.setOption("enableEmmet", true);
-		// editor.setOption("showInvisibles", settings.showSpaces);
-		// editor.setOption("indentedSoftWrap", false);
-		// editor.setOption("scrollPastEnd", 0.5);
-		// editor.setOption("showPrintMargin", settings.showPrintMargin);
-		// editor.setOption("relativeLineNumbers", settings.relativeLineNumbers);
-		// editor.setOption("useElasticTabstops", settings.elasticTabstops);
-		// editor.setOption("useTextareaForIME", settings.useTextareaForIME);
-		// editor.setOption("rtlText", settings.rtlText);
-		// editor.setOption("hardWrap", settings.hardWrap);
-		// editor.setOption("spellCheck", settings.spellCheck);
-		// editor.setOption("printMarginColumn", settings.printMargin);
-		// editor.setOption("enableBasicAutocompletion", true);
-		// editor.setOption("enableLiveAutocompletion", settings.liveAutoCompletion);
-		// editor.setOption("copyWithEmptySelection", true);
-		// editor.setOption("fadeFoldWidgets", settings.fadeFoldWidgets);
-		// editor.setOption('enableInlineAutocompletion', settings.inlineAutoCompletion);
-
 		updateMargin(true);
 		updateSideButtonContainer();
 		toggleProblemButton();
-		// TODO: Implement scroll margin for CodeMirror
-		// editor.renderer.setScrollMargin(
-		//	scrollMarginTop,
-		//	scrollMarginBottom,
-		//	scrollMarginLeft,
-		//	scrollMarginRight,
-		// );
 	}
 
 	/**
@@ -1945,10 +1879,6 @@ async function EditorManager($header, $body) {
 					$container.parentElement.appendChild(file.content);
 				}
 			}
-			// TODO: Implement selection clearing for CodeMirror
-			if (manager.activeFile && manager.activeFile.type === "editor") {
-				// manager.activeFile.session.selection.clearSelection();
-			}
 		}
 
 		file.tab.classList.add("active");
@@ -2070,17 +2000,16 @@ async function EditorManager($header, $body) {
 
 	/**
 	 * Gets the height of the editor
-	 * @param {AceAjax.Editor} editor
+	 * @param {object} editor
 	 * @returns
 	 */
-	// TODO: Implement editor height calculation for CodeMirror
 	function getEditorHeight(editor) {
 		try {
-			const sd = editor?.scrollDOM;
-			if (!sd) return 0;
-			// Return the total vertical scrollable range
-			const total = sd.scrollHeight || 0;
-			const viewport = sd.clientHeight || 0;
+			const view = editor;
+			if (!view || !view.scrollDOM) return 0;
+
+			const total = view.scrollDOM.scrollHeight || 0;
+			const viewport = view.scrollDOM.clientHeight || 0;
 			return Math.max(total - viewport, 0);
 		} catch (_) {
 			return 0;
@@ -2089,17 +2018,16 @@ async function EditorManager($header, $body) {
 
 	/**
 	 * Gets the height of the editor
-	 * @param {AceAjax.Editor} editor
+	 * @param {object} editor
 	 * @returns
 	 */
-	// TODO: Implement editor width calculation for CodeMirror
 	function getEditorWidth(editor) {
 		try {
-			const sd = editor?.scrollDOM;
-			if (!sd) return 0;
-			// Return the total horizontal scrollable range
-			const total = sd.scrollWidth || 0;
-			const viewport = sd.clientWidth || 0;
+			const view = editor;
+			if (!view || !view.scrollDOM) return 0;
+
+			const total = view.scrollDOM.scrollWidth || 0;
+			const viewport = view.scrollDOM.clientWidth || 0;
 			let width = Math.max(total - viewport, 0);
 			if (!appSettings.value.textWrap) {
 				const { leftMargin = 0 } = appSettings.value;
