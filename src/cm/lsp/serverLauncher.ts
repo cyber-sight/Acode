@@ -1,50 +1,60 @@
 import toast from "components/toast";
 import confirm from "dialogs/confirm";
 import loader from "dialogs/loader";
+import type {
+	BridgeConfig,
+	InstallStatus,
+	LauncherConfig,
+	LspServerDefinition,
+	ManagedServerEntry,
+	WaitOptions,
+} from "./types";
 
-const managedServers = new Map();
-const checkedCommands = new Map();
-const pendingInstallChecks = new Map();
-const announcedServers = new Set();
+const managedServers = new Map<string, ManagedServerEntry>();
+const checkedCommands = new Map<string, InstallStatus>();
+const pendingInstallChecks = new Map<string, Promise<boolean>>();
+const announcedServers = new Set<string>();
 
-const STATUS_PRESENT = "present";
-const STATUS_DECLINED = "declined";
-const STATUS_FAILED = "failed";
+const STATUS_PRESENT: InstallStatus = "present";
+const STATUS_DECLINED: InstallStatus = "declined";
+const STATUS_FAILED: InstallStatus = "failed";
 
 const AXS_BINARY = "$PREFIX/axs";
 
-function getExecutor() {
-	const executor = globalThis.Executor;
+function getExecutor(): Executor {
+	const executor = (globalThis as unknown as { Executor?: Executor }).Executor;
 	if (!executor) {
 		throw new Error("Executor plugin is not available");
 	}
 	return executor;
 }
 
-function joinCommand(command, args = []) {
+function joinCommand(command: string, args: string[] = []): string {
 	if (!Array.isArray(args)) return command;
 	return [command, ...args].join(" ");
 }
 
-function wrapShellCommand(command) {
+function wrapShellCommand(command: string): string {
 	const script = command.trim();
 	const escaped = script.replace(/"/g, '\\"');
 	return `sh -lc "set -e; ${escaped}"`;
 }
 
-async function runCommand(command) {
+async function runCommand(command: string): Promise<string> {
 	const wrapped = wrapShellCommand(command);
 	return getExecutor().execute(wrapped, true);
 }
 
-function quoteArg(value) {
+function quoteArg(value: unknown): string {
 	const str = String(value ?? "");
 	if (!str.length) return "''";
 	if (/^[A-Za-z0-9_@%+=:,./-]+$/.test(str)) return str;
 	return `'${str.replace(/'/g, "'\\''")}'`;
 }
 
-function buildAxsBridgeCommand(bridge) {
+function buildAxsBridgeCommand(
+	bridge: BridgeConfig | undefined,
+): string | null {
 	if (!bridge || bridge.kind !== "axs") return null;
 	const port = Number(bridge.port);
 	if (!Number.isInteger(port) || port <= 0 || port > 65535) {
@@ -57,7 +67,7 @@ function buildAxsBridgeCommand(bridge) {
 		: (() => {
 				throw new Error("Bridge requires a command to execute");
 			})();
-	const args = Array.isArray(bridge.args)
+	const args: string[] = Array.isArray(bridge.args)
 		? bridge.args.map((arg) => String(arg))
 		: [];
 
@@ -69,8 +79,10 @@ function buildAxsBridgeCommand(bridge) {
 	return parts.join(" ");
 }
 
-function resolveStartCommand(server) {
-	const launcher = server.launcher || {};
+function resolveStartCommand(server: LspServerDefinition): string | null {
+	const launcher = server.launcher;
+	if (!launcher) return null;
+
 	if (launcher.startCommand) {
 		return Array.isArray(launcher.startCommand)
 			? launcher.startCommand.join(" ")
@@ -85,7 +97,7 @@ function resolveStartCommand(server) {
 	return null;
 }
 
-async function ensureInstalled(server) {
+async function ensureInstalled(server: LspServerDefinition): Promise<boolean> {
 	const launcher = server.launcher;
 	if (!launcher?.checkCommand) return true;
 
@@ -98,7 +110,8 @@ async function ensureInstalled(server) {
 
 	// If there's already a pending check for this server, wait for it
 	if (pendingInstallChecks.has(cacheKey)) {
-		return pendingInstallChecks.get(cacheKey);
+		const pending = pendingInstallChecks.get(cacheKey);
+		if (pending) return pending;
 	}
 
 	// Create and track the pending promise
@@ -112,9 +125,20 @@ async function ensureInstalled(server) {
 	}
 }
 
-async function performInstallCheck(server, launcher, cacheKey) {
+interface LoaderDialog {
+	show: () => void;
+	destroy: () => void;
+}
+
+async function performInstallCheck(
+	server: LspServerDefinition,
+	launcher: LauncherConfig,
+	cacheKey: string,
+): Promise<boolean> {
 	try {
-		await runCommand(launcher.checkCommand);
+		if (launcher.checkCommand) {
+			await runCommand(launcher.checkCommand);
+		}
 		checkedCommands.set(cacheKey, STATUS_PRESENT);
 		return true;
 	} catch (error) {
@@ -144,7 +168,7 @@ async function performInstallCheck(server, launcher, cacheKey) {
 			return false;
 		}
 
-		let loadingDialog;
+		let loadingDialog: LoaderDialog | null = null;
 		try {
 			loadingDialog = loader.create(
 				server.label,
@@ -157,7 +181,7 @@ async function performInstallCheck(server, launcher, cacheKey) {
 			return true;
 		} catch (installError) {
 			console.error(`Failed to install ${server.id}`, installError);
-			toast(strings?.error || "Error");
+			toast(strings?.error ?? "Error");
 			checkedCommands.set(cacheKey, STATUS_FAILED);
 			throw installError;
 		} finally {
@@ -166,20 +190,22 @@ async function performInstallCheck(server, launcher, cacheKey) {
 	}
 }
 
-async function startInteractiveServer(command, serverId) {
+
+
+async function startInteractiveServer(
+	command: string,
+	serverId: string,
+): Promise<string> {
 	const executor = getExecutor();
-	const uuid = await executor.start(
-		command,
-		(type, data) => {
-			if (type === "stderr") {
-				if (/proot warning/i.test(data)) return;
-				console.warn(`[${serverId}] ${data}`);
-			} else if (type === "stdout" && data && data.trim()) {
-				console.info(`[${serverId}] ${data}`);
-			}
-		},
-		true,
-	);
+	const callback: ExecutorCallback = (type, data) => {
+		if (type === "stderr") {
+			if (/proot warning/i.test(data)) return;
+			console.warn(`[${serverId}] ${data}`);
+		} else if (type === "stdout" && data && data.trim()) {
+			console.info(`[${serverId}] ${data}`);
+		}
+	};
+	const uuid = await executor.start(command, callback, true);
 	managedServers.set(serverId, {
 		uuid,
 		command,
@@ -188,20 +214,22 @@ async function startInteractiveServer(command, serverId) {
 	return uuid;
 }
 
-function sleep(ms) {
+function sleep(ms: number): Promise<void> {
 	return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
 async function waitForWebSocket(
-	url,
-	{ attempts = 20, delay = 200, probeTimeout = 2000 } = {},
-) {
-	let lastError = null;
+	url: string,
+	options: WaitOptions = {},
+): Promise<void> {
+	const { attempts = 20, delay = 200, probeTimeout = 2000 } = options;
+
+	let lastError: Error | null = null;
 	for (let i = 0; i < attempts; i++) {
 		try {
-			await new Promise((resolve, reject) => {
-				let socket;
-				let timer;
+			await new Promise<void>((resolve, reject) => {
+				let socket: WebSocket | null = null;
+				let timer: ReturnType<typeof setTimeout> | null = null;
 				try {
 					socket = new WebSocket(url);
 				} catch (error) {
@@ -209,19 +237,22 @@ async function waitForWebSocket(
 					return;
 				}
 
-				const cleanup = (cb) => {
+				const cleanup = (cb?: () => void): void => {
 					if (timer) clearTimeout(timer);
 					if (socket) {
-						socket.onopen = socket.onerror = null;
+						socket.onopen = null;
+						socket.onerror = null;
 						try {
 							socket.close();
-						} catch (_) {}
+						} catch (_) {
+							// Ignore close errors
+						}
 					}
-					cb && cb();
+					if (cb) cb();
 				};
 
 				socket.onopen = () => cleanup(resolve);
-				socket.onerror = (event) =>
+				socket.onerror = (event: Event) =>
 					cleanup(() =>
 						reject(
 							event instanceof Error ? event : new Error("websocket error"),
@@ -234,23 +265,27 @@ async function waitForWebSocket(
 			});
 			return;
 		} catch (error) {
-			lastError = error;
+			lastError = error instanceof Error ? error : new Error(String(error));
 			await sleep(delay);
 		}
 	}
-	const reason = lastError
-		? lastError.message || lastError.type || String(lastError)
-		: "unknown";
+	const reason = lastError ? lastError.message || String(lastError) : "unknown";
 	throw new Error(`WebSocket ${url} did not become ready (${reason})`);
 }
 
-export async function ensureServerRunning(server) {
+interface LspError extends Error {
+	code?: string;
+}
+
+export async function ensureServerRunning(
+	server: LspServerDefinition,
+): Promise<string | null> {
 	const launcher = server.launcher;
-	if (!launcher) return;
+	if (!launcher) return null;
 
 	const installed = await ensureInstalled(server);
 	if (!installed) {
-		const unavailable = new Error(
+		const unavailable: LspError = new Error(
 			`Language server ${server.id} is not available.`,
 		);
 		unavailable.code = "LSP_SERVER_UNAVAILABLE";
@@ -260,10 +295,10 @@ export async function ensureServerRunning(server) {
 	const key = server.id;
 	if (managedServers.has(key)) {
 		const existing = managedServers.get(key);
-		return existing?.uuid || null;
+		return existing?.uuid ?? null;
 	}
 
-	const command = await resolveStartCommand(server);
+	const command = resolveStartCommand(server);
 	if (!command) {
 		return null;
 	}
@@ -279,7 +314,7 @@ export async function ensureServerRunning(server) {
 		}
 		if (!announcedServers.has(key)) {
 			toast(
-				strings?.lsp_connected?.replace("{{label}}", server.label) ||
+				strings?.lsp_connected?.replace("{{label}}", server.label) ??
 					`${server.label} connected`,
 			);
 			announcedServers.add(key);
@@ -287,14 +322,15 @@ export async function ensureServerRunning(server) {
 		return uuid;
 	} catch (error) {
 		console.error(`Failed to start language server ${server.id}`, error);
+		const errorMessage = error instanceof Error ? error.message : String(error);
 		toast(
-			`${server.label} failed to connect${error?.message ? `: ${error.message}` : ""}`,
+			`${server.label} failed to connect${errorMessage ? `: ${errorMessage}` : ""}`,
 		);
 		const entry = managedServers.get(key);
 		if (entry) {
 			getExecutor()
 				.stop(entry.uuid)
-				.catch((err) => {
+				.catch((err: Error) => {
 					console.warn(
 						`Failed to stop language server shell ${server.id}`,
 						err,
@@ -302,27 +338,27 @@ export async function ensureServerRunning(server) {
 				});
 			managedServers.delete(key);
 		}
-		const unavailable = new Error(
-			`Language server ${server.id} failed to start (${error?.message || error})`,
+		const unavailable: LspError = new Error(
+			`Language server ${server.id} failed to start (${errorMessage})`,
 		);
 		unavailable.code = "LSP_SERVER_UNAVAILABLE";
 		throw unavailable;
 	}
 }
 
-export function stopManagedServer(serverId) {
+export function stopManagedServer(serverId: string): void {
 	const entry = managedServers.get(serverId);
 	if (!entry) return;
 	getExecutor()
 		.stop(entry.uuid)
-		.catch((error) => {
+		.catch((error: Error) => {
 			console.warn(`Failed to stop language server ${serverId}`, error);
 		});
 	managedServers.delete(serverId);
 	announcedServers.delete(serverId);
 }
 
-export function resetManagedServers() {
+export function resetManagedServers(): void {
 	for (const id of Array.from(managedServers.keys())) {
 		stopManagedServer(id);
 	}

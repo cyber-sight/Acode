@@ -1,4 +1,5 @@
 import { getIndentUnit, indentUnit } from "@codemirror/language";
+import type { LSPClientExtension } from "@codemirror/lsp-client";
 import {
 	findReferencesKeymap,
 	formatKeymap,
@@ -11,24 +12,40 @@ import {
 	serverDiagnostics,
 	signatureHelp,
 } from "@codemirror/lsp-client";
-import { MapMode } from "@codemirror/state";
-import { keymap } from "@codemirror/view";
+import { Extension, MapMode } from "@codemirror/state";
+import { EditorView, keymap } from "@codemirror/view";
 import Uri from "utils/Uri";
 import { ensureServerRunning } from "./serverLauncher";
 import serverRegistry from "./serverRegistry";
 import { createTransport } from "./transport";
+import type {
+	BuiltinExtensionsConfig,
+	ClientManagerOptions,
+	ClientState,
+	FileMetadata,
+	FormattingOptions,
+	LspServerDefinition,
+	NormalizedRootUri,
+	ParsedUri,
+	RootUriContext,
+	TextEdit,
+	TransportHandle,
+} from "./types";
 import AcodeWorkspace from "./workspace";
 
-function asArray(value) {
+function asArray<T>(value: T | T[] | null | undefined): T[] {
 	if (!value) return [];
 	return Array.isArray(value) ? value : [value];
 }
 
-function pluginKey(serverId, rootUri) {
-	return `${serverId}::${rootUri || "__global__"}`;
+function pluginKey(
+	serverId: string,
+	rootUri: string | null | undefined,
+): string {
+	return `${serverId}::${rootUri ?? "__global__"}`;
 }
 
-function safeString(value) {
+function safeString(value: unknown): string {
 	return value != null ? String(value) : "";
 }
 
@@ -39,56 +56,99 @@ const defaultKeymaps = keymap.of([
 	...findReferencesKeymap,
 ]);
 
-function buildBuiltinExtensions({
-	includeHover = true,
-	includeCompletion = true,
-	includeSignature = true,
-	includeKeymaps = true,
-	includeDiagnostics = true,
-} = {}) {
-	const extensions = [];
-	let diagnosticsExtension = null;
+interface BuiltinExtensionsResult {
+	extensions: Extension[];
+	diagnosticsExtension: Extension | LSPClientExtension | null;
+}
+
+function buildBuiltinExtensions(
+	config: BuiltinExtensionsConfig = {},
+): BuiltinExtensionsResult {
+	const {
+		hover: includeHover = true,
+		completion: includeCompletion = true,
+		signature: includeSignature = true,
+		keymaps: includeKeymaps = true,
+		diagnostics: includeDiagnostics = true,
+	} = config;
+
+	const extensions: Extension[] = [];
+	let diagnosticsExtension: Extension | LSPClientExtension | null = null;
 
 	if (includeCompletion) extensions.push(serverCompletion());
 	if (includeHover) extensions.push(hoverTooltips());
 	if (includeKeymaps) extensions.push(defaultKeymaps);
 	if (includeSignature) extensions.push(signatureHelp());
 	if (includeDiagnostics) {
-		diagnosticsExtension = serverDiagnostics();
-		extensions.push(diagnosticsExtension);
+		const diagExt = serverDiagnostics();
+		diagnosticsExtension = diagExt;
+		extensions.push(diagExt as Extension);
 	}
 
 	return { extensions, diagnosticsExtension };
 }
 
+interface LSPError extends Error {
+	code?: string;
+}
+
+interface InitContext {
+	key: string;
+	normalizedRootUri: string | null;
+	originalRootUri: string | null;
+}
+
+interface LSPPluginInstance {
+	fromPosition: (
+		pos: { line: number; character: number },
+		doc: unknown,
+	) => number;
+	syncedDoc: { length: number };
+	unsyncedChanges: {
+		mapPos: (pos: number, assoc?: number, mode?: MapMode) => number | null;
+		empty: boolean;
+	};
+	client: LSPClient & {
+		sync: () => void;
+	};
+	clear: () => void;
+}
+
+interface ExtendedLSPClient extends LSPClient {
+	__acodeLoggedInfo?: boolean;
+	serverInfo?: { name?: string; version?: string };
+}
+
 export class LspClientManager {
-	constructor(options = {}) {
+	options: ClientManagerOptions;
+
+	#clients: Map<string, ClientState>;
+	#pendingClients: Map<string, Promise<ClientState>>;
+
+	constructor(options: ClientManagerOptions = {}) {
 		this.options = { ...options };
 		this.#clients = new Map();
 		this.#pendingClients = new Map();
 	}
 
-	#clients;
-	#pendingClients;
-
-	setOptions(next) {
+	setOptions(next: Partial<ClientManagerOptions>): void {
 		this.options = { ...this.options, ...next };
 	}
 
-	getActiveClients() {
+	getActiveClients(): ClientState[] {
 		return Array.from(this.#clients.values());
 	}
 
-	async getExtensionsForFile(metadata) {
+	async getExtensionsForFile(metadata: FileMetadata): Promise<Extension[]> {
 		const { uri, languageId, languageName, view, file, rootUri } = metadata;
 
-		const effectiveLang = safeString(languageId || languageName).toLowerCase();
+		const effectiveLang = safeString(languageId ?? languageName).toLowerCase();
 		if (!effectiveLang) return [];
 
 		const servers = serverRegistry.getServersForLanguage(effectiveLang);
 		if (!servers.length) return [];
 
-		const lspExtensions = [];
+		const lspExtensions: Extension[] = [];
 		const diagnosticsUiExtension = this.options.diagnosticsUiExtension;
 
 		for (const server of servers) {
@@ -119,12 +179,13 @@ export class LspClientManager {
 					rootUri,
 				});
 				const plugin = clientState.client.plugin(uri, targetLanguageId);
-				clientState.attach(uri, view);
+				clientState.attach(uri, view as EditorView);
 				lspExtensions.push(plugin);
 			} catch (error) {
-				if (error?.code === "LSP_SERVER_UNAVAILABLE") {
+				const lspError = error as LSPError;
+				if (lspError?.code === "LSP_SERVER_UNAVAILABLE") {
 					console.info(
-						`Skipping LSP client for ${server.id}: ${error.message}`,
+						`Skipping LSP client for ${server.id}: ${lspError.message}`,
 					);
 					continue;
 				}
@@ -142,19 +203,21 @@ export class LspClientManager {
 		return lspExtensions;
 	}
 
-	async formatDocument(metadata, options = {}) {
+	async formatDocument(
+		metadata: FileMetadata,
+		options: FormattingOptions = {},
+	): Promise<boolean> {
 		const { uri, languageId, languageName, view, file } = metadata;
-		const effectiveLang = safeString(languageId || languageName).toLowerCase();
+		const effectiveLang = safeString(languageId ?? languageName).toLowerCase();
 		if (!effectiveLang || !view) return false;
 		const servers = serverRegistry.getServersForLanguage(effectiveLang);
 		if (!servers.length) return false;
 
 		for (const server of servers) {
 			try {
-				const context = {
+				const context: RootUriContext = {
 					uri,
 					languageId: effectiveLang,
-					languageName,
 					view,
 					file,
 					rootUri: metadata.rootUri,
@@ -163,10 +226,13 @@ export class LspClientManager {
 				const capabilities = state.client.serverCapabilities;
 				if (!capabilities?.documentFormattingProvider) continue;
 				state.attach(uri, view);
-				const plugin = LSPPlugin.get(view);
+				const plugin = LSPPlugin.get(view) as LSPPluginInstance | null;
 				if (!plugin) continue;
 				plugin.client.sync();
-				const edits = await state.client.request("textDocument/formatting", {
+				const edits = await state.client.request<
+					{ textDocument: { uri: string }; options: FormattingOptions },
+					TextEdit[] | null
+				>("textDocument/formatting", {
 					textDocument: { uri },
 					options: buildFormattingOptions(view, options),
 				});
@@ -186,22 +252,25 @@ export class LspClientManager {
 		return false;
 	}
 
-	detach(uri, view) {
+	detach(uri: string, view: EditorView): void {
 		for (const state of this.#clients.values()) {
 			state.detach(uri, view);
 		}
 	}
 
-	async dispose() {
-		const disposeOps = [];
+	async dispose(): Promise<void> {
+		const disposeOps: Promise<void>[] = [];
 		for (const [key, state] of this.#clients.entries()) {
-			disposeOps.push(state.dispose?.());
+			disposeOps.push(state.dispose());
 			this.#clients.delete(key);
 		}
 		await Promise.allSettled(disposeOps);
 	}
 
-	async #ensureClient(server, context) {
+	async #ensureClient(
+		server: LspServerDefinition,
+		context: RootUriContext,
+	): Promise<ClientState> {
 		const resolvedRoot = await this.#resolveRootUri(server, context);
 		const { normalizedRootUri, originalRootUri } = normalizeRootUriForServer(
 			server,
@@ -211,12 +280,12 @@ export class LspClientManager {
 
 		// Return existing client if already initialized
 		if (this.#clients.has(key)) {
-			return this.#clients.get(key);
+			return this.#clients.get(key)!;
 		}
 
 		// If initialization is already in progress, wait for it
 		if (this.#pendingClients.has(key)) {
-			return this.#pendingClients.get(key);
+			return this.#pendingClients.get(key)!;
 		}
 
 		// Create and track the pending initialization
@@ -235,36 +304,49 @@ export class LspClientManager {
 	}
 
 	async #initializeClient(
-		server,
-		context,
-		{ key, normalizedRootUri, originalRootUri },
-	) {
+		server: LspServerDefinition,
+		context: RootUriContext,
+		initContext: InitContext,
+	): Promise<ClientState> {
+		const { key, normalizedRootUri, originalRootUri } = initContext;
+
 		const workspaceOptions = {
 			displayFile: this.options.displayFile,
 		};
 
-		const clientConfig = { ...(server.clientConfig || {}) };
-		const builtinConfig = clientConfig.builtinExtensions || {};
+		const clientConfig = { ...(server.clientConfig ?? {}) };
+		const builtinConfig = clientConfig.builtinExtensions ?? {};
 		const useDefaultExtensions = clientConfig.useDefaultExtensions !== false;
 		const { extensions: defaultExtensions, diagnosticsExtension } =
 			useDefaultExtensions
 				? buildBuiltinExtensions({
-						includeHover: builtinConfig.hover !== false,
-						includeCompletion: builtinConfig.completion !== false,
-						includeSignature: builtinConfig.signature !== false,
-						includeKeymaps: builtinConfig.keymaps !== false,
-						includeDiagnostics: builtinConfig.diagnostics !== false,
+						hover: builtinConfig.hover !== false,
+						completion: builtinConfig.completion !== false,
+						signature: builtinConfig.signature !== false,
+						keymaps: builtinConfig.keymaps !== false,
+						diagnostics: builtinConfig.diagnostics !== false,
 					})
 				: { extensions: [], diagnosticsExtension: null };
 
 		const extraExtensions = asArray(this.options.clientExtensions);
 		const serverExtensions = asArray(clientConfig.extensions);
+
+		interface ExtensionWithCapabilities {
+			clientCapabilities?: {
+				textDocument?: {
+					publishDiagnostics?: unknown;
+				};
+			};
+		}
+
 		const wantsCustomDiagnostics = [
 			...extraExtensions,
 			...serverExtensions,
-		].some(
-			(ext) => !!ext?.clientCapabilities?.textDocument?.publishDiagnostics,
-		);
+		].some((ext) => {
+			const extWithCaps = ext as ExtensionWithCapabilities;
+			return !!extWithCaps?.clientCapabilities?.textDocument
+				?.publishDiagnostics;
+		});
 
 		const filteredBuiltins =
 			wantsCustomDiagnostics && diagnosticsExtension
@@ -278,13 +360,24 @@ export class LspClientManager {
 		];
 		clientConfig.extensions = mergedExtensions;
 
-		const existingHandlers = clientConfig.notificationHandlers || {};
+		const existingHandlers = clientConfig.notificationHandlers ?? {};
+
+		type LogLevel = "error" | "warn" | "log" | "info";
+		interface LogMessageParams {
+			type?: number;
+			message?: string;
+		}
+		interface ShowMessageParams {
+			message?: string;
+		}
+
 		clientConfig.notificationHandlers = {
 			...existingHandlers,
-			"window/logMessage": (_client, params) => {
-				if (!params?.message) return false;
-				const { type, message } = params;
-				let level = "info";
+			"window/logMessage": (_client: LSPClient, params: unknown): boolean => {
+				const logParams = params as LogMessageParams;
+				if (!logParams?.message) return false;
+				const { type, message } = logParams;
+				let level: LogLevel = "info";
 				switch (type) {
 					case 1:
 						level = "error";
@@ -298,18 +391,20 @@ export class LspClientManager {
 					default:
 						level = "info";
 				}
-				(console[level] || console.info)(`[LSP:${server.id}] ${message}`);
+				const logFn = console[level] ?? console.info;
+				logFn(`[LSP:${server.id}] ${message}`);
 				return true;
 			},
-			"window/showMessage": (_client, params) => {
-				if (!params?.message) return false;
-				console.info(`[LSP:${server.id}] ${params.message}`);
+			"window/showMessage": (_client: LSPClient, params: unknown): boolean => {
+				const showParams = params as ShowMessageParams;
+				if (!showParams?.message) return false;
+				console.info(`[LSP:${server.id}] ${showParams.message}`);
 				return true;
 			},
 		};
 
 		if (!clientConfig.workspace) {
-			clientConfig.workspace = (client) =>
+			clientConfig.workspace = (client: LSPClient) =>
 				new AcodeWorkspace(client, workspaceOptions);
 		}
 
@@ -325,18 +420,18 @@ export class LspClientManager {
 			clientConfig.timeout = server.startupTimeout;
 		}
 
-		let transportHandle;
-		let client;
+		let transportHandle: TransportHandle | undefined;
+		let client: ExtendedLSPClient | undefined;
 
 		try {
 			await ensureServerRunning(server);
 			transportHandle = createTransport(server, {
 				...context,
 				rootUri: normalizedRootUri ?? null,
-				originalRootUri,
+				originalRootUri: originalRootUri ?? undefined,
 			});
 			await transportHandle.ready;
-			client = new LSPClient(clientConfig);
+			client = new LSPClient(clientConfig) as ExtendedLSPClient;
 			client.connect(transportHandle.transport);
 			await client.initializing;
 			if (!client.__acodeLoggedInfo) {
@@ -375,26 +470,34 @@ export class LspClientManager {
 		return state;
 	}
 
-	#createClientState({
-		key,
-		server,
-		client,
-		transportHandle,
-		normalizedRootUri,
-		originalRootUri,
-	}) {
-		const fileRefs = new Map();
+	#createClientState(params: {
+		key: string;
+		server: LspServerDefinition;
+		client: LSPClient;
+		transportHandle: TransportHandle;
+		normalizedRootUri: string | null;
+		originalRootUri: string | null;
+	}): ClientState {
+		const {
+			key,
+			server,
+			client,
+			transportHandle,
+			normalizedRootUri,
+			originalRootUri,
+		} = params;
+		const fileRefs = new Map<string, Set<EditorView>>();
 		const effectiveRoot = normalizedRootUri ?? originalRootUri ?? null;
 
-		const attach = (uri, view) => {
-			const existing = fileRefs.get(uri) || new Set();
+		const attach = (uri: string, view: EditorView): void => {
+			const existing = fileRefs.get(uri) ?? new Set();
 			existing.add(view);
 			fileRefs.set(uri, existing);
 			const suffix = effectiveRoot ? ` (root ${effectiveRoot})` : "";
 			console.info(`[LSP:${server.id}] attached to ${uri}${suffix}`);
 		};
 
-		const detach = (uri, view) => {
+		const detach = (uri: string, view?: EditorView): void => {
 			const existing = fileRefs.get(uri);
 			if (!existing) return;
 			if (view) existing.delete(view);
@@ -403,7 +506,7 @@ export class LspClientManager {
 				try {
 					// Only pass uri to closeFile - view is not needed for closing
 					// and passing it may cause issues if the view is already disposed
-					client.workspace?.closeFile?.(uri);
+					(client.workspace as AcodeWorkspace)?.closeFile?.(uri);
 				} catch (error) {
 					console.warn(`Failed to close LSP file ${uri}`, error);
 				}
@@ -418,7 +521,7 @@ export class LspClientManager {
 			}
 		};
 
-		const dispose = async () => {
+		const dispose = async (): Promise<void> => {
 			try {
 				client.disconnect();
 			} catch (error) {
@@ -443,12 +546,15 @@ export class LspClientManager {
 		};
 	}
 
-	async #resolveRootUri(server, context) {
+	async #resolveRootUri(
+		server: LspServerDefinition,
+		context: RootUriContext,
+	): Promise<string | null> {
 		if (context?.rootUri) return context.rootUri;
 
 		if (typeof server.rootUri === "function") {
 			try {
-				const value = await server.rootUri(context?.uri, context);
+				const value = await server.rootUri(context?.uri ?? "", context);
 				if (value) return safeString(value);
 			} catch (error) {
 				console.warn(`Server root resolver failed for ${server.id}`, error);
@@ -468,26 +574,44 @@ export class LspClientManager {
 	}
 }
 
-function applyTextEdits(plugin, view, edits) {
-	const changes = [];
+interface Change {
+	from: number;
+	to: number;
+	insert: string;
+}
+
+function applyTextEdits(
+	plugin: LSPPluginInstance,
+	view: EditorView,
+	edits: TextEdit[],
+): boolean {
+	const changes: Change[] = [];
 	for (const edit of edits) {
 		if (!edit?.range) continue;
-		let fromBase;
-		let toBase;
+		let fromBase: number;
+		let toBase: number;
 		try {
 			fromBase = plugin.fromPosition(edit.range.start, plugin.syncedDoc);
 			toBase = plugin.fromPosition(edit.range.end, plugin.syncedDoc);
 		} catch (_) {
 			continue;
 		}
-		const from = plugin.unsyncedChanges.mapPos(fromBase, 1, MapMode.TrackDel);
-		const to = plugin.unsyncedChanges.mapPos(toBase, -1, MapMode.TrackDel);
-		if (from == null || to == null) continue;
+		const fromResult = plugin.unsyncedChanges.mapPos(
+			fromBase,
+			1,
+			MapMode.TrackDel,
+		);
+		const toResult = plugin.unsyncedChanges.mapPos(
+			toBase,
+			-1,
+			MapMode.TrackDel,
+		);
+		if (fromResult == null || toResult == null) continue;
 		const insert =
 			typeof edit.newText === "string"
 				? edit.newText.replace(/\r\n/g, "\n")
 				: "";
-		changes.push({ from, to, insert });
+		changes.push({ from: fromResult, to: toResult, insert });
 	}
 	if (!changes.length) return false;
 	changes.sort((a, b) => a.from - b.from || a.to - b.to);
@@ -495,7 +619,10 @@ function applyTextEdits(plugin, view, edits) {
 	return true;
 }
 
-function buildFormattingOptions(view, overrides = {}) {
+function buildFormattingOptions(
+	view: EditorView,
+	overrides: FormattingOptions = {},
+): FormattingOptions {
 	const state = view?.state;
 	if (!state) return { ...overrides };
 
@@ -503,7 +630,7 @@ function buildFormattingOptions(view, overrides = {}) {
 	const unit =
 		typeof unitValue === "string" && unitValue.length
 			? unitValue
-			: String(unitValue || "\t");
+			: String(unitValue ?? "\t");
 	let tabSize = getIndentUnit(state);
 	if (
 		typeof tabSize !== "number" ||
@@ -521,7 +648,7 @@ function buildFormattingOptions(view, overrides = {}) {
 	};
 }
 
-function resolveIndentWidth(unit) {
+function resolveIndentWidth(unit: string): number {
 	if (typeof unit !== "string" || !unit.length) return 4;
 	let width = 0;
 	for (const ch of unit) {
@@ -537,7 +664,10 @@ export default defaultManager;
 
 const FILE_SCHEME_REQUIRED_SERVERS = new Set(["typescript"]);
 
-function normalizeRootUriForServer(server, rootUri) {
+function normalizeRootUriForServer(
+	server: LspServerDefinition,
+	rootUri: string | null,
+): NormalizedRootUri {
 	if (!rootUri || typeof rootUri !== "string") {
 		return { normalizedRootUri: null, originalRootUri: null };
 	}
@@ -560,9 +690,9 @@ function normalizeRootUriForServer(server, rootUri) {
 	return { normalizedRootUri: rootUri, originalRootUri: rootUri };
 }
 
-function contentUriToFileUri(uri) {
+function contentUriToFileUri(uri: string): string | null {
 	try {
-		const parsed = Uri.parse(uri);
+		const parsed = Uri.parse(uri) as ParsedUri | null;
 		if (!parsed || typeof parsed !== "object") return null;
 		const { docId, rootUri, isFileUri } = parsed;
 		if (!docId) return null;
@@ -572,7 +702,9 @@ function contentUriToFileUri(uri) {
 		}
 
 		const providerMatch =
-			/^content:\/\/com\.((?![:<>"/\\|?*]).*)\.documents\//.exec(rootUri);
+			/^content:\/\/com\.((?![:<>"/\\|?*]).*)\\.documents\//.exec(
+				rootUri ?? "",
+			);
 		const providerId = providerMatch ? providerMatch[1] : null;
 
 		let normalized = docId.trim();
@@ -629,7 +761,7 @@ function contentUriToFileUri(uri) {
 	}
 }
 
-function buildFileUri(pathname) {
+function buildFileUri(pathname: string): string | null {
 	if (!pathname) return null;
 	const normalized = pathname.startsWith("/") ? pathname : `/${pathname}`;
 	const encoded = encodeURI(normalized).replace(/#/g, "%23");

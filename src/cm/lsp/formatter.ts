@@ -1,18 +1,36 @@
+import type { EditorView } from "@codemirror/view";
 import { getModes } from "cm/modelist";
 import toast from "components/toast";
 import lspClientManager from "./clientManager";
 import serverRegistry from "./serverRegistry";
+import type { AcodeApi, FileMetadata } from "./types";
 
-function getActiveMetadata(manager, file) {
+interface Mode {
+	name?: string;
+	extensions?: string;
+}
+
+interface EditorManagerWithLsp {
+	editor?: EditorView;
+	activeFile?: AcodeFile;
+	getLspMetadata?: (file: AcodeFile) => FileMetadata | null;
+}
+
+function getActiveMetadata(
+	manager: EditorManagerWithLsp | undefined,
+	file: AcodeFile | undefined,
+): (FileMetadata & { view?: EditorView }) | null {
 	if (!manager?.getLspMetadata || !file) return null;
 	const metadata = manager.getLspMetadata(file);
 	if (!metadata) return null;
-	metadata.view = manager.editor;
-	return metadata;
+	return {
+		...metadata,
+		view: manager.editor,
+	};
 }
 
-export function registerLspFormatter(acode) {
-	const languages = new Set();
+export function registerLspFormatter(acode: AcodeApi): void {
+	const languages = new Set<string>();
 	serverRegistry.listServers().forEach((server) => {
 		(server.languages || []).forEach((lang) => {
 			if (lang) languages.add(String(lang));
@@ -26,7 +44,7 @@ export function registerLspFormatter(acode) {
 		"lsp",
 		extensions,
 		async () => {
-			const manager = window.editorManager;
+			const manager = window.editorManager as EditorManagerWithLsp | undefined;
 			const file = manager?.activeFile;
 			const metadata = getActiveMetadata(manager, file);
 			if (!metadata) {
@@ -43,8 +61,11 @@ export function registerLspFormatter(acode) {
 				toast("No LSP formatter available");
 				return false;
 			}
-			metadata.languageName = metadata.languageName || languageId;
-			const success = await lspClientManager.formatDocument(metadata);
+			const fullMetadata = {
+				...metadata,
+				languageName: metadata.languageName || languageId,
+			};
+			const success = await lspClientManager.formatDocument(fullMetadata);
 			if (!success) {
 				toast("LSP formatter failed");
 			}
@@ -54,21 +75,24 @@ export function registerLspFormatter(acode) {
 	);
 }
 
-function collectFormatterExtensions(languages) {
-	const extensions = new Set();
-	const modeMap = new Map();
+function collectFormatterExtensions(languages: Set<string>): string[] {
+	const extensions = new Set<string>();
+	const modeMap = new Map<string, Mode>();
 
 	try {
-		getModes().forEach((mode) => {
-			const key = String(mode?.name || "")
+		const modes = getModes() as Mode[];
+		modes.forEach((mode) => {
+			const key = String(mode?.name ?? "")
 				.trim()
 				.toLowerCase();
 			if (key) modeMap.set(key, mode);
 		});
-	} catch (_) {}
+	} catch (_) {
+		// Ignore mode loading errors
+	}
 
 	languages.forEach((language) => {
-		const key = String(language || "")
+		const key = String(language ?? "")
 			.trim()
 			.toLowerCase();
 		if (!key) return;

@@ -1,57 +1,46 @@
-/**
- * @typedef {Object} LspTransportDescriptor
- * @property {"stdio"|"websocket"|"external"} kind
- * @property {string} [command]
- * @property {string[]} [args]
- * @property {Record<string, any>} [options]
- * @property {string} [url]
- */
+import type {
+	BridgeConfig,
+	ClientConfig,
+	LanguageResolverContext,
+	LauncherConfig,
+	LspServerDefinition,
+	RegistryEventListener,
+	RegistryEventType,
+	RootUriContext,
+	TransportDescriptor,
+	WebSocketTransportOptions,
+} from "./types";
 
-/**
- * @typedef {Object} LspServerDefinition
- * @property {string} id
- * @property {string} label
- * @property {boolean} [enabled]
- * @property {string[]} languages
- * @property {LspTransportDescriptor} transport
- * @property {Record<string, any>} [initializationOptions]
- * @property {Record<string, any>} [clientConfig]
- * @property {number} [startupTimeout]
- * @property {Record<string, any>} [capabilityOverrides]
- * @property {(uri: string, context: any) => string | null} [rootUri]
- * @property {(metadata: any) => string | null} [resolveLanguageId]
- */
+const registry = new Map<string, LspServerDefinition>();
+const listeners = new Set<RegistryEventListener>();
 
-const registry = new Map();
-const listeners = new Set();
-
-function toKey(id) {
-	return String(id || "")
+function toKey(id: string | undefined | null): string {
+	return String(id ?? "")
 		.trim()
 		.toLowerCase();
 }
 
-function clone(value) {
+function clone<T>(value: T): T | undefined {
 	if (!value || typeof value !== "object") return undefined;
 	try {
-		return JSON.parse(JSON.stringify(value));
+		return JSON.parse(JSON.stringify(value)) as T;
 	} catch (_) {
 		return value;
 	}
 }
 
-function sanitizeLanguages(languages = []) {
+function sanitizeLanguages(languages: string[] = []): string[] {
 	if (!Array.isArray(languages)) return [];
 	return languages
 		.map((lang) =>
-			String(lang || "")
+			String(lang ?? "")
 				.trim()
 				.toLowerCase(),
 		)
 		.filter(Boolean);
 }
 
-function parsePort(value) {
+function parsePort(value: unknown): number | null {
 	const num = Number(value);
 	if (!Number.isFinite(num)) return null;
 	const int = Math.floor(num);
@@ -59,9 +48,19 @@ function parsePort(value) {
 	return int;
 }
 
-function sanitizeBridge(serverId, bridge) {
+interface RawBridgeConfig {
+	kind?: string;
+	port?: unknown;
+	command?: string;
+	args?: unknown[];
+}
+
+function sanitizeBridge(
+	serverId: string,
+	bridge: RawBridgeConfig | undefined | null,
+): BridgeConfig | undefined {
 	if (!bridge || typeof bridge !== "object") return undefined;
-	const kind = bridge.kind || "axs";
+	const kind = bridge.kind ?? "axs";
 	if (kind !== "axs") {
 		throw new Error(
 			`LSP server ${serverId} declares unsupported bridge kind ${kind}`,
@@ -79,14 +78,53 @@ function sanitizeBridge(serverId, bridge) {
 		? bridge.args.map((arg) => String(arg))
 		: undefined;
 	return {
-		kind,
+		kind: "axs",
 		port,
 		command,
 		args,
 	};
 }
 
-function sanitizeDefinition(definition) {
+interface RawTransportDescriptor {
+	kind?: string;
+	command?: string;
+	args?: unknown[];
+	options?: Record<string, unknown> | WebSocketTransportOptions;
+	url?: string;
+}
+
+interface RawLauncherConfig {
+	command?: string;
+	args?: unknown[];
+	startCommand?: string | string[];
+	checkCommand?: string;
+	install?: { command?: string };
+	bridge?: RawBridgeConfig;
+}
+
+interface RawServerDefinition {
+	id?: string;
+	label?: string;
+	enabled?: boolean;
+	languages?: string[];
+	transport?: RawTransportDescriptor | TransportDescriptor;
+	initializationOptions?: Record<string, unknown>;
+	clientConfig?: Record<string, unknown> | ClientConfig;
+	startupTimeout?: number;
+	capabilityOverrides?: Record<string, unknown>;
+	rootUri?:
+		| ((uri: string, context: unknown) => string | null)
+		| ((uri: string, context: RootUriContext) => string | null)
+		| null;
+	resolveLanguageId?:
+		| ((context: LanguageResolverContext) => string | null)
+		| null;
+	launcher?: RawLauncherConfig | LauncherConfig;
+}
+
+function sanitizeDefinition(
+	definition: RawServerDefinition,
+): LspServerDefinition {
 	if (!definition || typeof definition !== "object") {
 		throw new TypeError("LSP server definition must be an object");
 	}
@@ -94,8 +132,11 @@ function sanitizeDefinition(definition) {
 	const id = toKey(definition.id);
 	if (!id) throw new Error("LSP server definition requires a non-empty id");
 
-	const transport = definition.transport || {};
-	const kind = transport.kind || "stdio";
+	const transport: RawTransportDescriptor = definition.transport ?? {};
+	const kind = (transport.kind ?? "stdio") as
+		| "stdio"
+		| "websocket"
+		| "external";
 
 	if (!transport || typeof transport !== "object") {
 		throw new Error(`LSP server ${id} is missing a transport descriptor`);
@@ -116,26 +157,50 @@ function sanitizeDefinition(definition) {
 		throw new Error(`LSP server ${id} (websocket) requires a url`);
 	}
 
-	const transportOptions =
+	const transportOptions: Record<string, unknown> =
 		transport.options && typeof transport.options === "object"
 			? { ...transport.options }
 			: {};
 
-	const sanitized = {
+	const sanitizedTransport: TransportDescriptor = {
+		kind,
+		command: transport.command,
+		args: Array.isArray(transport.args)
+			? transport.args.map((arg) => String(arg))
+			: undefined,
+		options: transportOptions,
+		url: transport.url,
+		protocols: undefined,
+	};
+
+	let launcher: LauncherConfig | undefined;
+	if (definition.launcher && typeof definition.launcher === "object") {
+		const rawLauncher = definition.launcher;
+		launcher = {
+			command: rawLauncher.command,
+			args: Array.isArray(rawLauncher.args)
+				? rawLauncher.args.map((arg) => String(arg))
+				: undefined,
+			startCommand: Array.isArray(rawLauncher.startCommand)
+				? rawLauncher.startCommand.map((arg) => String(arg))
+				: rawLauncher.startCommand,
+			checkCommand: rawLauncher.checkCommand,
+			install:
+				rawLauncher.install && typeof rawLauncher.install === "object"
+					? {
+							command: rawLauncher.install.command ?? "",
+						}
+					: undefined,
+			bridge: sanitizeBridge(id, rawLauncher.bridge),
+		};
+	}
+
+	const sanitized: LspServerDefinition = {
 		id,
-		label: definition.label || id,
+		label: definition.label ?? id,
 		enabled: definition.enabled !== false,
 		languages: sanitizeLanguages(definition.languages),
-		transport: {
-			kind,
-			command: transport.command,
-			args: Array.isArray(transport.args)
-				? transport.args.map((arg) => String(arg))
-				: undefined,
-			options: transportOptions,
-			url: transport.url,
-			protocols: undefined,
-		},
+		transport: sanitizedTransport,
 		initializationOptions: clone(definition.initializationOptions),
 		clientConfig: clone(definition.clientConfig),
 		startupTimeout:
@@ -149,27 +214,7 @@ function sanitizeDefinition(definition) {
 			typeof definition.resolveLanguageId === "function"
 				? definition.resolveLanguageId
 				: null,
-		launcher:
-			definition.launcher && typeof definition.launcher === "object"
-				? {
-						command: definition.launcher.command,
-						args: Array.isArray(definition.launcher.args)
-							? definition.launcher.args.map((arg) => String(arg))
-							: undefined,
-						startCommand: Array.isArray(definition.launcher.startCommand)
-							? definition.launcher.startCommand.map((arg) => String(arg))
-							: definition.launcher.startCommand,
-						checkCommand: definition.launcher.checkCommand,
-						install:
-							definition.launcher.install &&
-							typeof definition.launcher.install === "object"
-								? {
-										command: definition.launcher.install.command,
-									}
-								: undefined,
-						bridge: sanitizeBridge(id, definition.launcher.bridge),
-					}
-				: undefined,
+		launcher,
 	};
 
 	if (!Object.keys(transportOptions).length) {
@@ -179,8 +224,11 @@ function sanitizeDefinition(definition) {
 	return sanitized;
 }
 
-function resolveJsTsLanguageId(languageId, languageName) {
-	const lang = toKey(languageId || languageName);
+function resolveJsTsLanguageId(
+	languageId: string | undefined,
+	languageName: string | undefined,
+): string | null {
+	const lang = toKey(languageId ?? languageName);
 	switch (lang) {
 		case "tsx":
 		case "typescriptreact":
@@ -197,7 +245,7 @@ function resolveJsTsLanguageId(languageId, languageName) {
 	}
 }
 
-function notify(event, payload) {
+function notify(event: RegistryEventType, payload: LspServerDefinition): void {
 	listeners.forEach((fn) => {
 		try {
 			fn(event, payload);
@@ -207,29 +255,50 @@ function notify(event, payload) {
 	});
 }
 
-export function registerServer(definition, { replace = false } = {}) {
+export interface RegisterServerOptions {
+	replace?: boolean;
+}
+
+export function registerServer(
+	definition: RawServerDefinition,
+	options: RegisterServerOptions = {},
+): LspServerDefinition {
+	const { replace = false } = options;
 	const normalized = sanitizeDefinition(definition);
 	const exists = registry.has(normalized.id);
-	if (exists && !replace) return registry.get(normalized.id);
+	if (exists && !replace) {
+		const existing = registry.get(normalized.id);
+		if (existing) return existing;
+	}
 
 	registry.set(normalized.id, normalized);
 	notify("register", normalized);
 	return normalized;
 }
 
-export function unregisterServer(id) {
+export function unregisterServer(id: string): boolean {
 	const key = toKey(id);
 	if (!key || !registry.has(key)) return false;
 	const existing = registry.get(key);
 	registry.delete(key);
-	notify("unregister", existing);
+	if (existing) {
+		notify("unregister", existing);
+	}
 	return true;
 }
 
-export function updateServer(id, updater) {
+export type ServerUpdater = (
+	current: LspServerDefinition,
+) => Partial<LspServerDefinition> | null;
+
+export function updateServer(
+	id: string,
+	updater: ServerUpdater,
+): LspServerDefinition | null {
 	const key = toKey(id);
 	if (!key || !registry.has(key)) return null;
 	const current = registry.get(key);
+	if (!current) return null;
 	const next = updater({ ...current });
 	if (!next) return current;
 	const normalized = sanitizeDefinition({
@@ -242,18 +311,23 @@ export function updateServer(id, updater) {
 	return normalized;
 }
 
-export function getServer(id) {
-	return registry.get(toKey(id)) || null;
+export function getServer(id: string): LspServerDefinition | null {
+	return registry.get(toKey(id)) ?? null;
 }
 
-export function listServers() {
+export function listServers(): LspServerDefinition[] {
 	return Array.from(registry.values());
 }
 
+export interface GetServersOptions {
+	includeDisabled?: boolean;
+}
+
 export function getServersForLanguage(
-	languageId,
-	{ includeDisabled = false } = {},
-) {
+	languageId: string,
+	options: GetServersOptions = {},
+): LspServerDefinition[] {
+	const { includeDisabled = false } = options;
 	const langKey = toKey(languageId);
 	if (!langKey) return [];
 
@@ -263,14 +337,14 @@ export function getServersForLanguage(
 	});
 }
 
-export function onRegistryChange(listener) {
+export function onRegistryChange(listener: RegistryEventListener): () => void {
 	if (typeof listener !== "function") return () => {};
 	listeners.add(listener);
 	return () => listeners.delete(listener);
 }
 
-function registerBuiltinServers() {
-	const defaults = [
+function registerBuiltinServers(): void {
+	const defaults: RawServerDefinition[] = [
 		{
 			id: "typescript",
 			label: "TypeScript / JavaScript",

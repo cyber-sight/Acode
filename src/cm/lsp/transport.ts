@@ -3,19 +3,31 @@
 	WebSocket bridge so the CodeMirror client can continue to speak WebSocket.
 */
 
-/**
- * @typedef {Object} TransportHandle
- * @property {{ send(message: string): void, subscribe(handler: (value: string) => void): void, unsubscribe(handler: (value: string) => void): void }} transport
- * @property {() => Promise<void> | void} dispose
- * @property {Promise<void>} ready
- */
+import type { Transport } from "@codemirror/lsp-client";
+import type {
+	LspServerDefinition,
+	TransportContext,
+	TransportHandle,
+	WebSocketTransportOptions,
+} from "./types";
 
 const DEFAULT_TIMEOUT = 5000;
 const RECONNECT_BASE_DELAY = 500;
 const RECONNECT_MAX_DELAY = 10000;
 const RECONNECT_MAX_ATTEMPTS = 5;
 
-function createWebSocketTransport(server, context) {
+type MessageListener = (data: string) => void;
+
+interface TransportInterface extends Transport {
+	send(message: string): void;
+	subscribe(handler: MessageListener): void;
+	unsubscribe(handler: MessageListener): void;
+}
+
+function createWebSocketTransport(
+	server: LspServerDefinition,
+	context: TransportContext,
+): TransportHandle {
 	const transport = server.transport;
 	if (!transport) {
 		throw new Error(
@@ -23,54 +35,60 @@ function createWebSocketTransport(server, context) {
 		);
 	}
 
-	const { url, options = {} } = transport;
+	const url = transport.url;
+	const options: WebSocketTransportOptions = transport.options ?? {};
+
 	if (!url) {
 		throw new Error(`WebSocket transport for ${server.id} is missing a url`);
 	}
 
-	const listeners = new Set();
+	// Store validated URL in a const for TypeScript narrowing in nested functions
+	const wsUrl: string = url;
+
+	const listeners = new Set<MessageListener>();
 	const binaryMode = !!options.binary;
 	const timeout = options.timeout ?? DEFAULT_TIMEOUT;
 	const enableReconnect = options.reconnect !== false;
 	const maxReconnectAttempts =
 		options.maxReconnectAttempts ?? RECONNECT_MAX_ATTEMPTS;
 
-	let socket = null;
+	let socket: WebSocket | null = null;
 	let disposed = false;
 	let reconnectAttempts = 0;
-	let reconnectTimer = null;
+	let reconnectTimer: ReturnType<typeof setTimeout> | null = null;
 	let connected = false;
 
 	const encoder = binaryMode ? new TextEncoder() : null;
 
-	function createSocket() {
+	function createSocket(): WebSocket {
 		try {
 			// pylsp's websocket endpoint does not require subprotocol negotiation.
 			// Avoid passing protocols to keep the handshake simple.
-			const ws = new WebSocket(url);
+			const ws = new WebSocket(wsUrl);
 			if (binaryMode) {
 				ws.binaryType = "arraybuffer";
 			}
 			return ws;
 		} catch (error) {
+			const message = error instanceof Error ? error.message : String(error);
 			throw new Error(
-				`Failed to construct WebSocket for ${server.id} (${url}): ${error?.message || error}`,
+				`Failed to construct WebSocket for ${server.id} (${wsUrl}): ${message}`,
 			);
 		}
 	}
 
-	function handleMessage(event) {
-		let data;
+	function handleMessage(event: MessageEvent): void {
+		let data: string;
 		if (typeof event.data === "string") {
 			data = event.data;
 		} else if (event.data instanceof Blob) {
 			// Handle Blob synchronously by queuing - avoids async ordering issues
 			event.data
 				.text()
-				.then((text) => {
+				.then((text: string) => {
 					dispatchToListeners(text);
 				})
-				.catch((err) => {
+				.catch((err: Error) => {
 					console.error("Failed to read Blob message", err);
 				});
 			return;
@@ -87,7 +105,7 @@ function createWebSocketTransport(server, context) {
 		dispatchToListeners(data);
 	}
 
-	function dispatchToListeners(data) {
+	function dispatchToListeners(data: string): void {
 		// Debugging aid while stabilising websocket transport
 		if (context?.debugWebSocket) {
 			console.debug(`[LSP:${server.id}] <=`, data);
@@ -101,7 +119,7 @@ function createWebSocketTransport(server, context) {
 		});
 	}
 
-	function handleClose(event) {
+	function handleClose(event: CloseEvent): void {
 		connected = false;
 		if (disposed) return;
 
@@ -122,13 +140,15 @@ function createWebSocketTransport(server, context) {
 		}
 	}
 
-	function handleError(event) {
+	function handleError(event: Event): void {
 		if (disposed) return;
-		const reason = event?.message || event?.type || "connection error";
+		const errorEvent = event as ErrorEvent;
+		const reason =
+			errorEvent?.message || errorEvent?.type || "connection error";
 		console.error(`[LSP:${server.id}] WebSocket error: ${reason}`);
 	}
 
-	function scheduleReconnect() {
+	function scheduleReconnect(): void {
 		if (disposed || reconnectTimer) return;
 
 		const delay = Math.min(
@@ -148,7 +168,7 @@ function createWebSocketTransport(server, context) {
 		}, delay);
 	}
 
-	function attemptReconnect() {
+	function attemptReconnect(): void {
 		if (disposed) return;
 
 		try {
@@ -159,7 +179,9 @@ function createWebSocketTransport(server, context) {
 				connected = true;
 				reconnectAttempts = 0;
 				console.info(`[LSP:${server.id}] Reconnected successfully`);
-				socket.onopen = null;
+				if (socket) {
+					socket.onopen = null;
+				}
 			};
 		} catch (error) {
 			console.error(`[LSP:${server.id}] Reconnection failed`, error);
@@ -169,7 +191,7 @@ function createWebSocketTransport(server, context) {
 		}
 	}
 
-	function setupSocketHandlers(ws) {
+	function setupSocketHandlers(ws: WebSocket): void {
 		ws.onmessage = handleMessage;
 		ws.onclose = handleClose;
 		ws.onerror = handleError;
@@ -178,50 +200,64 @@ function createWebSocketTransport(server, context) {
 	// Initial socket creation
 	socket = createSocket();
 
-	const ready = new Promise((resolve, reject) => {
+	const ready = new Promise<void>((resolve, reject) => {
 		const timeoutId = setTimeout(() => {
-			socket.onopen = socket.onerror = null;
+			if (socket) {
+				socket.onopen = null;
+				socket.onerror = null;
+			}
 			try {
-				socket.close();
-			} catch (_) {}
+				socket?.close();
+			} catch (_) {
+				// Ignore close errors
+			}
 			reject(new Error(`Timed out opening WebSocket for ${server.id}`));
 		}, timeout);
 
-		socket.onopen = () => {
-			clearTimeout(timeoutId);
-			connected = true;
-			setupSocketHandlers(socket);
-			resolve();
-		};
+		if (socket) {
+			socket.onopen = () => {
+				clearTimeout(timeoutId);
+				connected = true;
+				if (socket) {
+					setupSocketHandlers(socket);
+				}
+				resolve();
+			};
 
-		socket.onerror = (event) => {
-			clearTimeout(timeoutId);
-			socket.onopen = socket.onerror = null;
-			const reason = event?.message || event?.type || "connection error";
-			reject(new Error(`WebSocket error for ${server.id}: ${reason}`));
-		};
+			socket.onerror = (event: Event) => {
+				clearTimeout(timeoutId);
+				if (socket) {
+					socket.onopen = null;
+					socket.onerror = null;
+				}
+				const errorEvent = event as ErrorEvent;
+				const reason =
+					errorEvent?.message || errorEvent?.type || "connection error";
+				reject(new Error(`WebSocket error for ${server.id}: ${reason}`));
+			};
+		}
 	});
 
-	const transportInterface = {
-		send(message) {
+	const transportInterface: TransportInterface = {
+		send(message: string): void {
 			if (!connected || !socket || socket.readyState !== WebSocket.OPEN) {
 				throw new Error("WebSocket transport is not open");
 			}
-			if (binaryMode) {
+			if (binaryMode && encoder) {
 				socket.send(encoder.encode(message));
 			} else {
 				socket.send(message);
 			}
 		},
-		subscribe(handler) {
+		subscribe(handler: MessageListener): void {
 			listeners.add(handler);
 		},
-		unsubscribe(handler) {
+		unsubscribe(handler: MessageListener): void {
 			listeners.delete(handler);
 		},
 	};
 
-	const dispose = () => {
+	const dispose = (): void => {
 		disposed = true;
 		connected = false;
 
@@ -241,14 +277,19 @@ function createWebSocketTransport(server, context) {
 			}
 			try {
 				socket.close(1000, "Client disposed");
-			} catch (_) {}
+			} catch (_) {
+				// Ignore close errors
+			}
 		}
 	};
 
 	return { transport: transportInterface, dispose, ready };
 }
 
-function createStdioTransport(server, context) {
+function createStdioTransport(
+	server: LspServerDefinition,
+	context: TransportContext,
+): TransportHandle {
 	if (!server.transport) {
 		throw new Error(
 			`LSP server ${server.id} is missing transport configuration`,
@@ -267,7 +308,10 @@ function createStdioTransport(server, context) {
 	return createWebSocketTransport(server, context);
 }
 
-export function createTransport(server, context = {}) {
+export function createTransport(
+	server: LspServerDefinition,
+	context: TransportContext = {},
+): TransportHandle {
 	if (!server) {
 		throw new Error("createTransport requires a server configuration");
 	}

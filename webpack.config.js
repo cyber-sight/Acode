@@ -8,6 +8,25 @@ module.exports = (env, options) => {
   const { mode = 'development' } = options;
   const rules = [
     {
+      test: /\.tsx?$/,
+      exclude: /node_modules/,
+      use: [
+        'html-tag-js/jsx/tag-loader.js',
+        {
+          loader: 'babel-loader',
+          options: {
+            presets: ['@babel/preset-env', '@babel/preset-typescript'],
+          },
+        },
+        {
+          loader: 'ts-loader',
+          options: {
+            transpileOnly: true, // Skip type checking for faster builds
+          },
+        },
+      ],
+    },
+    {
       test: /\.(hbs|md)$/,
       use: ['raw-loader'],
     },
@@ -99,6 +118,7 @@ module.exports = (env, options) => {
       rules,
     },
     resolve: {
+      extensions: ['.ts', '.tsx', '.js', '.mjs', '.json'],
       fallback: {
         path: require.resolve('path-browserify'),
         crypto: false,

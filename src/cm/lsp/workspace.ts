@@ -1,7 +1,23 @@
+import type { WorkspaceFile } from "@codemirror/lsp-client";
 import { LSPPlugin, Workspace } from "@codemirror/lsp-client";
+import type { Text } from "@codemirror/state";
+import type { EditorView } from "@codemirror/view";
+import type { WorkspaceFileUpdate, WorkspaceOptions } from "./types";
 
-class AcodeWorkspaceFile {
-	constructor(uri, languageId, version, doc, view) {
+class AcodeWorkspaceFile implements WorkspaceFile {
+	uri: string;
+	languageId: string;
+	version: number;
+	doc: Text;
+	views: Set<EditorView>;
+
+	constructor(
+		uri: string,
+		languageId: string,
+		version: number,
+		doc: Text,
+		view?: EditorView,
+	) {
 		this.uri = uri;
 		this.languageId = languageId;
 		this.version = version;
@@ -10,7 +26,7 @@ class AcodeWorkspaceFile {
 		if (view) this.views.add(view);
 	}
 
-	getView(preferred) {
+	getView(preferred?: EditorView): EditorView | null {
 		if (preferred && this.views.has(preferred)) return preferred;
 		const iterator = this.views.values();
 		const next = iterator.next();
@@ -19,25 +35,41 @@ class AcodeWorkspaceFile {
 }
 
 export default class AcodeWorkspace extends Workspace {
-	constructor(client, options = {}) {
+	files: AcodeWorkspaceFile[];
+	options: WorkspaceOptions;
+
+	#fileMap: Map<string, AcodeWorkspaceFile>;
+	#versions: Record<string, number>;
+
+	constructor(
+		client: ConstructorParameters<typeof Workspace>[0],
+		options: WorkspaceOptions = {},
+	) {
 		super(client);
 		this.files = [];
 		this.#fileMap = new Map();
-		this.#versions = Object.create(null);
+		this.#versions = Object.create(null) as Record<string, number>;
 		this.options = options;
 	}
 
-	#fileMap;
-	#versions;
-
-	#getOrCreateFile(uri, languageId, view) {
+	#getOrCreateFile(
+		uri: string,
+		languageId: string,
+		view: EditorView,
+	): AcodeWorkspaceFile {
 		let file = this.#fileMap.get(uri);
 		if (!file) {
+			const doc = view.state?.doc;
+			if (!doc) {
+				throw new Error(
+					`Cannot create workspace file without document: ${uri}`,
+				);
+			}
 			file = new AcodeWorkspaceFile(
 				uri,
 				languageId,
 				this.#nextFileVersion(uri),
-				view.state?.doc,
+				doc,
 				view,
 			);
 			this.#fileMap.set(uri, file);
@@ -48,24 +80,24 @@ export default class AcodeWorkspace extends Workspace {
 		return file;
 	}
 
-	#getFileEntry(uri) {
-		return this.#fileMap.get(uri) || null;
+	#getFileEntry(uri: string): AcodeWorkspaceFile | null {
+		return this.#fileMap.get(uri) ?? null;
 	}
 
-	#removeFileEntry(file) {
+	#removeFileEntry(file: AcodeWorkspaceFile): void {
 		this.#fileMap.delete(file.uri);
 		this.files = this.files.filter((candidate) => candidate !== file);
 	}
 
-	#nextFileVersion(uri) {
+	#nextFileVersion(uri: string): number {
 		const current = this.#versions[uri] ?? -1;
 		const next = current + 1;
 		this.#versions[uri] = next;
 		return next;
 	}
 
-	syncFiles() {
-		const updates = [];
+	syncFiles(): readonly WorkspaceFileUpdate[] {
+		const updates: WorkspaceFileUpdate[] = [];
 		for (const file of this.files) {
 			const view = file.getView();
 			if (!view) continue;
@@ -82,12 +114,12 @@ export default class AcodeWorkspace extends Workspace {
 		return updates;
 	}
 
-	openFile(uri, languageId, view) {
+	openFile(uri: string, languageId: string, view: EditorView): void {
 		if (!view) return;
 		this.#getOrCreateFile(uri, languageId, view);
 	}
 
-	closeFile(uri, view) {
+	closeFile(uri: string, view?: EditorView): void {
 		const file = this.#getFileEntry(uri);
 		if (!file) return;
 
@@ -101,11 +133,11 @@ export default class AcodeWorkspace extends Workspace {
 		}
 	}
 
-	getFile(uri) {
+	getFile(uri: string): AcodeWorkspaceFile | null {
 		return this.#getFileEntry(uri);
 	}
 
-	async displayFile(uri) {
+	async displayFile(uri: string): Promise<EditorView | null> {
 		if (typeof this.options.displayFile === "function") {
 			try {
 				return await this.options.displayFile(uri);

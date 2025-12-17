@@ -32,3 +32,54 @@ interface String {
 	 */
 	hash(): string;
 }
+
+type ExecutorCallback = (type: "stdout" | "stderr" | "exit", data: string) => void;
+
+interface Executor {
+	execute: (command: string, alpine: boolean) => Promise<string>;
+	start: (
+		command: string,
+		callback: ExecutorCallback,
+		alpine: boolean,
+	) => Promise<string>;
+	write: (uuid: string, input: string) => Promise<void>;
+	stop: (uuid: string) => Promise<void>;
+	isRunning: (uuid: string) => Promise<boolean>;
+}
+
+declare const Executor: Executor | undefined;
+
+interface Window {
+	Executor?: Executor;
+	editorManager?: EditorManager;
+}
+
+interface EditorManager {
+	editor?: import("@codemirror/view").EditorView;
+	activeFile?: AcodeFile;
+	getLspMetadata?: (file: AcodeFile) => LspFileMetadata | null;
+}
+
+interface LspFileMetadata {
+	uri: string;
+	languageId?: string;
+	languageName?: string;
+	view?: import("@codemirror/view").EditorView;
+	file?: AcodeFile;
+	rootUri?: string;
+}
+
+/**
+ * Acode file object
+ */
+interface AcodeFile {
+	uri?: string;
+	name?: string;
+	session?: unknown;
+	[key: string]: unknown;
+}
+
+// Extend globalThis with Executor
+declare global {
+	var Executor: Executor | undefined;
+}
