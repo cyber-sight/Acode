@@ -8,6 +8,7 @@ import {
 	syntaxHighlighting,
 } from "@codemirror/language";
 import { highlightSelectionMatches } from "@codemirror/search";
+import type { Extension } from "@codemirror/state";
 import { EditorState } from "@codemirror/state";
 import {
 	crosshairCursor,
@@ -22,9 +23,8 @@ import {
 
 /**
  * Base extensions roughly matching the useful parts of CodeMirror's basicSetup
- * @returns {import("@codemirror/state").Extension[]}
  */
-export default function createBaseExtensions() {
+export default function createBaseExtensions(): Extension[] {
 	return [
 		highlightActiveLineGutter(),
 		highlightSpecialChars(),

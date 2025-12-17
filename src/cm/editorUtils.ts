@@ -1,23 +1,33 @@
 import { foldEffect, foldedRanges } from "@codemirror/language";
-import { EditorSelection, EditorState } from "@codemirror/state";
-import { EditorView } from "@codemirror/view";
-/**
- * Interface for fold span objects
- * @typedef {Object} FoldSpan
- * @property {number} fromLine - Starting line number (1-based)
- * @property {number} fromCol - Starting column (0-based)
- * @property {number} toLine - Ending line number (1-based)
- * @property {number} toCol - Ending column (0-based)
- */
+import type { EditorState, StateEffect } from "@codemirror/state";
+import { EditorSelection } from "@codemirror/state";
+import type { EditorView } from "@codemirror/view";
+
+export interface FoldSpan {
+	fromLine: number;
+	fromCol: number;
+	toLine: number;
+	toCol: number;
+}
+export interface SelectionRange {
+	from: number;
+	to: number;
+}
+export interface SerializedSelection {
+	ranges: SelectionRange[];
+	mainIndex: number;
+}
+export interface ScrollPosition {
+	scrollTop: number;
+	scrollLeft: number;
+}
 
 /**
  * Get all folded ranges from CodeMirror editor state
- * @param {EditorState} state - CodeMirror editor state
- * @returns {FoldSpan[]} Array of fold span objects
  */
-export function getAllFolds(state) {
+export function getAllFolds(state: EditorState): FoldSpan[] {
 	const doc = state.doc;
-	const folds = [];
+	const folds: FoldSpan[] = [];
 
 	foldedRanges(state).between(0, doc.length, (from, to) => {
 		const fromPos = doc.lineAt(from);
@@ -34,9 +44,9 @@ export function getAllFolds(state) {
 }
 
 /**
- * @param {EditorView} view - CodeMirror editor state
+ * Get current selection from editor view
  */
-export function getSelection(view) {
+export function getSelection(view: EditorView): SerializedSelection {
 	const sel = view.state.selection;
 	return {
 		ranges: sel.ranges.map((r) => ({ from: r.from, to: r.to })),
@@ -45,21 +55,21 @@ export function getSelection(view) {
 }
 
 /**
- * Get scroll
- * @param {EditorView} view - CodeMirror editor view
+ * Get scroll position from editor view
  */
-export function getScrollPosition(view) {
+export function getScrollPosition(view: EditorView): ScrollPosition {
 	const { scrollTop, scrollLeft } = view.scrollDOM;
 	return { scrollTop, scrollLeft };
 }
 
 /**
  * Set scroll position in CodeMirror editor view
- * @param {EditorView} view - CodeMirror editor view
- * @param {number} scrollTop - Vertical scroll position
- * @param {number} scrollLeft - Horizontal scroll position
  */
-export function setScrollPosition(view, scrollTop, scrollLeft) {
+export function setScrollPosition(
+	view: EditorView,
+	scrollTop?: number,
+	scrollLeft?: number,
+): void {
 	const scroller = view.scrollDOM;
 
 	if (typeof scrollTop === "number") {
@@ -71,7 +81,13 @@ export function setScrollPosition(view, scrollTop, scrollLeft) {
 	}
 }
 
-export function restoreSelection(view, sel) {
+/**
+ * Restore selection to editor view
+ */
+export function restoreSelection(
+	view: EditorView,
+	sel: SerializedSelection | null | undefined,
+): void {
 	if (!sel || !sel.ranges || !sel.ranges.length) return;
 	const len = view.state.doc.length;
 
@@ -96,20 +112,28 @@ export function restoreSelection(view, sel) {
 
 /**
  * Restore folds to CodeMirror editor
- * @param {EditorView} view - CodeMirror editor view
- * @param {FoldSpan[]} folds - Array of fold spans to restore
  */
-export function restoreFolds(view, folds) {
+export function restoreFolds(
+	view: EditorView,
+	folds: FoldSpan[] | null | undefined,
+): void {
 	if (!Array.isArray(folds) || folds.length === 0) return;
 
-	function lineColToOffset(doc, line, col) {
+	function lineColToOffset(
+		doc: EditorState["doc"],
+		line: number,
+		col: number,
+	): number {
 		const ln = doc.line(line);
 		return Math.min(ln.from + col, ln.to);
 	}
 
-	function loadFolds(state, saved) {
+	function loadFolds(
+		state: EditorState,
+		saved: FoldSpan[],
+	): StateEffect<{ from: number; to: number }>[] {
 		const doc = state.doc;
-		const effects = [];
+		const effects: StateEffect<{ from: number; to: number }>[] = [];
 
 		for (const f of saved) {
 			// Validate line numbers
@@ -131,15 +155,20 @@ export function restoreFolds(view, folds) {
 	}
 }
 
-export function clearSelection(view) {
+/**
+ * Clear selection, keeping only cursor position
+ */
+export function clearSelection(view: EditorView): void {
 	view.dispatch({
-		selection: EditorSelection.single(view.state.selection.main.head), // keep cursor where the main selection head is
+		selection: EditorSelection.single(view.state.selection.main.head),
 		scrollIntoView: true,
 	});
-	// Also clear the global DOM selection to prevent native selection handles/menus persisting across tab switches
+	// Also clear the global DOM selection to prevent native selection handles/menus persisting
 	try {
 		document.getSelection()?.removeAllRanges();
-	} catch (_) {}
+	} catch (_) {
+		// Ignore errors
+	}
 }
 
 export default {

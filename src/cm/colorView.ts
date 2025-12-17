@@ -1,3 +1,5 @@
+import type { Range, Text } from "@codemirror/state";
+import type { DecorationSet, ViewUpdate } from "@codemirror/view";
 import {
 	Decoration,
 	EditorView,
@@ -8,8 +10,20 @@ import pickColor from "dialogs/color";
 import color from "utils/color";
 import { colorRegex, HEX } from "utils/color/regex";
 
+interface ColorWidgetState {
+	from: number;
+	to: number;
+	colorType: string;
+	alpha?: string;
+}
+
+interface ColorWidgetParams extends ColorWidgetState {
+	color: string;
+	colorRaw: string;
+}
+
 // WeakMap to carry state from widget DOM back into handler
-const colorState = new WeakMap();
+const colorState = new WeakMap<HTMLElement, ColorWidgetState>();
 
 const HEX_RE = new RegExp(HEX, "gi");
 
@@ -21,7 +35,7 @@ const disallowedBoundaryBefore = new Set(["-", ".", "/", "#"]);
 const disallowedBoundaryAfter = new Set(["-", ".", "/"]);
 const ignoredLeadingWords = new Set(["url"]);
 
-function isWhitespace(char) {
+function isWhitespace(char: string): boolean {
 	return (
 		char === " " ||
 		char === "\t" ||
@@ -31,7 +45,7 @@ function isWhitespace(char) {
 	);
 }
 
-function isAlpha(char) {
+function isAlpha(char: string): boolean {
 	if (!char) return false;
 	const code = char.charCodeAt(0);
 	return (
@@ -40,26 +54,26 @@ function isAlpha(char) {
 	);
 }
 
-function charAt(doc, index) {
+function charAt(doc: Text, index: number): string {
 	if (index < 0 || index >= doc.length) return "";
 	return doc.sliceString(index, index + 1);
 }
 
-function findPrevNonWhitespace(doc, index) {
+function findPrevNonWhitespace(doc: Text, index: number): number {
 	for (let i = index - 1; i >= 0; i--) {
 		if (!isWhitespace(charAt(doc, i))) return i;
 	}
 	return -1;
 }
 
-function findNextNonWhitespace(doc, index) {
+function findNextNonWhitespace(doc: Text, index: number): number {
 	for (let i = index; i < doc.length; i++) {
 		if (!isWhitespace(charAt(doc, i))) return i;
 	}
 	return doc.length;
 }
 
-function readWordBefore(doc, index) {
+function readWordBefore(doc: Text, index: number): string {
 	let pos = index;
 	while (pos >= 0 && isWhitespace(charAt(doc, pos))) pos--;
 	if (pos < 0) return "";
@@ -67,14 +81,14 @@ function readWordBefore(doc, index) {
 		pos--;
 	}
 	while (pos >= 0 && isWhitespace(charAt(doc, pos))) pos--;
-	let end = pos;
+	const end = pos;
 	while (pos >= 0 && isAlpha(charAt(doc, pos))) pos--;
 	const start = pos + 1;
 	if (end < start) return "";
 	return doc.sliceString(start, end + 1).toLowerCase();
 }
 
-function shouldRenderColor(doc, start, end) {
+function shouldRenderColor(doc: Text, start: number, end: number): boolean {
 	const immediatePrev = charAt(doc, start - 1);
 	if (disallowedBoundaryBefore.has(immediatePrev)) return false;
 
@@ -99,13 +113,18 @@ function shouldRenderColor(doc, start, end) {
 }
 
 class ColorWidget extends WidgetType {
-	constructor({ color, colorRaw, ...state }) {
+	state: ColorWidgetState;
+	color: string;
+	colorRaw: string;
+
+	constructor({ color, colorRaw, ...state }: ColorWidgetParams) {
 		super();
 		this.state = state; // from, to, colorType, alpha
 		this.color = color; // hex for input value
 		this.colorRaw = colorRaw; // original css color string
 	}
-	eq(other) {
+
+	eq(other: ColorWidget): boolean {
 		return (
 			other.state.colorType === this.state.colorType &&
 			other.color === this.color &&
@@ -114,7 +133,8 @@ class ColorWidget extends WidgetType {
 			(other.state.alpha || "") === (this.state.alpha || "")
 		);
 	}
-	toDOM() {
+
+	toDOM(): HTMLElement {
 		const wrapper = document.createElement("span");
 		wrapper.className = "cm-color-chip";
 		wrapper.style.display = "inline-block";
@@ -132,20 +152,21 @@ class ColorWidget extends WidgetType {
 		colorState.set(wrapper, this.state);
 		return wrapper;
 	}
-	ignoreEvent() {
+
+	ignoreEvent(): boolean {
 		return false;
 	}
 }
 
-function colorDecorations(view) {
-	const deco = [];
+function colorDecorations(view: EditorView): DecorationSet {
+	const deco: Range<Decoration>[] = [];
 	const ranges = view.visibleRanges;
 	const doc = view.state.doc;
 	for (const { from, to } of ranges) {
 		const text = doc.sliceString(from, to);
 		// Any color using global matcher from utils (captures named/rgb/rgba/hsl/hsla/hex)
 		RGBG.lastIndex = 0;
-		for (let m; (m = RGBG.exec(text)); ) {
+		for (let m: RegExpExecArray | null; (m = RGBG.exec(text)); ) {
 			const raw = m[2];
 			const start = from + m.index + m[1].length;
 			const end = start + raw.length;
@@ -167,66 +188,69 @@ function colorDecorations(view) {
 		}
 	}
 
-	return Decoration.set(deco, { sort: true });
+	return Decoration.set(deco, true);
+}
+
+class ColorViewPlugin {
+	decorations: DecorationSet;
+
+	constructor(view: EditorView) {
+		this.decorations = colorDecorations(view);
+	}
+
+	update(update: ViewUpdate): void {
+		if (update.docChanged || update.viewportChanged) {
+			this.decorations = colorDecorations(update.view);
+		}
+		const readOnly = update.view.contentDOM.ariaReadOnly === "true";
+		const editable = update.view.contentDOM.contentEditable === "true";
+		const canBeEdited = readOnly === false && editable;
+		this.changePicker(update.view, canBeEdited);
+	}
+
+	changePicker(view: EditorView, canBeEdited: boolean): void {
+		const doms = view.contentDOM.querySelectorAll("input[type=color]");
+		doms.forEach((inp) => {
+			const input = inp as HTMLInputElement;
+			if (canBeEdited) {
+				input.removeAttribute("disabled");
+			} else {
+				input.setAttribute("disabled", "");
+			}
+		});
+	}
 }
 
 export const colorView = (showPicker = true) =>
-	ViewPlugin.fromClass(
-		class ColorViewPlugin {
-			constructor(view) {
-				this.decorations = colorDecorations(view);
-			}
-			update(update) {
-				if (update.docChanged || update.viewportChanged) {
-					this.decorations = colorDecorations(update.view);
-				}
-				const readOnly = update.view.contentDOM.ariaReadOnly === "true";
-				const editable = update.view.contentDOM.contentEditable === "true";
-				const canBeEdited = readOnly === false && editable;
-				this.changePicker(update.view, canBeEdited);
-			}
-			changePicker(view, canBeEdited) {
-				const doms = view.contentDOM.querySelectorAll("input[type=color]");
-				doms.forEach((inp) => {
-					if (!showPicker) {
-						inp.setAttribute("disabled", "");
-					} else {
-						canBeEdited
-							? inp.removeAttribute("disabled")
-							: inp.setAttribute("disabled", "");
-					}
-				});
-			}
-		},
-		{
-			decorations: (v) => v.decorations,
-			eventHandlers: {
-				click: async (e, view) => {
-					const target = e.target;
-					const chip = target?.closest?.(".cm-color-chip");
-					if (!chip) return false;
-					// Respect read-only and setting toggle
-					const readOnly = view.contentDOM.ariaReadOnly === "true";
-					const editable = view.contentDOM.contentEditable === "true";
-					const canBeEdited = !readOnly && editable;
-					if (!canBeEdited) return true;
-					const data = colorState.get(chip);
-					if (!data) return false;
-					try {
-						const picked = await pickColor(
-							chip.dataset.colorraw || chip.dataset.color,
-						);
-						if (!picked) return true;
+	ViewPlugin.fromClass(ColorViewPlugin, {
+		decorations: (v) => v.decorations,
+		eventHandlers: {
+			click: (e: PointerEvent, view: EditorView): boolean => {
+				const target = e.target as HTMLElement | null;
+				const chip = target?.closest?.(".cm-color-chip") as HTMLElement | null;
+				if (!chip) return false;
+				// Respect read-only and setting toggle
+				const readOnly = view.contentDOM.ariaReadOnly === "true";
+				const editable = view.contentDOM.contentEditable === "true";
+				const canBeEdited = !readOnly && editable;
+				if (!canBeEdited) return true;
+				const data = colorState.get(chip);
+				if (!data) return false;
+
+				pickColor(chip.dataset.colorraw || chip.dataset.color || "")
+					.then((picked: string | null) => {
+						if (!picked) return;
 						view.dispatch({
 							changes: { from: data.from, to: data.to, insert: picked },
 						});
-					} catch {
+					})
+					.catch(() => {
 						/* ignore */
-					}
-					return true;
-				},
+					});
+
+				return true;
 			},
 		},
-	);
+	});
 
 export default colorView;
