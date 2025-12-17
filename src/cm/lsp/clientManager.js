@@ -65,9 +65,11 @@ export class LspClientManager {
 	constructor(options = {}) {
 		this.options = { ...options };
 		this.#clients = new Map();
+		this.#pendingClients = new Map();
 	}
 
 	#clients;
+	#pendingClients;
 
 	setOptions(next) {
 		this.options = { ...this.options, ...next };
@@ -206,10 +208,37 @@ export class LspClientManager {
 			resolvedRoot,
 		);
 		const key = pluginKey(server.id, normalizedRootUri);
+
+		// Return existing client if already initialized
 		if (this.#clients.has(key)) {
 			return this.#clients.get(key);
 		}
 
+		// If initialization is already in progress, wait for it
+		if (this.#pendingClients.has(key)) {
+			return this.#pendingClients.get(key);
+		}
+
+		// Create and track the pending initialization
+		const initPromise = this.#initializeClient(server, context, {
+			key,
+			normalizedRootUri,
+			originalRootUri,
+		});
+		this.#pendingClients.set(key, initPromise);
+
+		try {
+			return await initPromise;
+		} finally {
+			this.#pendingClients.delete(key);
+		}
+	}
+
+	async #initializeClient(
+		server,
+		context,
+		{ key, normalizedRootUri, originalRootUri },
+	) {
 		const workspaceOptions = {
 			displayFile: this.options.displayFile,
 		};
@@ -372,7 +401,9 @@ export class LspClientManager {
 			if (!view || !existing.size) {
 				fileRefs.delete(uri);
 				try {
-					client.workspace?.closeFile?.(uri, view);
+					// Only pass uri to closeFile - view is not needed for closing
+					// and passing it may cause issues if the view is already disposed
+					client.workspace?.closeFile?.(uri);
 				} catch (error) {
 					console.warn(`Failed to close LSP file ${uri}`, error);
 				}
