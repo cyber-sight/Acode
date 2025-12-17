@@ -19,6 +19,7 @@ import {
 	highlightSpecialChars,
 	keymap,
 	rectangularSelection,
+	tooltips,
 } from "@codemirror/view";
 
 /**
@@ -42,5 +43,17 @@ export default function createBaseExtensions(): Extension[] {
 		highlightActiveLine(),
 		highlightSelectionMatches(),
 		keymap.of([...completionKeymap, ...defaultKeymap, ...historyKeymap]),
+		// This prevents tooltips from being going out of the editor area
+		tooltips({
+			tooltipSpace: (view) => {
+				const rect = view.dom.getBoundingClientRect();
+				return {
+					top: rect.top,
+					left: rect.left,
+					bottom: window.innerHeight,
+					right: window.innerWidth,
+				};
+			},
+		}),
 	];
 }
