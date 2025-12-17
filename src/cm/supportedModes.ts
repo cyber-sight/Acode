@@ -1,5 +1,14 @@
 import { languages } from "@codemirror/language-data";
+import type { Extension } from "@codemirror/state";
 import { addMode } from "./modelist";
+
+interface LanguageDescription {
+	name?: string;
+	extensions?: readonly string[];
+	filenames?: readonly string[];
+	filename?: string;
+	load?: () => Promise<Extension>;
+}
 
 // 1) Always register a plain text fallback
 addMode("Text", "txt|text|log|plain", "Plain Text", () => []);
@@ -7,13 +16,12 @@ addMode("Text", "txt|text|log|plain", "Plain Text", () => []);
 // 2) Register all languages provided by @codemirror/language-data
 //    We convert extensions like [".js", ".mjs"] into a modelist pattern: "js|mjs"
 //    and include anchored filename patterns like "^Dockerfile" when present.
-for (const lang of languages) {
+for (const lang of languages as readonly LanguageDescription[]) {
 	try {
 		const name = String(lang?.name || "").trim();
 		if (!name) continue;
 
-		/** @type {string[]} */
-		const parts = [];
+		const parts: string[] = [];
 		// File extensions
 		if (Array.isArray(lang.extensions)) {
 			for (const e of lang.extensions) {
@@ -41,7 +49,7 @@ for (const lang of languages) {
 
 		// Wrap language-data loader as our modelist language provider
 		// lang.load() returns a Promise<Extension>; we let the editor handle async loading
-		const loader = typeof lang.load === "function" ? () => lang.load() : null;
+		const loader = typeof lang.load === "function" ? () => lang.load!() : null;
 
 		addMode(name, pattern, name, loader);
 	} catch (_) {

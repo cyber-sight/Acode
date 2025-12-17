@@ -1,24 +1,31 @@
-const modesByName = {};
-const modes = [];
+import type { Extension } from "@codemirror/state";
+
+export type LanguageExtensionProvider = () => Extension | Promise<Extension>;
+
+export interface ModesByName {
+	[name: string]: Mode;
+}
+
+const modesByName: ModesByName = {};
+const modes: Mode[] = [];
 
 /**
  * Initialize CodeMirror mode list functionality
  */
-export function initModes() {
+export function initModes(): void {
 	// CodeMirror modes don't need the same ace.define wrapper
 	// but we maintain the same API structure for compatibility
 }
 
 /**
  * Add language mode to CodeMirror editor
- * @param {string} name name of the mode
- * @param {string|Array<string>} extensions extensions of the mode
- * @param {string} [caption] display name of the mode
- * @param {Function} [languageExtension] CodeMirror language provider function.
- *   This function may return an Extension synchronously or a Promise resolving
- *   to an Extension.
  */
-export function addMode(name, extensions, caption, languageExtension = null) {
+export function addMode(
+	name: string,
+	extensions: string | string[],
+	caption?: string,
+	languageExtension: LanguageExtensionProvider | null = null,
+): void {
 	const filename = name.toLowerCase();
 	const mode = new Mode(filename, caption, extensions, languageExtension);
 	modesByName[filename] = mode;
@@ -27,9 +34,8 @@ export function addMode(name, extensions, caption, languageExtension = null) {
 
 /**
  * Remove language mode from CodeMirror editor
- * @param {string} name
  */
-export function removeMode(name) {
+export function removeMode(name: string): void {
 	const filename = name.toLowerCase();
 	delete modesByName[filename];
 	const modeIndex = modes.findIndex((mode) => mode.name === filename);
@@ -40,12 +46,10 @@ export function removeMode(name) {
 
 /**
  * Get mode for file path
- * @param {string} path
- * @returns {Mode}
  */
-export function getModeForPath(path) {
+export function getModeForPath(path: string): Mode {
 	let mode = modesByName.text;
-	let fileName = path.split(/[\/\\]/).pop();
+	const fileName = path.split(/[/\\]/).pop() || "";
 
 	// Sort modes by specificity (descending) to check most specific first
 	const sortedModes = [...modes].sort((a, b) => {
@@ -67,7 +71,7 @@ export function getModeForPath(path) {
  * - Anchored patterns (e.g., "^Dockerfile") get a base score of 1000.
  * - Non-anchored patterns (extensions) are scored by length.
  */
-function getModeSpecificityScore(modeInstance) {
+function getModeSpecificityScore(modeInstance: Mode): number {
 	const extensionsStr = modeInstance.extensions;
 	if (!extensionsStr) return 0;
 
@@ -92,36 +96,32 @@ function getModeSpecificityScore(modeInstance) {
 
 /**
  * Get all modes by name
- * @returns {Object}
  */
-export function getModesByName() {
+export function getModesByName(): ModesByName {
 	return modesByName;
 }
 
 /**
  * Get all modes array
- * @returns {Array}
  */
-export function getModes() {
+export function getModes(): Mode[] {
 	return modes;
 }
 
-class Mode {
-	extensions;
-	displayName;
-	name;
-	mode;
-	extRe;
-	languageExtension;
+export class Mode {
+	extensions: string;
+	caption: string;
+	name: string;
+	mode: string;
+	extRe: RegExp;
+	languageExtension: LanguageExtensionProvider | null;
 
-	/**
-	 * Create a new mode
-	 * @param {string} name
-	 * @param {string} caption
-	 * @param {string|Array<string>} extensions
-	 * @param {Function} languageExtension - CodeMirror language extension function
-	 */
-	constructor(name, caption, extensions, languageExtension = null) {
+	constructor(
+		name: string,
+		caption: string | undefined,
+		extensions: string | string[],
+		languageExtension: LanguageExtensionProvider | null = null,
+	) {
 		if (Array.isArray(extensions)) {
 			extensions = extensions.join("|");
 		}
@@ -131,11 +131,11 @@ class Mode {
 		this.extensions = extensions;
 		this.caption = caption || this.name.replace(/_/g, " ");
 		this.languageExtension = languageExtension;
-		let re;
+		let re: string;
 
 		if (/\^/.test(extensions)) {
 			re =
-				extensions.replace(/\|(\^)?/g, function (a, b) {
+				extensions.replace(/\|(\^)?/g, function (_a: string, b: string) {
 					return "$|" + (b ? "^" : "^.*\\.");
 				}) + "$";
 		} else {
@@ -145,23 +145,21 @@ class Mode {
 		this.extRe = new RegExp(re, "i");
 	}
 
-	supportsFile(filename) {
+	supportsFile(filename: string): boolean {
 		return this.extRe.test(filename);
 	}
 
 	/**
 	 * Get the CodeMirror language extension
-	 * @returns {Function|null} The language provider function or null if not available
 	 */
-	getExtension() {
+	getExtension(): LanguageExtensionProvider | null {
 		return this.languageExtension;
 	}
 
 	/**
 	 * Check if the language extension is available (loaded)
-	 * @returns {boolean}
 	 */
-	isAvailable() {
+	isAvailable(): boolean {
 		return this.languageExtension !== null;
 	}
 }
