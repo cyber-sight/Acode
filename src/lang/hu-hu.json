@@ -477,7 +477,7 @@
 	"source not found": "Már nem létezik a forrásfájl",
 	"restored": "Helyreállítva",
 	"skipped": "Kihagyva",
-	"backup not valid object": "Nem érvényes objektum a biztonsági mentési fájl ",
+	"backup not valid object": "Nem érvényes objektum a biztonsági mentési fájl",
 	"backup no data": "Nem tartalmaz helyreállítandó adatokat a biztonsági mentési fájl.",
 	"backup legacy warning": "Ez egy régebbi biztonsági mentési formátum (v1). Egyes funkciók korlátozottak lehetnek.",
 	"backup missing metadata": "Hiányzó biztonsági mentési metaadatok - egyes információk nem érhetők el",
