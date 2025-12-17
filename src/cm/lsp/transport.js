@@ -10,55 +10,70 @@
  * @property {Promise<void>} ready
  */
 
+const DEFAULT_TIMEOUT = 5000;
+const RECONNECT_BASE_DELAY = 500;
+const RECONNECT_MAX_DELAY = 10000;
+const RECONNECT_MAX_ATTEMPTS = 5;
+
 function createWebSocketTransport(server, context) {
-	const { url, options = {} } = server.transport;
+	const transport = server.transport;
+	if (!transport) {
+		throw new Error(
+			`LSP server ${server.id} is missing transport configuration`,
+		);
+	}
+
+	const { url, options = {} } = transport;
 	if (!url) {
 		throw new Error(`WebSocket transport for ${server.id} is missing a url`);
 	}
 
-	let socket;
-	try {
-		// pylsp's websocket endpoint does not require subprotocol negotiation.
-		// Avoid passing protocols to keep the handshake simple.
-		socket = new WebSocket(url);
-	} catch (error) {
-		throw new Error(
-			`Failed to construct WebSocket for ${server.id} (${url}): ${error?.message || error}`,
-		);
-	}
 	const listeners = new Set();
 	const binaryMode = !!options.binary;
-	if (binaryMode) {
-		socket.binaryType = "arraybuffer";
+	const timeout = options.timeout ?? DEFAULT_TIMEOUT;
+	const enableReconnect = options.reconnect !== false;
+	const maxReconnectAttempts =
+		options.maxReconnectAttempts ?? RECONNECT_MAX_ATTEMPTS;
+
+	let socket = null;
+	let disposed = false;
+	let reconnectAttempts = 0;
+	let reconnectTimer = null;
+	let connected = false;
+
+	const encoder = binaryMode ? new TextEncoder() : null;
+
+	function createSocket() {
+		try {
+			// pylsp's websocket endpoint does not require subprotocol negotiation.
+			// Avoid passing protocols to keep the handshake simple.
+			const ws = new WebSocket(url);
+			if (binaryMode) {
+				ws.binaryType = "arraybuffer";
+			}
+			return ws;
+		} catch (error) {
+			throw new Error(
+				`Failed to construct WebSocket for ${server.id} (${url}): ${error?.message || error}`,
+			);
+		}
 	}
 
-	const ready = new Promise((resolve, reject) => {
-		const timeout = setTimeout(() => {
-			socket.onopen = socket.onerror = null;
-			try {
-				socket.close();
-			} catch (_) {}
-			reject(new Error(`Timed out opening WebSocket for ${server.id}`));
-		}, 5000);
-		socket.onopen = () => {
-			clearTimeout(timeout);
-			socket.onopen = socket.onerror = null;
-			resolve();
-		};
-		socket.onerror = (event) => {
-			clearTimeout(timeout);
-			socket.onopen = socket.onerror = null;
-			const reason = event?.message || event?.type || "connection error";
-			reject(new Error(`WebSocket error for ${server.id}: ${reason}`));
-		};
-	});
-
-	socket.onmessage = async (event) => {
+	function handleMessage(event) {
 		let data;
 		if (typeof event.data === "string") {
 			data = event.data;
 		} else if (event.data instanceof Blob) {
-			data = await event.data.text();
+			// Handle Blob synchronously by queuing - avoids async ordering issues
+			event.data
+				.text()
+				.then((text) => {
+					dispatchToListeners(text);
+				})
+				.catch((err) => {
+					console.error("Failed to read Blob message", err);
+				});
+			return;
 		} else if (event.data instanceof ArrayBuffer) {
 			data = new TextDecoder().decode(event.data);
 		} else {
@@ -69,6 +84,10 @@ function createWebSocketTransport(server, context) {
 			);
 			data = String(event.data);
 		}
+		dispatchToListeners(data);
+	}
+
+	function dispatchToListeners(data) {
 		// Debugging aid while stabilising websocket transport
 		if (context?.debugWebSocket) {
 			console.debug(`[LSP:${server.id}] <=`, data);
@@ -80,12 +99,112 @@ function createWebSocketTransport(server, context) {
 				console.error("LSP transport listener failed", error);
 			}
 		});
-	};
+	}
 
-	const encoder = binaryMode ? new TextEncoder() : null;
-	const transport = {
+	function handleClose(event) {
+		connected = false;
+		if (disposed) return;
+
+		const wasClean = event.wasClean || event.code === 1000;
+		if (wasClean) {
+			console.info(`[LSP:${server.id}] WebSocket closed cleanly`);
+			return;
+		}
+
+		console.warn(
+			`[LSP:${server.id}] WebSocket closed unexpectedly (code: ${event.code})`,
+		);
+
+		if (enableReconnect && reconnectAttempts < maxReconnectAttempts) {
+			scheduleReconnect();
+		} else if (reconnectAttempts >= maxReconnectAttempts) {
+			console.error(`[LSP:${server.id}] Max reconnection attempts reached`);
+		}
+	}
+
+	function handleError(event) {
+		if (disposed) return;
+		const reason = event?.message || event?.type || "connection error";
+		console.error(`[LSP:${server.id}] WebSocket error: ${reason}`);
+	}
+
+	function scheduleReconnect() {
+		if (disposed || reconnectTimer) return;
+
+		const delay = Math.min(
+			RECONNECT_BASE_DELAY * Math.pow(2, reconnectAttempts),
+			RECONNECT_MAX_DELAY,
+		);
+		reconnectAttempts++;
+
+		console.info(
+			`[LSP:${server.id}] Reconnecting in ${delay}ms (attempt ${reconnectAttempts}/${maxReconnectAttempts})`,
+		);
+
+		reconnectTimer = setTimeout(() => {
+			reconnectTimer = null;
+			if (disposed) return;
+			attemptReconnect();
+		}, delay);
+	}
+
+	function attemptReconnect() {
+		if (disposed) return;
+
+		try {
+			socket = createSocket();
+			setupSocketHandlers(socket);
+
+			socket.onopen = () => {
+				connected = true;
+				reconnectAttempts = 0;
+				console.info(`[LSP:${server.id}] Reconnected successfully`);
+				socket.onopen = null;
+			};
+		} catch (error) {
+			console.error(`[LSP:${server.id}] Reconnection failed`, error);
+			if (reconnectAttempts < maxReconnectAttempts) {
+				scheduleReconnect();
+			}
+		}
+	}
+
+	function setupSocketHandlers(ws) {
+		ws.onmessage = handleMessage;
+		ws.onclose = handleClose;
+		ws.onerror = handleError;
+	}
+
+	// Initial socket creation
+	socket = createSocket();
+
+	const ready = new Promise((resolve, reject) => {
+		const timeoutId = setTimeout(() => {
+			socket.onopen = socket.onerror = null;
+			try {
+				socket.close();
+			} catch (_) {}
+			reject(new Error(`Timed out opening WebSocket for ${server.id}`));
+		}, timeout);
+
+		socket.onopen = () => {
+			clearTimeout(timeoutId);
+			connected = true;
+			setupSocketHandlers(socket);
+			resolve();
+		};
+
+		socket.onerror = (event) => {
+			clearTimeout(timeoutId);
+			socket.onopen = socket.onerror = null;
+			const reason = event?.message || event?.type || "connection error";
+			reject(new Error(`WebSocket error for ${server.id}: ${reason}`));
+		};
+	});
+
+	const transportInterface = {
 		send(message) {
-			if (socket.readyState !== WebSocket.OPEN) {
+			if (!connected || !socket || socket.readyState !== WebSocket.OPEN) {
 				throw new Error("WebSocket transport is not open");
 			}
 			if (binaryMode) {
@@ -103,26 +222,44 @@ function createWebSocketTransport(server, context) {
 	};
 
 	const dispose = () => {
-		listeners.clear();
-		if (
-			socket.readyState === WebSocket.CLOSED ||
-			socket.readyState === WebSocket.CLOSING
-		) {
-			return;
+		disposed = true;
+		connected = false;
+
+		if (reconnectTimer) {
+			clearTimeout(reconnectTimer);
+			reconnectTimer = null;
 		}
-		socket.close(1000, "Client disposed");
+
+		listeners.clear();
+
+		if (socket) {
+			if (
+				socket.readyState === WebSocket.CLOSED ||
+				socket.readyState === WebSocket.CLOSING
+			) {
+				return;
+			}
+			try {
+				socket.close(1000, "Client disposed");
+			} catch (_) {}
+		}
 	};
 
-	return { transport, dispose, ready };
+	return { transport: transportInterface, dispose, ready };
 }
 
 function createStdioTransport(server, context) {
-	if (!server.transport?.url) {
+	if (!server.transport) {
+		throw new Error(
+			`LSP server ${server.id} is missing transport configuration`,
+		);
+	}
+	if (!server.transport.url) {
 		throw new Error(
 			`STDIO transport for ${server.id} is missing a websocket bridge url`,
 		);
 	}
-	if (!server.transport?.options?.binary) {
+	if (!server.transport.options?.binary) {
 		console.info(
 			`LSP server ${server.id} is using stdio bridge without binary mode. Falling back to text frames.`,
 		);
@@ -131,7 +268,23 @@ function createStdioTransport(server, context) {
 }
 
 export function createTransport(server, context = {}) {
-	switch (server.transport.kind) {
+	if (!server) {
+		throw new Error("createTransport requires a server configuration");
+	}
+	if (!server.transport) {
+		throw new Error(
+			`LSP server ${server.id || "unknown"} is missing transport configuration`,
+		);
+	}
+
+	const kind = server.transport.kind;
+	if (!kind) {
+		throw new Error(
+			`LSP server ${server.id} transport is missing 'kind' property`,
+		);
+	}
+
+	switch (kind) {
 		case "websocket":
 			return createWebSocketTransport(server, context);
 		case "stdio":
@@ -144,7 +297,7 @@ export function createTransport(server, context = {}) {
 				`LSP server ${server.id} declares an external transport without a create() factory`,
 			);
 		default:
-			throw new Error(`Unsupported transport kind: ${server.transport.kind}`);
+			throw new Error(`Unsupported transport kind: ${kind}`);
 	}
 }
 
