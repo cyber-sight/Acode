@@ -225,7 +225,8 @@
               echo "Nightly tag already points to this commit. Skipping update."
             fi
 
-        
+        # 🚨⚠️ WARNING: the GITHUB_TOKEN under this step, has access to write & read access to Contents, Pull Requests
+        # Which is why, it uses a fine-granted token with Read-Only Access to Public Repos Only.
         - name: Generate Release Notes (Experimental)
           if: ${{ success() && env.releaseRequired == 'true' }}
           id: gen-release-notes
@@ -237,6 +238,8 @@
                 echo "$RELEASE_NOTES"
                 echo "EOF"
               } >> $GITHUB_ENV        
+          env: 
+            GITHUB_TOKEN: ${{ secrets.NIGHTLY_RELEASE_NOTES_GH_TOKEN }}
         - name: Release Nightly Version
 #          Only run this step, if not called from another workflow. And a previous step is successful with releasedRequired=true
           id: release
