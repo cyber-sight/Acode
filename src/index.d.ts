@@ -33,7 +33,10 @@ interface String {
 	hash(): string;
 }
 
-type ExecutorCallback = (type: "stdout" | "stderr" | "exit", data: string) => void;
+type ExecutorCallback = (
+	type: "stdout" | "stderr" | "exit",
+	data: string,
+) => void;
 
 interface Executor {
 	execute: (command: string, alpine: boolean) => Promise<string>;

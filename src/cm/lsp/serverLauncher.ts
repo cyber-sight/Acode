@@ -190,8 +190,6 @@ async function performInstallCheck(
 	}
 }
 
-
-
 async function startInteractiveServer(
 	command: string,
 	serverId: string,
