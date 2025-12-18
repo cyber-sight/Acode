@@ -312,13 +312,7 @@ export async function ensureServerRunning(
 			await waitForWebSocket(server.transport.url);
 		}
 		if (!announcedServers.has(key)) {
-			lspStatusBar.show({
-				message: `${server.label} connected`,
-				title: server.label || server.id,
-				type: "success",
-				icon: "check",
-				duration: 1500,
-			});
+			console.info(`[LSP:${server.id}] ${server.label} connected`);
 			announcedServers.add(key);
 		}
 		return uuid;

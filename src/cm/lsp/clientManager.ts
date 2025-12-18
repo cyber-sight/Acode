@@ -15,6 +15,7 @@ import {
 import { Extension, MapMode } from "@codemirror/state";
 import { EditorView, keymap } from "@codemirror/view";
 import lspStatusBar from "components/lspStatusBar";
+import NotificationManager from "lib/notificationManager";
 import Uri from "utils/Uri";
 import { ensureServerRunning } from "./serverLauncher";
 import serverRegistry from "./serverRegistry";
@@ -393,37 +394,39 @@ export class LspClientManager {
 				const showParams = params as ShowMessageParams;
 				if (!showParams?.message) return false;
 				const { type, message } = showParams;
-				let statusType: "info" | "success" | "warning" | "error" = "info";
-				let icon = "info";
-				let duration: number | false = 5000;
+				const serverLabel = server.label || server.id;
 
-				switch (type) {
-					case 1: // Error
-						statusType = "error";
-						icon = "error";
-						duration = false; // Persistent for errors
-						break;
-					case 2: // Warning
-						statusType = "warning";
-						icon = "warningreport_problem";
-						duration = 8000;
-						break;
-					case 3: // Info
-						statusType = "info";
-						icon = "info";
-						break;
-					case 4: // Log
-						statusType = "info";
-						icon = "autorenew";
-						break;
+				// Helper to clean and truncate message for notifications
+				const cleanMessage = (msg: string, maxLen = 150): string => {
+					// Take only first line
+					let cleaned = msg.split("\n")[0].trim();
+					if (cleaned.length > maxLen) {
+						cleaned = cleaned.slice(0, maxLen - 3) + "...";
+					}
+					return cleaned;
+				};
+
+				// Use notifications for errors and warnings
+				if (type === 1 || type === 2) {
+					const notificationManager = new NotificationManager();
+					notificationManager.pushNotification({
+						title: serverLabel,
+						message: cleanMessage(message),
+						icon: type === 1 ? "error" : "warningreport_problem",
+						type: type === 1 ? "error" : "warning",
+					});
+					// Log full message to console for debugging
+					console.info(`[LSP:${server.id}] ${message}`);
+					return true;
 				}
 
+				// For info/log messages, use status bar briefly
 				lspStatusBar.show({
-					message,
-					title: server.label || server.id,
-					type: statusType,
-					icon,
-					duration,
+					message: cleanMessage(message, 80),
+					title: serverLabel,
+					type: "info",
+					icon: type === 4 ? "autorenew" : "info",
+					duration: 5000,
 				});
 				console.info(`[LSP:${server.id}] ${message}`);
 				return true;
@@ -441,14 +444,17 @@ export class LspClientManager {
 				}
 				const progressParams = params as ProgressParams;
 				if (!progressParams?.value) return false;
-				console.log("Progress", progressParams.value);
 
 				const { kind, title, message, percentage } = progressParams.value;
 				const displayTitle = title || server.label || server.id;
+				// Use server ID + token as unique status ID for concurrent progress tracking
+				const progressToken = progressParams.token;
+				const statusId = `${server.id}-progress-${progressToken ?? "default"}`;
 
 				if (kind === "begin") {
 					lspStatusBar.show({
-						message: message || "Starting...",
+						id: statusId,
+						message: message || title || "Starting...",
 						title: displayTitle,
 						type: "info",
 						icon: "autorenew",
@@ -458,17 +464,13 @@ export class LspClientManager {
 					});
 				} else if (kind === "report") {
 					lspStatusBar.update({
+						id: statusId,
 						message: message,
 						progress: percentage,
 					});
 				} else if (kind === "end") {
-					lspStatusBar.show({
-						message: message || "Complete",
-						title: displayTitle,
-						type: "success",
-						icon: "check",
-						duration: 2000,
-					});
+					// Just hide the progress item silently, no "Complete" message
+					lspStatusBar.hideById(statusId);
 				}
 
 				console.info(
@@ -510,6 +512,7 @@ export class LspClientManager {
 			client.connect(transportHandle.transport);
 			await client.initializing;
 			if (!client.__acodeLoggedInfo) {
+				// Log root URI info to console
 				if (normalizedRootUri) {
 					if (originalRootUri && originalRootUri !== normalizedRootUri) {
 						console.info(
@@ -521,6 +524,7 @@ export class LspClientManager {
 				} else if (originalRootUri) {
 					console.info(`[LSP:${server.id}] root ignored`, originalRootUri);
 				}
+				console.info(`[LSP:${server.id}] initialized`);
 				client.__acodeLoggedInfo = true;
 			}
 		} catch (error) {
