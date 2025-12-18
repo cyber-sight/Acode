@@ -337,10 +337,19 @@ export class LspClientManager {
 				? defaultExtensions.filter((ext) => ext !== diagnosticsExtension)
 				: defaultExtensions;
 
+		const progressCapabilities: LSPClientExtension = {
+			clientCapabilities: {
+				window: {
+					workDoneProgress: true,
+				},
+			},
+		};
+
 		const mergedExtensions = [
 			...filteredBuiltins,
 			...extraExtensions,
 			...serverExtensions,
+			progressCapabilities,
 		];
 		clientConfig.extensions = mergedExtensions;
 
@@ -419,54 +428,54 @@ export class LspClientManager {
 				console.info(`[LSP:${server.id}] ${message}`);
 				return true;
 			},
-			// "$/progress": (_client: LSPClient, params: unknown): boolean => {
-			// 	interface ProgressParams {
-			// 		token?: string | number;
-			// 		value?: {
-			// 			kind?: "begin" | "report" | "end";
-			// 			title?: string;
-			// 			message?: string;
-			// 			percentage?: number;
-			// 			cancellable?: boolean;
-			// 		};
-			// 	}
-			// 	const progressParams = params as ProgressParams;
-			// 	if (!progressParams?.value) return false;
-			// 	console.log("Progress", progressParams.value);
+			"$/progress": (_client: LSPClient, params: unknown): boolean => {
+				interface ProgressParams {
+					token?: string | number;
+					value?: {
+						kind?: "begin" | "report" | "end";
+						title?: string;
+						message?: string;
+						percentage?: number;
+						cancellable?: boolean;
+					};
+				}
+				const progressParams = params as ProgressParams;
+				if (!progressParams?.value) return false;
+				console.log("Progress", progressParams.value);
 
-			// 	const { kind, title, message, percentage } = progressParams.value;
-			// 	const displayTitle = title || server.label || server.id;
+				const { kind, title, message, percentage } = progressParams.value;
+				const displayTitle = title || server.label || server.id;
 
-			// 	if (kind === "begin") {
-			// 		lspStatusBar.show({
-			// 			message: message || "Starting...",
-			// 			title: displayTitle,
-			// 			type: "info",
-			// 			icon: "autorenew",
-			// 			duration: false,
-			// 			showProgress: typeof percentage === "number",
-			// 			progress: percentage,
-			// 		});
-			// 	} else if (kind === "report") {
-			// 		lspStatusBar.update({
-			// 			message: message,
-			// 			progress: percentage,
-			// 		});
-			// 	} else if (kind === "end") {
-			// 		lspStatusBar.show({
-			// 			message: message || "Complete",
-			// 			title: displayTitle,
-			// 			type: "success",
-			// 			icon: "check",
-			// 			duration: 2000,
-			// 		});
-			// 	}
+				if (kind === "begin") {
+					lspStatusBar.show({
+						message: message || "Starting...",
+						title: displayTitle,
+						type: "info",
+						icon: "autorenew",
+						duration: false,
+						showProgress: typeof percentage === "number",
+						progress: percentage,
+					});
+				} else if (kind === "report") {
+					lspStatusBar.update({
+						message: message,
+						progress: percentage,
+					});
+				} else if (kind === "end") {
+					lspStatusBar.show({
+						message: message || "Complete",
+						title: displayTitle,
+						type: "success",
+						icon: "check",
+						duration: 2000,
+					});
+				}
 
-			// 	console.info(
-			// 		`[LSP:${server.id}] Progress: ${kind} - ${message || title || ""} ${typeof percentage === "number" ? `(${percentage}%)` : ""}`,
-			// 	);
-			// 	return true;
-			// },
+				console.info(
+					`[LSP:${server.id}] Progress: ${kind} - ${message || title || ""} ${typeof percentage === "number" ? `(${percentage}%)` : ""}`,
+				);
+				return true;
+			},
 		};
 
 		if (!clientConfig.workspace) {
