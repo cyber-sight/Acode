@@ -110,10 +110,10 @@ export interface BuiltinExtensionsConfig {
 	diagnostics?: boolean;
 }
 
-export interface ClientConfig {
+export interface AcodeClientConfig {
 	useDefaultExtensions?: boolean;
 	builtinExtensions?: BuiltinExtensionsConfig;
-	extensions?: Extension[];
+	extensions?: (Extension | LSPClientExtension)[];
 	notificationHandlers?: Record<
 		string,
 		(client: LSPClient, params: unknown) => boolean
@@ -137,7 +137,7 @@ export interface LspServerDefinition {
 	languages: string[];
 	transport: TransportDescriptor;
 	initializationOptions?: Record<string, unknown>;
-	clientConfig?: ClientConfig;
+	clientConfig?: AcodeClientConfig;
 	startupTimeout?: number;
 	capabilityOverrides?: Record<string, unknown>;
 	rootUri?: ((uri: string, context: RootUriContext) => string | null) | null;
@@ -288,6 +288,5 @@ export interface ParsedUri {
 declare module "@codemirror/lsp-client" {
 	interface LSPClient {
 		__acodeLoggedInfo?: boolean;
-		serverInfo?: { name?: string; version?: string };
 	}
 }

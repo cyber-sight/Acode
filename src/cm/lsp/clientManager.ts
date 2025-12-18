@@ -99,25 +99,8 @@ interface InitContext {
 	originalRootUri: string | null;
 }
 
-interface LSPPluginInstance {
-	fromPosition: (
-		pos: { line: number; character: number },
-		doc: unknown,
-	) => number;
-	syncedDoc: { length: number };
-	unsyncedChanges: {
-		mapPos: (pos: number, assoc?: number, mode?: MapMode) => number | null;
-		empty: boolean;
-	};
-	client: LSPClient & {
-		sync: () => void;
-	};
-	clear: () => void;
-}
-
 interface ExtendedLSPClient extends LSPClient {
 	__acodeLoggedInfo?: boolean;
-	serverInfo?: { name?: string; version?: string };
 }
 
 export class LspClientManager {
@@ -227,7 +210,7 @@ export class LspClientManager {
 				const capabilities = state.client.serverCapabilities;
 				if (!capabilities?.documentFormattingProvider) continue;
 				state.attach(uri, view);
-				const plugin = LSPPlugin.get(view) as LSPPluginInstance | null;
+				const plugin = LSPPlugin.get(view);
 				if (!plugin) continue;
 				plugin.client.sync();
 				const edits = await state.client.request<
@@ -518,10 +501,6 @@ export class LspClientManager {
 			client.connect(transportHandle.transport);
 			await client.initializing;
 			if (!client.__acodeLoggedInfo) {
-				const info = client.serverInfo;
-				if (info) {
-					console.info(`[LSP:${server.id}] server info`, info);
-				}
 				if (normalizedRootUri) {
 					if (originalRootUri && originalRootUri !== normalizedRootUri) {
 						console.info(
@@ -664,7 +643,7 @@ interface Change {
 }
 
 function applyTextEdits(
-	plugin: LSPPluginInstance,
+	plugin: LSPPlugin,
 	view: EditorView,
 	edits: TextEdit[],
 ): boolean {

@@ -1,6 +1,6 @@
 import type {
+	AcodeClientConfig,
 	BridgeConfig,
-	ClientConfig,
 	LanguageResolverContext,
 	LauncherConfig,
 	LspServerDefinition,
@@ -109,7 +109,7 @@ interface RawServerDefinition {
 	languages?: string[];
 	transport?: RawTransportDescriptor | TransportDescriptor;
 	initializationOptions?: Record<string, unknown>;
-	clientConfig?: Record<string, unknown> | ClientConfig;
+	clientConfig?: Record<string, unknown> | AcodeClientConfig;
 	startupTimeout?: number;
 	capabilityOverrides?: Record<string, unknown>;
 	rootUri?:
