@@ -1,3 +1,4 @@
+import lspStatusBar from "components/lspStatusBar";
 import toast from "components/toast";
 import confirm from "dialogs/confirm";
 import loader from "dialogs/loader";
@@ -311,19 +312,26 @@ export async function ensureServerRunning(
 			await waitForWebSocket(server.transport.url);
 		}
 		if (!announcedServers.has(key)) {
-			toast(
-				strings?.lsp_connected?.replace("{{label}}", server.label) ??
-					`${server.label} connected`,
-			);
+			lspStatusBar.show({
+				message: `${server.label} connected`,
+				title: server.label || server.id,
+				type: "success",
+				icon: "check",
+				duration: 1500,
+			});
 			announcedServers.add(key);
 		}
 		return uuid;
 	} catch (error) {
 		console.error(`Failed to start language server ${server.id}`, error);
 		const errorMessage = error instanceof Error ? error.message : String(error);
-		toast(
-			`${server.label} failed to connect${errorMessage ? `: ${errorMessage}` : ""}`,
-		);
+		lspStatusBar.show({
+			message: errorMessage || "Connection failed",
+			title: `${server.label} failed`,
+			type: "error",
+			icon: "error",
+			duration: false,
+		});
 		const entry = managedServers.get(key);
 		if (entry) {
 			getExecutor()
