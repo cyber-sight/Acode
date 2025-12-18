@@ -8,6 +8,13 @@ import type {
 } from "@codemirror/lsp-client";
 import type { ChangeSet, Extension, Text } from "@codemirror/state";
 import type { EditorView } from "@codemirror/view";
+import type {
+	Diagnostic as LSPDiagnostic,
+	FormattingOptions as LSPFormattingOptions,
+	Position,
+	Range,
+	TextEdit,
+} from "vscode-languageserver-types";
 
 export type {
 	LSPClient,
@@ -16,6 +23,11 @@ export type {
 	Transport,
 	Workspace,
 	WorkspaceFile,
+	TextEdit,
+	LSPFormattingOptions,
+	LSPDiagnostic,
+	Range,
+	Position,
 };
 
 export interface WorkspaceFileUpdate {
@@ -243,10 +255,7 @@ export interface PublishDiagnosticsParams {
 }
 
 export interface RawDiagnostic {
-	range: {
-		start: { line: number; character: number };
-		end: { line: number; character: number };
-	};
+	range: Range;
 	severity?: number;
 	code?: number | string;
 	source?: string;
@@ -264,15 +273,6 @@ export interface AcodeApi {
 		formatter: () => Promise<boolean>,
 		label: string,
 	) => void;
-}
-
-// LSP Text Edit
-export interface TextEdit {
-	range: {
-		start: { line: number; character: number };
-		end: { line: number; character: number };
-	};
-	newText: string;
 }
 
 /**
