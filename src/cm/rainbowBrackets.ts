@@ -1,239 +1,176 @@
-import type { Text } from "@codemirror/state";
-import { RangeSetBuilder } from "@codemirror/state";
+import { syntaxTree } from "@codemirror/language";
 import type { DecorationSet, ViewUpdate } from "@codemirror/view";
 import { Decoration, EditorView, ViewPlugin } from "@codemirror/view";
+import type { SyntaxNode } from "@lezer/common";
 
-export const defaultRainbowColors: string[] = [
-	"red",
-	"orange",
-	"yellow",
-	"green",
-	"blue",
-	"indigo",
-	"violet",
-];
+const COLORS = ["gold", "orchid", "lightblue"];
 
-interface ThemeRules {
-	[selector: string]: { color: string };
-}
+// Token types that should be skipped (brackets inside these are not colored)
+const SKIP_CONTEXTS = new Set([
+	"String",
+	"TemplateString",
+	"Comment",
+	"LineComment",
+	"BlockComment",
+	"RegExp",
+]);
 
-interface DepthCache {
-	balances: Int32Array;
-	prefixDepth: Int32Array;
-	version: number;
-}
-
-interface RainbowBracketsOptions {
-	colors?: string[];
-	useLight?: boolean;
-}
-
-interface ViewportRange {
+interface BracketInfo {
 	from: number;
 	to: number;
+	depth: number;
+	char: string;
 }
 
-/**
- * Build a base theme for N colors.
- */
-function rainbowTheme(colors: string[]) {
-	const rules: ThemeRules = {};
-	// Depth k (1..N) maps to class .cm-rb-dk
-	for (let i = 0; i < colors.length; i++) {
-		const depth = i + 1;
-		rules[`.cm-rb-d${depth}`] = { color: colors[i] };
-	}
-	return EditorView.baseTheme(rules);
-}
-
-function lineBalance(text: string): number {
-	let bal = 0;
-	for (let i = 0, n = text.length; i < n; i++) {
-		const ch = text.charCodeAt(i);
-		// Quick switch on a few ASCII codes
-		// '(', ')', '[', ']', '{', '}'
-		if (ch === 40 || ch === 91 || ch === 123) bal++;
-		else if (ch === 41 || ch === 93 || ch === 125) bal--;
-	}
-	return bal;
-}
-
-function computeDepthCache(doc: Text): DepthCache {
-	const lineCount = doc.lines;
-	const balances = new Int32Array(lineCount);
-	const prefixDepth = new Int32Array(lineCount + 1); // prefixDepth[1] for line 1
-	// Iterate once through all lines
-	for (let ln = 1; ln <= lineCount; ln++) {
-		const t = doc.line(ln).text;
-		const bal = lineBalance(t);
-		balances[ln - 1] = bal;
-		prefixDepth[ln] = prefixDepth[ln - 1] + bal;
-	}
-	return { balances, prefixDepth, version: doc.length }; // track length as a cheap change marker
-}
-
-function firstChangedLine(update: ViewUpdate): number {
-	let min = Number.POSITIVE_INFINITY;
-	update.changes.iterChanges(
-		(fromA: number, _toA: number, fromB: number, _toB: number) => {
-			const ln = update.state.doc.lineAt(fromB).number;
-			if (ln < min) min = ln;
-		},
-	);
-	if (min === Number.POSITIVE_INFINITY) return 1;
-	return Math.max(1, min);
-}
-
-function recomputeDepthCache(
-	prevCache: DepthCache | null,
-	prevDoc: Text | null,
-	newDoc: Text,
-	startLine = 1,
-): DepthCache {
-	const lineCount = newDoc.lines;
-	const balances = new Int32Array(lineCount);
-	const prefixDepth = new Int32Array(lineCount + 1);
-
-	// Copy prefix for unchanged prefix lines
-	const copyEnd = Math.max(1, Math.min(startLine - 1, lineCount));
-	if (prevCache && prevDoc) {
-		for (let ln = 1; ln <= copyEnd; ln++) {
-			balances[ln - 1] = prevCache.balances[ln - 1] || 0;
-			prefixDepth[ln] = prevCache.prefixDepth[ln] || 0;
-		}
-	}
-
-	// If nothing to copy, ensure prefixDepth[0] = 0
-	if (copyEnd === 0) prefixDepth[0] = 0;
-
-	// Start depth for startLine
-	const startDepth = prefixDepth[startLine - 1] || 0;
-	prefixDepth[startLine - 1] = startDepth; // make sure defined
-
-	for (let ln = startLine; ln <= lineCount; ln++) {
-		const t = newDoc.line(ln).text;
-		const bal = lineBalance(t);
-		balances[ln - 1] = bal;
-		prefixDepth[ln] = prefixDepth[ln - 1] + bal;
-	}
-
-	return { balances, prefixDepth, version: newDoc.length };
-}
-
-function buildDecorationBank(maxDepth: number): Decoration[] {
-	const arr: Decoration[] = new Array(maxDepth);
-	for (let i = 0; i < maxDepth; i++) {
-		const cls = `cm-rb-d${i + 1}`;
-		arr[i] = Decoration.mark({ class: cls });
-	}
-	return arr;
-}
-
-/**
- * The main extension factory.
- */
-export function rainbowBrackets(options: RainbowBracketsOptions = {}) {
-	const palette = options.colors || defaultRainbowColors;
-	const theme = rainbowTheme(palette);
-	const bank = buildDecorationBank(palette.length);
-
-	class RainbowPlugin {
-		view: EditorView;
-		cache: DepthCache;
+const rainbowBracketsPlugin = ViewPlugin.fromClass(
+	class {
 		decorations: DecorationSet;
 
 		constructor(view: EditorView) {
-			this.view = view;
-			this.cache = computeDepthCache(view.state.doc);
-			this.decorations = this.compute();
+			this.decorations = this.buildDecorations(view);
 		}
 
-		update(update: ViewUpdate): void {
-			if (update.docChanged) {
-				const startLn = firstChangedLine(update);
-				this.cache = recomputeDepthCache(
-					this.cache,
-					update.startState.doc,
-					update.state.doc,
-					startLn,
-				);
-			}
+		update(update: ViewUpdate) {
 			if (update.docChanged || update.viewportChanged) {
-				this.decorations = this.compute();
+				this.decorations = this.buildDecorations(update.view);
 			}
 		}
 
-		compute(): DecorationSet {
-			const { view } = this;
-			const { cache } = this;
-			const builder = new RangeSetBuilder<Decoration>();
-			const colorCount = palette.length;
-			if (!colorCount) return builder.finish();
+		buildDecorations(view: EditorView): DecorationSet {
+			const decorations: { from: number; to: number; color: string }[] = [];
+			const tree = syntaxTree(view.state);
 
-			const margin = 200;
-			const windows: ViewportRange[] = [];
+			// Process only visible ranges for performance
 			for (const { from, to } of view.visibleRanges) {
-				const start = Math.max(0, from - margin);
-				const end = Math.min(view.state.doc.length, to + margin);
-				if (start < end) windows.push({ from: start, to: end });
-			}
-			windows.sort((a, b) => a.from - b.from || a.to - b.to);
-			const merged: ViewportRange[] = [];
-			for (const w of windows) {
-				if (!merged.length || w.from > merged[merged.length - 1].to) {
-					merged.push({ ...w });
-				} else {
-					merged[merged.length - 1].to = Math.max(
-						merged[merged.length - 1].to,
-						w.to,
-					);
-				}
+				this.processRange(view, tree, from, to, decorations);
 			}
 
-			for (const { from: winStart, to: winEnd } of merged) {
-				// Start scanning exactly at window start to keep builder.add calls sorted
-				const startLine = view.state.doc.lineAt(winStart);
-				let depth = cache.prefixDepth[startLine.number - 1];
-				// Adjust depth if starting mid-line
-				const startOffset = winStart - startLine.from;
-				if (startOffset > 0) {
-					depth += lineBalance(startLine.text.slice(0, startOffset));
-				}
+			// Sort by position (required for Decoration.set)
+			decorations.sort((a, b) => a.from - b.from);
 
-				let pos = winStart;
-				while (pos < winEnd) {
-					const line = view.state.doc.lineAt(pos);
-					const text = line.text;
-					const lineStart = line.from;
-					const upto = Math.min(line.to, winEnd);
-					const iStart = Math.max(0, pos - lineStart);
-					for (let i = iStart, n = upto - lineStart; i < n; i++) {
-						const ch = text.charCodeAt(i);
-						if (ch === 40 || ch === 91 || ch === 123) {
-							const clsIndex = ((depth % colorCount) + colorCount) % colorCount;
-							builder.add(lineStart + i, lineStart + i + 1, bank[clsIndex]);
-							depth++;
-						} else if (ch === 41 || ch === 93 || ch === 125) {
-							depth = Math.max(depth - 1, 0);
-							const clsIndex = ((depth % colorCount) + colorCount) % colorCount;
-							builder.add(lineStart + i, lineStart + i + 1, bank[clsIndex]);
+			// Build decoration marks
+			const marks = decorations.map((d) =>
+				Decoration.mark({ class: `cm-bracket-${d.color}` }).range(d.from, d.to),
+			);
+
+			return Decoration.set(marks);
+		}
+
+		processRange(
+			view: EditorView,
+			tree: ReturnType<typeof syntaxTree>,
+			from: number,
+			to: number,
+			decorations: { from: number; to: number; color: string }[],
+		): void {
+			const { doc } = view.state;
+			const openBrackets: BracketInfo[] = [];
+
+			// Iterate through the document in the visible range
+			for (let pos = from; pos < to; pos++) {
+				const char = doc.sliceString(pos, pos + 1);
+
+				// Check if this is a bracket character
+				if (!this.isBracketChar(char)) continue;
+
+				// Use syntax tree to check if this bracket should be colored
+				if (this.isInSkipContext(tree, pos)) continue;
+
+				if (char === "(" || char === "[" || char === "{") {
+					// Opening bracket - push to stack with current depth
+					openBrackets.push({
+						from: pos,
+						to: pos + 1,
+						depth: openBrackets.length,
+						char,
+					});
+				} else if (char === ")" || char === "]" || char === "}") {
+					// Closing bracket - find matching open bracket
+					const matchingOpen = this.getMatchingOpenBracket(char);
+					let matchFound = false;
+
+					// Search backwards for matching open bracket
+					for (let i = openBrackets.length - 1; i >= 0; i--) {
+						if (openBrackets[i].char === matchingOpen) {
+							const open = openBrackets[i];
+							const depth = open.depth;
+							const color = COLORS[depth % COLORS.length];
+
+							// Add decorations for both brackets
+							decorations.push(
+								{ from: open.from, to: open.to, color },
+								{ from: pos, to: pos + 1, color },
+							);
+
+							// Remove matched bracket and all unmatched brackets after it
+							openBrackets.splice(i);
+							matchFound = true;
+							break;
 						}
 					}
-					const nextLineNo = line.number + 1;
-					if (nextLineNo <= view.state.doc.lines)
-						depth = cache.prefixDepth[nextLineNo - 1];
-					pos = line.to + 1;
+
+					// If no match found, this is an unmatched closing bracket
+					if (!matchFound) {
+						// Unmatched closing bracket
+					}
 				}
 			}
-			return builder.finish();
 		}
-	}
 
-	const vp = ViewPlugin.fromClass(RainbowPlugin, {
+		isBracketChar(char: string): boolean {
+			return (
+				char === "(" ||
+				char === ")" ||
+				char === "[" ||
+				char === "]" ||
+				char === "{" ||
+				char === "}"
+			);
+		}
+
+		isInSkipContext(tree: ReturnType<typeof syntaxTree>, pos: number): boolean {
+			let node: SyntaxNode | null = tree.resolveInner(pos, 1);
+
+			// Walk up the tree to check if we're inside a skip context
+			while (node) {
+				if (SKIP_CONTEXTS.has(node.name)) {
+					return true;
+				}
+				node = node.parent;
+			}
+
+			return false;
+		}
+
+		getMatchingOpenBracket(closing: string): string | null {
+			switch (closing) {
+				case ")":
+					return "(";
+				case "]":
+					return "[";
+				case "}":
+					return "{";
+				default:
+					return null;
+			}
+		}
+	},
+	{
 		decorations: (v) => v.decorations,
-	});
+	},
+);
 
-	return [vp, theme];
+const theme = EditorView.baseTheme({
+	".cm-bracket-gold": { color: "#FFD700 !important" },
+	".cm-bracket-gold > span": { color: "#FFD700 !important" },
+	".cm-bracket-orchid": { color: "#DA70D6 !important" },
+	".cm-bracket-orchid > span": { color: "#DA70D6 !important" },
+	".cm-bracket-lightblue": { color: "#179FFF !important" },
+	".cm-bracket-lightblue > span": { color: "#179FFF !important" },
+});
+
+export function rainbowBrackets() {
+	return [rainbowBracketsPlugin, theme];
 }
 
 export default rainbowBrackets;

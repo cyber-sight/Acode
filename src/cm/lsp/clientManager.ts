@@ -478,10 +478,7 @@ export class LspClientManager {
 				);
 				return true;
 			},
-			"$/typescriptVersion": (
-				_client: LSPClient,
-				params: unknown,
-			): boolean => {
+			"$/typescriptVersion": (_client: LSPClient, params: unknown): boolean => {
 				interface TypeScriptVersionParams {
 					version?: string;
 					source?: string;
