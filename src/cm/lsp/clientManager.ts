@@ -478,7 +478,55 @@ export class LspClientManager {
 				);
 				return true;
 			},
+			"$/typescriptVersion": (
+				_client: LSPClient,
+				params: unknown,
+			): boolean => {
+				interface TypeScriptVersionParams {
+					version?: string;
+					source?: string;
+				}
+				const versionParams = params as TypeScriptVersionParams;
+				if (!versionParams?.version) return false;
+
+				const serverLabel = server.label || server.id;
+				const source = versionParams.source || "bundled";
+				console.info(
+					`[LSP:${server.id}] TypeScript ${versionParams.version} (${source})`,
+				);
+
+				// Show briefly in status bar
+				lspStatusBar.show({
+					message: `TypeScript ${versionParams.version}`,
+					title: serverLabel,
+					type: "info",
+					icon: "code",
+					duration: 3000,
+				});
+				return true;
+			},
 		};
+
+		// Log unhandled notifications to help debug what servers are sending
+		const unhandledNotificationKey =
+			"unhandledNotification" as keyof typeof clientConfig;
+		if (!(unhandledNotificationKey in clientConfig)) {
+			(
+				clientConfig as Record<
+					string,
+					(client: LSPClient, method: string, params: unknown) => void
+				>
+			).unhandledNotification = (
+				_client: LSPClient,
+				method: string,
+				params: unknown,
+			) => {
+				console.info(
+					`[LSP:${server.id}] Unhandled notification: ${method}`,
+					params,
+				);
+			};
+		}
 
 		if (!clientConfig.workspace) {
 			clientConfig.workspace = (client: LSPClient) =>
