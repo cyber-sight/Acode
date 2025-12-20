@@ -295,22 +295,15 @@ const styles = EditorView.baseTheme({
 		padding: "0 3px",
 		margin: "0 2px",
 		verticalAlign: "baseline",
-		cursor: "default",
-		userSelect: "none",
+		pointerEvents: "none",
 	},
 	"&light .cm-inlay-hint": {
 		color: "#6a737d",
 		backgroundColor: "rgba(27, 31, 35, 0.05)",
 	},
-	"&light .cm-inlay-hint:hover": {
-		backgroundColor: "rgba(27, 31, 35, 0.1)",
-	},
 	"&dark .cm-inlay-hint": {
 		color: "#6a9955",
 		backgroundColor: "rgba(255, 255, 255, 0.05)",
-	},
-	"&dark .cm-inlay-hint:hover": {
-		backgroundColor: "rgba(255, 255, 255, 0.1)",
 	},
 	".cm-inlay-hint-pl": { marginLeft: "4px" },
 	".cm-inlay-hint-pr": { marginRight: "4px" },
