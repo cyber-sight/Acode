@@ -108,6 +108,7 @@ export interface BuiltinExtensionsConfig {
 	signature?: boolean;
 	keymaps?: boolean;
 	diagnostics?: boolean;
+	inlayHints?: boolean;
 }
 
 export interface AcodeClientConfig {

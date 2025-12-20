@@ -17,6 +17,7 @@ import { EditorView, keymap } from "@codemirror/view";
 import lspStatusBar from "components/lspStatusBar";
 import NotificationManager from "lib/notificationManager";
 import Uri from "utils/Uri";
+import { inlayHintsExtension } from "./inlayHints";
 import { ensureServerRunning } from "./serverLauncher";
 import serverRegistry from "./serverRegistry";
 import { createTransport } from "./transport";
@@ -72,6 +73,7 @@ function buildBuiltinExtensions(
 		signature: includeSignature = true,
 		keymaps: includeKeymaps = true,
 		diagnostics: includeDiagnostics = true,
+		inlayHints: includeInlayHints = true,
 	} = config;
 
 	const extensions: Extension[] = [];
@@ -85,6 +87,10 @@ function buildBuiltinExtensions(
 		const diagExt = serverDiagnostics();
 		diagnosticsExtension = diagExt;
 		extensions.push(diagExt as Extension);
+	}
+	if (includeInlayHints) {
+		const hintsExt = inlayHintsExtension();
+		extensions.push(hintsExt as LSPClientExtension as Extension);
 	}
 
 	return { extensions, diagnosticsExtension };
@@ -310,6 +316,7 @@ export class LspClientManager {
 						signature: builtinConfig.signature !== false,
 						keymaps: builtinConfig.keymaps !== false,
 						diagnostics: builtinConfig.diagnostics !== false,
+						inlayHints: builtinConfig.inlayHints !== false,
 					})
 				: { extensions: [], diagnosticsExtension: null };
 

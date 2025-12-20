@@ -8,6 +8,12 @@ export {
 	lspDiagnosticsUiExtension,
 } from "./diagnostics";
 export { registerLspFormatter } from "./formatter";
+export type { InlayHintsConfig } from "./inlayHints";
+export {
+	inlayHintsClientExtension,
+	inlayHintsEditorExtension,
+	inlayHintsExtension,
+} from "./inlayHints";
 export {
 	ensureServerRunning,
 	resetManagedServers,
@@ -17,6 +23,7 @@ export { default as serverRegistry } from "./serverRegistry";
 export { createTransport } from "./transport";
 
 export type {
+	BuiltinExtensionsConfig,
 	ClientManagerOptions,
 	ClientState,
 	FileMetadata,
