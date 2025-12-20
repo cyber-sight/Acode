@@ -374,6 +374,42 @@ function registerBuiltinServers(): void {
 				},
 			},
 			enabled: false,
+			initializationOptions: {
+				provideFormatter: true,
+				hostInfo: "acode",
+				tsserver: {
+					maxTsServerMemory: 4096,
+					useSeparateSyntaxServer: true,
+				},
+				preferences: {
+					includeInlayParameterNameHints: "all",
+					includeInlayParameterNameHintsWhenArgumentMatchesName: true,
+					includeInlayFunctionParameterTypeHints: true,
+					includeInlayVariableTypeHints: true,
+					includeInlayVariableTypeHintsWhenTypeMatchesName: false,
+					includeInlayPropertyDeclarationTypeHints: true,
+					includeInlayFunctionLikeReturnTypeHints: true,
+					includeInlayEnumMemberValueHints: true,
+					importModuleSpecifierPreference: "shortest",
+					importModuleSpecifierEnding: "auto",
+					includePackageJsonAutoImports: "auto",
+					provideRefactorNotApplicableReason: true,
+					allowIncompleteCompletions: true,
+					allowRenameOfImportPath: true,
+					generateReturnInDocTemplate: true,
+					organizeImportsIgnoreCase: "auto",
+					organizeImportsCollation: "ordinal",
+					organizeImportsCollationConfig: "default",
+					autoImportFileExcludePatterns: [],
+					preferTypeOnlyAutoImports: false,
+				},
+				completions: {
+					completeFunctionCalls: true,
+				},
+				diagnostics: {
+					reportStyleChecksAsWarnings: true,
+				},
+			},
 			resolveLanguageId: ({ languageId, languageName }) =>
 				resolveJsTsLanguageId(languageId, languageName),
 		},
@@ -406,6 +442,138 @@ function registerBuiltinServers(): void {
 				},
 			},
 			enabled: false,
+			initializationOptions: {
+				hostInfo: "acode",
+				typescript: {
+					enablePromptUseWorkspaceTsdk: true,
+					inlayHints: {
+						parameterNames: {
+							enabled: "all",
+							suppressWhenArgumentMatchesName: false,
+						},
+						parameterTypes: {
+							enabled: true,
+						},
+						variableTypes: {
+							enabled: true,
+							suppressWhenTypeMatchesName: false,
+						},
+						propertyDeclarationTypes: {
+							enabled: true,
+						},
+						functionLikeReturnTypes: {
+							enabled: true,
+						},
+						enumMemberValues: {
+							enabled: true,
+						},
+					},
+					suggest: {
+						completeFunctionCalls: true,
+						includeCompletionsForModuleExports: true,
+						includeCompletionsWithInsertText: true,
+						includeAutomaticOptionalChainCompletions: true,
+						includeCompletionsWithSnippetText: true,
+						includeCompletionsWithClassMemberSnippets: true,
+						includeCompletionsWithObjectLiteralMethodSnippets: true,
+						autoImports: true,
+						classMemberSnippets: {
+							enabled: true,
+						},
+						objectLiteralMethodSnippets: {
+							enabled: true,
+						},
+					},
+					preferences: {
+						importModuleSpecifier: "shortest",
+						importModuleSpecifierEnding: "auto",
+						includePackageJsonAutoImports: "auto",
+						preferTypeOnlyAutoImports: false,
+						quoteStyle: "auto",
+						jsxAttributeCompletionStyle: "auto",
+					},
+					format: {
+						enable: true,
+						insertSpaceAfterCommaDelimiter: true,
+						insertSpaceAfterSemicolonInForStatements: true,
+						insertSpaceBeforeAndAfterBinaryOperators: true,
+						insertSpaceAfterKeywordsInControlFlowStatements: true,
+						insertSpaceAfterFunctionKeywordForAnonymousFunctions: false,
+						insertSpaceAfterOpeningAndBeforeClosingNonemptyParenthesis: false,
+						insertSpaceAfterOpeningAndBeforeClosingNonemptyBrackets: false,
+						insertSpaceAfterOpeningAndBeforeClosingNonemptyBraces: true,
+						insertSpaceAfterOpeningAndBeforeClosingTemplateStringBraces: false,
+						insertSpaceAfterOpeningAndBeforeClosingJsxExpressionBraces: false,
+						placeOpenBraceOnNewLineForFunctions: false,
+						placeOpenBraceOnNewLineForControlBlocks: false,
+						semicolons: "ignore",
+					},
+					updateImportsOnFileMove: {
+						enabled: "always",
+					},
+					codeActionsOnSave: {
+						organizeImports: false,
+						addMissingImports: false,
+					},
+					workspaceSymbols: {
+						scope: "allOpenProjects",
+					},
+				},
+				javascript: {
+					inlayHints: {
+						parameterNames: {
+							enabled: "all",
+							suppressWhenArgumentMatchesName: false,
+						},
+						parameterTypes: {
+							enabled: true,
+						},
+						variableTypes: {
+							enabled: true,
+							suppressWhenTypeMatchesName: false,
+						},
+						propertyDeclarationTypes: {
+							enabled: true,
+						},
+						functionLikeReturnTypes: {
+							enabled: true,
+						},
+						enumMemberValues: {
+							enabled: true,
+						},
+					},
+					suggest: {
+						completeFunctionCalls: true,
+						includeCompletionsForModuleExports: true,
+						autoImports: true,
+						classMemberSnippets: {
+							enabled: true,
+						},
+					},
+					preferences: {
+						importModuleSpecifier: "shortest",
+						quoteStyle: "auto",
+					},
+					format: {
+						enable: true,
+					},
+					updateImportsOnFileMove: {
+						enabled: "always",
+					},
+				},
+				tsserver: {
+					maxTsServerMemory: 8092,
+				},
+				vtsls: {
+					experimental: {
+						completion: {
+							enableServerSideFuzzyMatch: true,
+							entriesLimit: 5000,
+						},
+					},
+					autoUseWorkspaceTsdk: true,
+				},
+			},
 			resolveLanguageId: ({ languageId, languageName }) =>
 				resolveJsTsLanguageId(languageId, languageName),
 		},
@@ -447,6 +615,12 @@ function registerBuiltinServers(): void {
 				"typescriptreact",
 				"tsx",
 				"jsx",
+				"vue",
+				"svelte",
+				"html",
+				"markdown",
+				"json",
+				"jsonc",
 			],
 			transport: {
 				kind: "websocket",
@@ -466,12 +640,49 @@ function registerBuiltinServers(): void {
 				},
 			},
 			enabled: false,
+			initializationOptions: {
+				validate: "on",
+				rulesCustomizations: [],
+				run: "onType",
+				nodePath: null,
+				workingDirectory: {
+					mode: "auto",
+				},
+				problems: {
+					shortenToSingleLine: false,
+				},
+				codeActionOnSave: {
+					enable: true,
+					rules: [],
+					mode: "all",
+				},
+				codeAction: {
+					disableRuleComment: {
+						enable: true,
+						location: "separateLine",
+						commentStyle: "line",
+					},
+					showDocumentation: {
+						enable: true,
+					},
+				},
+				experimental: {
+					useFlatConfig: false,
+				},
+				format: {
+					enable: true,
+				},
+				quiet: false,
+				onIgnoredFiles: "off",
+				useESLintClass: false,
+			},
 			clientConfig: {
 				builtinExtensions: {
 					hover: false,
 					completion: false,
 					signature: false,
 					keymaps: false,
+					diagnostics: true,
 				},
 			},
 			resolveLanguageId: ({ languageId, languageName }) =>
@@ -566,6 +777,255 @@ function registerBuiltinServers(): void {
 				},
 			},
 			enabled: false,
+		},
+		{
+			id: "gopls",
+			label: "Go (gopls)",
+			languages: ["go", "go.mod", "go.sum", "gotmpl"],
+			transport: {
+				kind: "websocket",
+				url: "ws://127.0.0.1:2097",
+			},
+			launcher: {
+				bridge: {
+					kind: "axs",
+					port: 2097,
+					command: "gopls",
+					args: ["serve"],
+				},
+				checkCommand: "which gopls",
+				install: {
+					command: "apk add --no-cache go gopls",
+				},
+			},
+			initializationOptions: {
+				usePlaceholders: false,
+				completeUnimported: true,
+				deepCompletion: true,
+				completionBudget: "100ms",
+				matcher: "Fuzzy",
+				staticcheck: true,
+				gofumpt: true,
+				hints: {
+					assignVariableTypes: true,
+					compositeLiteralFields: true,
+					compositeLiteralTypes: true,
+					constantValues: true,
+					functionTypeParameters: true,
+					parameterNames: true,
+					rangeVariableTypes: true,
+				},
+				diagnosticsDelay: "250ms",
+				diagnosticsTrigger: "Edit",
+				annotations: {
+					bounds: true,
+					escape: true,
+					inline: true,
+					nil: true,
+				},
+				semanticTokens: true,
+				analyses: {
+					nilness: true,
+					unusedparams: true,
+					unusedvariable: true,
+					unusedwrite: true,
+					shadow: true,
+					fieldalignment: false,
+					stringintconv: true,
+				},
+				importShortcut: "Both",
+				symbolMatcher: "FastFuzzy",
+				symbolStyle: "Dynamic",
+				symbolScope: "all",
+				local: "",
+				linksInHover: true,
+				hoverKind: "FullDocumentation",
+				verboseOutput: false,
+			},
+			enabled: true,
+		},
+		{
+			id: "rust-analyzer",
+			label: "Rust (rust-analyzer)",
+			languages: ["rust"],
+			transport: {
+				kind: "websocket",
+				url: "ws://127.0.0.1:2098",
+			},
+			launcher: {
+				bridge: {
+					kind: "axs",
+					port: 2098,
+					command: "rust-analyzer",
+				},
+				checkCommand: "which rust-analyzer",
+				install: {
+					command: "apk add --no-cache rust cargo rust-analyzer",
+				},
+			},
+			initializationOptions: {
+				cargo: {
+					allFeatures: true,
+					buildScripts: {
+						enable: true,
+					},
+					loadOutDirsFromCheck: true,
+				},
+				procMacro: {
+					enable: true,
+					attributes: {
+						enable: true,
+					},
+				},
+				checkOnSave: {
+					enable: true,
+					command: "clippy",
+					extraArgs: ["--no-deps"],
+				},
+				diagnostics: {
+					enable: true,
+					experimental: {
+						enable: true,
+					},
+				},
+				inlayHints: {
+					bindingModeHints: {
+						enable: false,
+					},
+					chainingHints: {
+						enable: true,
+					},
+					closingBraceHints: {
+						enable: true,
+						minLines: 25,
+					},
+					closureReturnTypeHints: {
+						enable: "with_block",
+					},
+					lifetimeElisionHints: {
+						enable: "skip_trivial",
+						useParameterNames: true,
+					},
+					maxLength: 25,
+					parameterHints: {
+						enable: true,
+					},
+					reborrowHints: {
+						enable: "mutable",
+					},
+					typeHints: {
+						enable: true,
+						hideClosureInitialization: false,
+						hideNamedConstructor: false,
+					},
+				},
+				lens: {
+					enable: true,
+					debug: {
+						enable: true,
+					},
+					implementations: {
+						enable: true,
+					},
+					references: {
+						adt: { enable: false },
+						enumVariant: { enable: false },
+						method: { enable: false },
+						trait: { enable: false },
+					},
+					run: {
+						enable: true,
+					},
+				},
+				completion: {
+					autoimport: {
+						enable: true,
+					},
+					autoself: {
+						enable: true,
+					},
+					callable: {
+						snippets: "fill_arguments",
+					},
+					postfix: {
+						enable: true,
+					},
+					privateEditable: {
+						enable: false,
+					},
+				},
+				semanticHighlighting: {
+					doc: {
+						comment: {
+							inject: {
+								enable: true,
+							},
+						},
+					},
+					operator: {
+						enable: true,
+						specialization: {
+							enable: true,
+						},
+					},
+					punctuation: {
+						enable: false,
+						separate: {
+							macro: {
+								bang: true,
+							},
+						},
+						specialization: {
+							enable: true,
+						},
+					},
+					strings: {
+						enable: true,
+					},
+				},
+				hover: {
+					actions: {
+						debug: {
+							enable: true,
+						},
+						enable: true,
+						gotoTypeDef: {
+							enable: true,
+						},
+						implementations: {
+							enable: true,
+						},
+						references: {
+							enable: true,
+						},
+						run: {
+							enable: true,
+						},
+					},
+					documentation: {
+						enable: true,
+					},
+					links: {
+						enable: true,
+					},
+				},
+				workspace: {
+					symbol: {
+						search: {
+							kind: "all_symbols",
+							scope: "workspace",
+						},
+					},
+				},
+				rustfmt: {
+					extraArgs: [],
+					overrideCommand: null,
+					rangeFormatting: {
+						enable: false,
+					},
+				},
+			},
+			enabled: true,
 		},
 	];
 
