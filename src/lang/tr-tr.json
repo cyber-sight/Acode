@@ -487,5 +487,7 @@
 	"backup invalid keybindings": "Invalid keyBindings format",
 	"backup invalid plugins": "Invalid installedPlugins format",
 	"issues found": "Issues found",
-	"error details": "Error details"
+	"error details": "Error details",
+	"active tools": "Active tools",
+	"available tools": "Available tools"
 }
