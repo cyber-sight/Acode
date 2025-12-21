@@ -97,7 +97,7 @@ export default function mainSettings() {
 		{
 			key: "lsp-settings",
 			text: strings?.lsp_settings || "Language servers",
-			icon: "psychology",
+			icon: "licons zap",
 			index: 7,
 		},
 		{
