@@ -487,5 +487,7 @@
 	"backup invalid keybindings": "Neplatný formát klávesových zkratek",
 	"backup invalid plugins": "Neplatný formát instalovaných pluginů",
 	"issues found": "Nalezené problémy",
-	"error details": "Podrobnosti o chybě"
+	"error details": "Podrobnosti o chybě",
+	"active tools": "Active tools",
+	"available tools": "Available tools"
 }

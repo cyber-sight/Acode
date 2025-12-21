@@ -487,5 +487,7 @@
 	"backup invalid keybindings": "Érvénytelen a billentyűparancsok formátuma",
 	"backup invalid plugins": "Érvénytelen a telepített bővítmények formátuma",
 	"issues found": "Problémák találhatók",
-	"error details": "Hiba részletei"
+	"error details": "Hiba részletei",
+	"active tools": "Active tools",
+	"available tools": "Available tools"
 }
