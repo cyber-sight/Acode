@@ -188,6 +188,8 @@ export interface ClientManagerOptions {
 	clientExtensions?: Extension | Extension[];
 	resolveRoot?: (context: RootUriContext) => Promise<string | null>;
 	displayFile?: (uri: string) => Promise<EditorView | null>;
+	openFile?: (uri: string) => Promise<EditorView | null>;
+	resolveLanguageId?: (uri: string) => string | null;
 	onClientIdle?: (info: ClientIdleInfo) => void;
 }
 
@@ -236,6 +238,8 @@ export interface WaitOptions {
 
 export interface WorkspaceOptions {
 	displayFile?: (uri: string) => Promise<EditorView | null>;
+	openFile?: (uri: string) => Promise<EditorView | null>;
+	resolveLanguageId?: (uri: string) => string | null;
 }
 
 // ============================================================================

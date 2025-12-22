@@ -1155,22 +1155,53 @@ async function EditorManager($header, $body) {
 		},
 		displayFile: async (targetUri) => {
 			if (!targetUri) return null;
-			const existing = manager.getFile(targetUri, "uri");
+			// Decode URI components (e.g., %40 -> @) since LSP returns encoded URIs
+			const decodedUri = decodeURIComponent(targetUri);
+			const existing = manager.getFile(decodedUri, "uri");
 			if (existing?.type === "editor") {
 				existing.makeActive();
 				return editor;
 			}
 			try {
-				await openFile(targetUri, { render: true });
-				const opened = manager.getFile(targetUri, "uri");
+				await openFile(decodedUri, { render: true });
+				const opened = manager.getFile(decodedUri, "uri");
 				if (opened?.type === "editor") {
 					opened.makeActive();
 					return editor;
 				}
 			} catch (error) {
-				console.error("Failed to open file for LSP navigation", error);
+				console.error("[LSP] Failed to open file", decodedUri, error);
 			}
 			return null;
+		},
+		openFile: async (targetUri) => {
+			if (!targetUri) return null;
+			// Decode URI components (e.g., %40 -> @)
+			const decodedUri = decodeURIComponent(targetUri);
+			const existing = manager.getFile(decodedUri, "uri");
+			if (existing?.type === "editor") {
+				existing.makeActive();
+				return editor;
+			}
+			try {
+				await openFile(decodedUri, { render: true });
+				const opened = manager.getFile(decodedUri, "uri");
+				if (opened?.type === "editor") {
+					opened.makeActive();
+					return editor;
+				}
+			} catch (error) {
+				console.error("[LSP] Failed to open file", decodedUri, error);
+			}
+			return null;
+		},
+		resolveLanguageId: (uri) => {
+			if (!uri) return "plaintext";
+			try {
+				const mode = getModeForPath(uri);
+				if (mode?.name) return String(mode.name).toLowerCase();
+			} catch (_) {}
+			return "plaintext";
 		},
 		clientExtensions: [diagnosticsClientExt],
 		diagnosticsUiExtension: buildDiagnosticsUiExt(),

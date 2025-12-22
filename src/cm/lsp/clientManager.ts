@@ -303,6 +303,8 @@ export class LspClientManager {
 
 		const workspaceOptions = {
 			displayFile: this.options.displayFile,
+			openFile: this.options.openFile,
+			resolveLanguageId: this.options.resolveLanguageId,
 		};
 
 		const clientConfig = { ...(server.clientConfig ?? {}) };
@@ -789,10 +791,8 @@ const defaultManager = new LspClientManager();
 
 export default defaultManager;
 
-const FILE_SCHEME_REQUIRED_SERVERS = new Set(["typescript"]);
-
 function normalizeRootUriForServer(
-	server: LspServerDefinition,
+	_server: LspServerDefinition,
 	rootUri: string | null,
 ): NormalizedRootUri {
 	if (!rootUri || typeof rootUri !== "string") {
@@ -800,20 +800,23 @@ function normalizeRootUriForServer(
 	}
 	const schemeMatch = /^([a-zA-Z][\w+\-.]*):/.exec(rootUri);
 	const scheme = schemeMatch ? schemeMatch[1].toLowerCase() : null;
+
+	// Already a file:// URI - use as-is
 	if (scheme === "file") {
 		return { normalizedRootUri: rootUri, originalRootUri: rootUri };
 	}
 
+	// Try to convert content:// URIs to file:// URIs
 	if (scheme === "content") {
 		const fileUri = contentUriToFileUri(rootUri);
 		if (fileUri) {
 			return { normalizedRootUri: fileUri, originalRootUri: rootUri };
 		}
-		if (FILE_SCHEME_REQUIRED_SERVERS.has(server.id)) {
-			return { normalizedRootUri: null, originalRootUri: rootUri };
-		}
+		// Can't convert to file:// - server won't work properly
+		return { normalizedRootUri: null, originalRootUri: rootUri };
 	}
 
+	// Unknown scheme - try to use as-is
 	return { normalizedRootUri: rootUri, originalRootUri: rootUri };
 }
 
@@ -839,6 +842,7 @@ function contentUriToFileUri(uri: string): string | null {
 
 		switch (providerId) {
 			case "foxdebug.acode":
+			case "foxdebug.acodefree":
 				normalized = normalized.replace(/:+$/, "");
 				if (!normalized) return null;
 				if (normalized.startsWith("raw:/")) {

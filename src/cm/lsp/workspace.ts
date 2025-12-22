@@ -1,7 +1,8 @@
 import type { WorkspaceFile } from "@codemirror/lsp-client";
 import { LSPPlugin, Workspace } from "@codemirror/lsp-client";
-import type { Text } from "@codemirror/state";
+import type { Text, TransactionSpec } from "@codemirror/state";
 import type { EditorView } from "@codemirror/view";
+import { getModeForPath } from "cm/modelist";
 import type { WorkspaceFileUpdate, WorkspaceOptions } from "./types";
 
 class AcodeWorkspaceFile implements WorkspaceFile {
@@ -96,6 +97,30 @@ export default class AcodeWorkspace extends Workspace {
 		return next;
 	}
 
+	#resolveLanguageIdForUri(uri: string): string {
+		if (typeof this.options.resolveLanguageId === "function") {
+			const resolved = this.options.resolveLanguageId(uri);
+			if (resolved) return resolved;
+		}
+		try {
+			const mode = getModeForPath(uri);
+			if (mode?.name) {
+				return String(mode.name).toLowerCase();
+			}
+		} catch (_) {}
+		return "plaintext";
+	}
+
+	#getOpenFileCallback(): ((uri: string) => Promise<EditorView | null>) | null {
+		if (typeof this.options.openFile === "function") {
+			return this.options.openFile;
+		}
+		if (typeof this.options.displayFile === "function") {
+			return this.options.displayFile;
+		}
+		return null;
+	}
+
 	syncFiles(): readonly WorkspaceFileUpdate[] {
 		const updates: WorkspaceFileUpdate[] = [];
 		for (const file of this.files) {
@@ -137,12 +162,73 @@ export default class AcodeWorkspace extends Workspace {
 		return this.#getFileEntry(uri);
 	}
 
+	async requestFile(uri: string): Promise<AcodeWorkspaceFile | null> {
+		const existing = this.#getFileEntry(uri);
+		if (existing) return existing;
+
+		const openFileCallback = this.#getOpenFileCallback();
+		if (!openFileCallback) return null;
+
+		try {
+			const view = await openFileCallback(uri);
+			if (!view?.state?.doc) return null;
+			const languageId = this.#resolveLanguageIdForUri(uri);
+			return this.#getOrCreateFile(uri, languageId, view);
+		} catch (error) {
+			console.error(`[LSP:Workspace] Failed to open file: ${uri}`, error);
+			return null;
+		}
+	}
+
+	connected(): void {
+		for (const file of this.files) {
+			this.client.didOpen(file);
+		}
+	}
+
+	updateFile(uri: string, update: TransactionSpec): void {
+		const file = this.#getFileEntry(uri);
+
+		if (file) {
+			const view = file.getView();
+			if (view) {
+				view.dispatch(update);
+				return;
+			}
+		}
+
+		// File is not open - try to open it and apply the update
+		this.#applyUpdateToClosedFile(uri, update).catch((error) => {
+			console.warn(`[LSP:Workspace] Failed to apply update: ${uri}`, error);
+		});
+	}
+
+	async #applyUpdateToClosedFile(
+		uri: string,
+		update: TransactionSpec,
+	): Promise<void> {
+		const openFileCallback = this.#getOpenFileCallback();
+		if (!openFileCallback) return;
+
+		try {
+			const file = await this.requestFile(uri);
+			if (!file) return;
+
+			const view = file.getView();
+			if (view) {
+				view.dispatch(update);
+			}
+		} catch (error) {
+			console.error(`[LSP:Workspace] Failed to apply update: ${uri}`, error);
+		}
+	}
+
 	async displayFile(uri: string): Promise<EditorView | null> {
 		if (typeof this.options.displayFile === "function") {
 			try {
 				return await this.options.displayFile(uri);
 			} catch (error) {
-				console.error("Failed to display file via workspace", error);
+				console.error("[LSP:Workspace] Failed to display file", error);
 			}
 		}
 		return null;
