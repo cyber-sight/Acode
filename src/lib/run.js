@@ -189,7 +189,7 @@ async function run(
 					isConsole ||
 					appSettings.value.console === appSettings.CONSOLE_LEGACY
 				) {
-					url = `${ASSETS_DIRECTORY}/js/build/console.build.js`;
+					url = `${ASSETS_DIRECTORY}/build/console.js`;
 				} else {
 					url = `${DATA_STORAGE}/eruda.js`;
 				}
