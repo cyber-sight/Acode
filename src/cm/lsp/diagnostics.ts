@@ -10,6 +10,8 @@ import {
 } from "@codemirror/state";
 import type { EditorView } from "@codemirror/view";
 import type {
+	LSPClientWithWorkspace,
+	LSPPluginAPI,
 	LspDiagnostic,
 	PublishDiagnosticsParams,
 	RawDiagnostic,
@@ -70,24 +72,8 @@ const severities: DiagnosticSeverity[] = [
 	"hint",
 ];
 
-interface LSPPluginInstance {
-	fromPosition: (
-		pos: { line: number; character: number },
-		doc: unknown,
-	) => number;
-	syncedDoc: { length: number };
-	unsyncedChanges: {
-		mapPos: (pos: number, assoc?: number, mode?: MapMode) => number | null;
-		empty: boolean;
-	};
-	client: {
-		sync: () => void;
-	};
-	clear: () => void;
-}
-
 function storeLspDiagnostics(
-	plugin: LSPPluginInstance,
+	plugin: LSPPluginAPI,
 	diagnostics: RawDiagnostic[],
 ): StateEffect<LspDiagnostic[]> {
 	const items: LspDiagnostic[] = [];
@@ -133,7 +119,7 @@ function storeLspDiagnostics(
 }
 
 function mapDiagnostics(
-	plugin: LSPPluginInstance,
+	plugin: LSPPluginAPI,
 	state: EditorState,
 ): Diagnostic[] {
 	plugin.client.sync();
@@ -159,22 +145,9 @@ function mapDiagnostics(
 }
 
 function lspLinterSource(view: EditorView): Diagnostic[] {
-	const plugin = LSPPlugin.get(view) as LSPPluginInstance | null;
+	const plugin = LSPPlugin.get(view) as LSPPluginAPI | null;
 	if (!plugin) return [];
 	return mapDiagnostics(plugin, view.state);
-}
-
-interface WorkspaceFile {
-	version: number;
-	getView: () => EditorView | null;
-}
-
-interface WorkspaceWithGetFile {
-	getFile: (uri: string) => WorkspaceFile | null;
-}
-
-interface LSPClientWithWorkspace {
-	workspace: WorkspaceWithGetFile;
 }
 
 export function lspDiagnosticsClientExtension(): {
@@ -200,7 +173,7 @@ export function lspDiagnosticsClientExtension(): {
 				client: LSPClient,
 				params: PublishDiagnosticsParams,
 			): boolean => {
-				const clientWithWorkspace = client as LSPClientWithWorkspace;
+				const clientWithWorkspace = client as unknown as LSPClientWithWorkspace;
 				const file = clientWithWorkspace.workspace.getFile(params.uri);
 				if (
 					!file ||
@@ -210,7 +183,7 @@ export function lspDiagnosticsClientExtension(): {
 				}
 				const view = file.getView();
 				if (!view) return false;
-				const plugin = LSPPlugin.get(view) as LSPPluginInstance | null;
+				const plugin = LSPPlugin.get(view) as LSPPluginAPI | null;
 				if (!plugin) return false;
 
 				view.dispatch({

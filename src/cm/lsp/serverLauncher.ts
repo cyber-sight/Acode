@@ -202,6 +202,10 @@ async function startInteractiveServer(
 			console.warn(`[${serverId}] ${data}`);
 		} else if (type === "stdout" && data && data.trim()) {
 			console.info(`[${serverId}] ${data}`);
+			// Detect when the axs proxy signals it's listening
+			if (/listening on/i.test(data)) {
+				signalServerReady(serverId);
+			}
 		}
 	};
 	const uuid = await executor.start(command, callback, true);
@@ -217,59 +221,68 @@ function sleep(ms: number): Promise<void> {
 	return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
+/**
+ * Tracks servers that have signaled they're ready (listening)
+ * Key: serverId, Value: timestamp when ready
+ */
+const serverReadySignals = new Map<string, number>();
+
+/**
+ * Called when stdout contains a "listening" message from the axs proxy.
+ * This signals that the server is ready to accept connections.
+ */
+export function signalServerReady(serverId: string): void {
+	serverReadySignals.set(serverId, Date.now());
+}
+
+/**
+ * Wait for the LSP server to be ready.
+ *
+ * This function polls for a ready signal (set when stdout contains "listening")
+ */
 async function waitForWebSocket(
 	url: string,
 	options: WaitOptions = {},
 ): Promise<void> {
-	const { attempts = 20, delay = 200, probeTimeout = 2000 } = options;
+	const {
+		delay = 100, // Poll interval
+		probeTimeout = 5000, // Max wait time
+	} = options;
 
-	let lastError: Error | null = null;
-	for (let i = 0; i < attempts; i++) {
-		try {
-			await new Promise<void>((resolve, reject) => {
-				let socket: WebSocket | null = null;
-				let timer: ReturnType<typeof setTimeout> | null = null;
-				try {
-					socket = new WebSocket(url);
-				} catch (error) {
-					reject(error);
-					return;
-				}
+	// Extract server ID from URL (e.g., "ws://127.0.0.1:2090" -> check by port)
+	const portMatch = url.match(/:(\d+)/);
+	const port = portMatch ? portMatch[1] : null;
 
-				const cleanup = (cb?: () => void): void => {
-					if (timer) clearTimeout(timer);
-					if (socket) {
-						socket.onopen = null;
-						socket.onerror = null;
-						try {
-							socket.close();
-						} catch (_) {
-							// Ignore close errors
-						}
-					}
-					if (cb) cb();
-				};
-
-				socket.onopen = () => cleanup(resolve);
-				socket.onerror = (event: Event) =>
-					cleanup(() =>
-						reject(
-							event instanceof Error ? event : new Error("websocket error"),
-						),
-					);
-				timer = setTimeout(
-					() => cleanup(() => reject(new Error("timeout"))),
-					probeTimeout,
-				);
-			});
-			return;
-		} catch (error) {
-			lastError = error instanceof Error ? error : new Error(String(error));
-			await sleep(delay);
+	// Find the server ID that's starting on this port
+	let targetServerId: string | null = null;
+	const entries = Array.from(managedServers.entries());
+	for (const [serverId, entry] of entries) {
+		if (
+			entry.command.includes(`--port ${port}`) ||
+			entry.command.includes(`:${port}`)
+		) {
+			targetServerId = serverId;
+			break;
 		}
 	}
-	const reason = lastError ? lastError.message || String(lastError) : "unknown";
-	throw new Error(`WebSocket ${url} did not become ready (${reason})`);
+
+	const deadline = Date.now() + probeTimeout;
+
+	while (Date.now() < deadline) {
+		// Check if we got a ready signal
+		if (targetServerId && serverReadySignals.has(targetServerId)) {
+			// Server is ready, clear the signal and return
+			serverReadySignals.delete(targetServerId);
+			return;
+		}
+
+		await sleep(delay);
+	}
+
+	// Timeout reached, proceed anyway (transport will retry if needed)
+	console.debug(
+		`[LSP] waitForWebSocket timed out for ${url}, proceeding anyway`,
+	);
 }
 
 interface LspError extends Error {

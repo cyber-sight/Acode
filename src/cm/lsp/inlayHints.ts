@@ -21,6 +21,7 @@ import type {
 	InlayHintLabelPart,
 	Position,
 } from "vscode-languageserver-types";
+import type { LSPPluginAPI } from "./types";
 
 // ============================================================================
 // Types
@@ -131,15 +132,6 @@ function buildDecos(hints: ProcessedHint[], docLen: number): DecorationSet {
 // Plugin
 // ============================================================================
 
-interface PluginAPI {
-	uri: string;
-	client: LSPClient;
-	toPosition: (offset: number) => Position;
-	fromPosition: (pos: Position, doc?: unknown) => number;
-	syncedDoc: { length: number };
-	unsyncedChanges: { mapPos: (pos: number) => number | null };
-}
-
 function createPlugin(config: InlayHintsConfig) {
 	const delay = config.debounceMs ?? 200;
 	const max = config.maxHints ?? 500;
@@ -179,7 +171,7 @@ function createPlugin(config: InlayHintsConfig) {
 			}
 
 			async fetch(): Promise<void> {
-				const lsp = LSPPlugin.get(this.view) as PluginAPI | null;
+				const lsp = LSPPlugin.get(this.view) as LSPPluginAPI | null;
 				if (!lsp?.client.connected) return;
 
 				const caps = lsp.client.serverCapabilities;
@@ -220,7 +212,7 @@ function createPlugin(config: InlayHintsConfig) {
 			}
 
 			process(
-				lsp: PluginAPI,
+				lsp: LSPPluginAPI,
 				hints: InlayHint[],
 				docLen: number,
 			): ProcessedHint[] {

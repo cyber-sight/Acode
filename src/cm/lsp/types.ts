@@ -6,8 +6,9 @@ import type {
 	Workspace,
 	WorkspaceFile,
 } from "@codemirror/lsp-client";
-import type { ChangeSet, Extension, Text } from "@codemirror/state";
+import type { ChangeSet, Extension, MapMode, Text } from "@codemirror/state";
 import type { EditorView } from "@codemirror/view";
+
 import type {
 	Diagnostic as LSPDiagnostic,
 	FormattingOptions as LSPFormattingOptions,
@@ -247,6 +248,20 @@ export interface LspDiagnostic {
 	severity: "error" | "warning" | "info" | "hint";
 	message: string;
 	source?: string;
+	/** Related diagnostic information (e.g., location of declaration for 'unused' errors) */
+	relatedInformation?: DiagnosticRelatedInformation[];
+}
+
+/** Related information for a diagnostic (mapped to editor positions) */
+export interface DiagnosticRelatedInformation {
+	/** Document URI */
+	uri: string;
+	/** Start position (offset in document) */
+	from: number;
+	/** End position (offset in document) */
+	to: number;
+	/** Message describing the relationship */
+	message: string;
 }
 
 export interface PublishDiagnosticsParams {
@@ -260,6 +275,17 @@ export interface RawDiagnostic {
 	severity?: number;
 	code?: number | string;
 	source?: string;
+	message: string;
+	/** Related diagnostic locations from LSP (raw positions) */
+	relatedInformation?: RawDiagnosticRelatedInformation[];
+}
+
+/** Raw related information from LSP (before position mapping) */
+export interface RawDiagnosticRelatedInformation {
+	location: {
+		uri: string;
+		range: Range;
+	};
 	message: string;
 }
 
@@ -283,6 +309,54 @@ export interface ParsedUri {
 	docId?: string;
 	rootUri?: string;
 	isFileUri?: boolean;
+}
+
+/**
+ * Interface representing the LSPPlugin instance API.
+ */
+export interface LSPPluginAPI {
+	/** The document URI this plugin is attached to */
+	uri: string;
+	/** The LSP client instance */
+	client: LSPClient & { sync: () => void; connected?: boolean };
+	/** Convert a document offset to an LSP Position */
+	toPosition: (offset: number) => { line: number; character: number };
+	/** Convert an LSP Position to a document offset */
+	fromPosition: (
+		pos: { line: number; character: number },
+		doc?: unknown,
+	) => number;
+	/** The currently synced document state */
+	syncedDoc: { length: number };
+	/** Pending changes that haven't been synced yet */
+	unsyncedChanges: {
+		mapPos: (pos: number, assoc?: number, mode?: MapMode) => number | null;
+		empty: boolean;
+	};
+	/** Clear pending changes */
+	clear: () => void;
+}
+
+/**
+ * Interface for workspace file with view access
+ */
+export interface WorkspaceFileWithView {
+	version: number;
+	getView: () => EditorView | null;
+}
+
+/**
+ * Interface for workspace with file access
+ */
+export interface WorkspaceWithFileAccess {
+	getFile: (uri: string) => WorkspaceFileWithView | null;
+}
+
+/**
+ * LSPClient with workspace access (for type casting in notification handlers)
+ */
+export interface LSPClientWithWorkspace {
+	workspace: WorkspaceWithFileAccess;
 }
 
 // Extend the LSPClient with Acode-specific properties
