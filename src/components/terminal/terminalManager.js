@@ -6,6 +6,7 @@
 import EditorFile from "lib/editorFile";
 import TerminalComponent from "./terminal";
 import "@xterm/xterm/css/xterm.css";
+import quickTools from "components/quickTools";
 import toast from "components/toast";
 import confirm from "dialogs/confirm";
 import appSettings from "lib/settings";
@@ -389,6 +390,35 @@ class TerminalManager {
 	 * @param {string} terminalId - Terminal ID
 	 */
 	async setupTerminalHandlers(terminalFile, terminalComponent, terminalId) {
+		const textarea = terminalComponent.terminal?.textarea;
+		if (textarea) {
+			const onFocus = () => {
+				const { $toggler } = quickTools;
+				$toggler.classList.add("hide");
+				clearTimeout(this.togglerTimeout);
+				this.togglerTimeout = setTimeout(() => {
+					$toggler.style.display = "none";
+				}, 300);
+			};
+
+			const onBlur = () => {
+				const { $toggler } = quickTools;
+				clearTimeout(this.togglerTimeout);
+				$toggler.style.display = "";
+				setTimeout(() => {
+					$toggler.classList.remove("hide");
+				}, 10);
+			};
+
+			textarea.addEventListener("focus", onFocus);
+			textarea.addEventListener("blur", onBlur);
+
+			terminalComponent.cleanupFocusHandlers = () => {
+				textarea.removeEventListener("focus", onFocus);
+				textarea.removeEventListener("blur", onBlur);
+			};
+		}
+
 		// Handle tab focus/blur
 		terminalFile.onfocus = () => {
 			// Guarded fit on focus: only fit if cols/rows would change, then focus
@@ -580,6 +610,11 @@ class TerminalManager {
 			// Cleanup resize observer
 			if (terminal.file._resizeObserver) {
 				terminal.file._resizeObserver.disconnect();
+			}
+
+			// Cleanup focus handlers
+			if (terminal.component.cleanupFocusHandlers) {
+				terminal.component.cleanupFocusHandlers();
 			}
 
 			// Dispose terminal component
