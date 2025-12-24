@@ -110,6 +110,44 @@ function createWebSocketTransport(
 		if (context?.debugWebSocket) {
 			console.debug(`[LSP:${server.id}] <=`, data);
 		}
+
+		// Temporary fix
+		// Intercept server requests that the CodeMirror LSP client doesn't handle
+		// The client only handles notifications, but some servers (e.g., TypeScript)
+		// send requests like window/workDoneProgress/create that need a response
+		try {
+			const msg = JSON.parse(data);
+			if (
+				msg &&
+				typeof msg.id !== "undefined" &&
+				msg.method === "window/workDoneProgress/create"
+			) {
+				// This is a request, respond with success
+				const response = JSON.stringify({
+					jsonrpc: "2.0",
+					id: msg.id,
+					result: null,
+				});
+				if (context?.debugWebSocket) {
+					console.debug(`[LSP:${server.id}] => (auto-response)`, response);
+				}
+				if (socket && socket.readyState === WebSocket.OPEN) {
+					if (binaryMode && encoder) {
+						socket.send(encoder.encode(response));
+					} else {
+						socket.send(response);
+					}
+				}
+				// Don't pass this request to listeners since we handled it
+				console.info(
+					`[LSP:${server.id}] Auto-responded to window/workDoneProgress/create`,
+				);
+				return;
+			}
+		} catch (_) {
+			// Not valid JSON or missing fields, pass through normally
+		}
+
 		listeners.forEach((listener) => {
 			try {
 				listener(data);
