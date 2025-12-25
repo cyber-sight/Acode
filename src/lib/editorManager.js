@@ -1505,39 +1505,53 @@ async function EditorManager($header, $body) {
 		});
 		keyboardHandler.on("keyboardShow", scrollCursorIntoView);
 
-		// TODO: Implement blur event for CodeMirror
-		// editor.on("blur", async () => {
-		//	const { hardKeyboardHidden, keyboardHeight } =
-		//		await getSystemConfiguration();
-		//	const blur = () => {
-		//		const { activeFile } = manager;
-		//		activeFile.focused = false;
-		//		activeFile.focusedBefore = false;
-		//	};
-		//	if (
-		//		hardKeyboardHidden === HARDKEYBOARDHIDDEN_NO &&
-		//		keyboardHeight < 100
-		//	) {
-		//		// external keyboard
-		//		blur();
-		//		return;
-		//	}
-		//	const onKeyboardHide = () => {
-		//		keyboardHandler.off("keyboardHide", onKeyboardHide);
-		//		blur();
-		//	};
-		//	keyboardHandler.on("keyboardHide", onKeyboardHide);
-		// });
+		// DOM event handlers for blur/focus and keydown
+		const domEventHandlersExtension = EditorView.domEventHandlers({
+			blur: async (_event, _view) => {
+				const { hardKeyboardHidden, keyboardHeight } =
+					await getSystemConfiguration();
+				const blur = () => {
+					const { activeFile } = manager;
+					if (activeFile) {
+						activeFile.focused = false;
+						activeFile.focusedBefore = false;
+					}
+				};
+				if (
+					hardKeyboardHidden === HARDKEYBOARDHIDDEN_NO &&
+					keyboardHeight < 100
+				) {
+					// external keyboard - blur immediately
+					blur();
+					return;
+				}
+				const onKeyboardHide = () => {
+					keyboardHandler.off("keyboardHide", onKeyboardHide);
+					blur();
+				};
+				keyboardHandler.on("keyboardHide", onKeyboardHide);
+			},
+			focus: (_event, _view) => {
+				const { activeFile } = manager;
+				if (activeFile) {
+					activeFile.focused = true;
+				}
+			},
+			keydown: (event, view) => {
+				if (event.key === "Escape") {
+					keydownState.esc = { value: true, target: view.contentDOM };
+				}
+				// Return false to allow default handling
+				return false;
+			},
+		});
 
-		// TODO: Implement scroll events for CodeMirror
-		// editor.on("scrolltop", onscrolltop);
-		// editor.on("scrollleft", onscrollleft);
-		// TODO: Add keydown listeners to CodeMirror
-		// textInput.addEventListener("keydown", (e) => {
-		//	if (e.key === "Escape") {
-		//		keydownState.esc = { value: true, target: textInput };
-		//	}
-		// });
+		// Append the DOM event handlers extension to the editor
+		try {
+			editor.dispatch({
+				effects: StateEffect.appendConfig.of(domEventHandlersExtension),
+			});
+		} catch (_) {}
 
 		updateMargin(true);
 		updateSideButtonContainer();
@@ -1580,7 +1594,6 @@ async function EditorManager($header, $body) {
 	 * Checks if the cursor is visible within the CodeMirror viewport.
 	 * @returns {boolean} - True if the cursor is visible, false otherwise.
 	 */
-	// TODO: Implement cursor visibility check for CodeMirror
 	function isCursorVisible() {
 		const view = editor;
 		const scroller = view?.scrollDOM;
