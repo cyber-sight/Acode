@@ -1123,6 +1123,16 @@ async function EditorManager($header, $body) {
 				events.emit(detailedEvent, ...detailedEventArgs);
 			}
 		},
+		/**
+		 * Restart LSP for the active file
+		 * Useful after stopping/restarting language servers
+		 */
+		restartLsp() {
+			const activeFile = manager.activeFile;
+			if (activeFile?.type === "editor") {
+				void configureLspForFile(activeFile);
+			}
+		},
 	};
 
 	if (typeof document !== "undefined") {

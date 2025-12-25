@@ -12,11 +12,12 @@ import {
 	serverDiagnostics,
 	signatureHelp,
 } from "@codemirror/lsp-client";
-import { Extension, MapMode } from "@codemirror/state";
+import { EditorState, Extension, MapMode } from "@codemirror/state";
 import { EditorView, keymap } from "@codemirror/view";
 import lspStatusBar from "components/lspStatusBar";
 import NotificationManager from "lib/notificationManager";
 import Uri from "utils/Uri";
+import { clearDiagnosticsEffect } from "./diagnostics";
 import { inlayHintsExtension } from "./inlayHints";
 import { ensureServerRunning } from "./serverLauncher";
 import serverRegistry from "./serverRegistry";
@@ -250,6 +251,54 @@ export class LspClientManager {
 	}
 
 	async dispose(): Promise<void> {
+		try {
+			interface FileWithSession {
+				id?: string;
+				type?: string;
+				session?: EditorState;
+			}
+
+			interface EditorManagerLike {
+				files?: FileWithSession[];
+				editor?: EditorView;
+				activeFile?: FileWithSession;
+			}
+
+			const em = (globalThis as Record<string, unknown>).editorManager as
+				| EditorManagerLike
+				| undefined;
+
+			if (em?.editor) {
+				try {
+					em.editor.dispatch({ effects: clearDiagnosticsEffect() });
+					if (em.activeFile?.type === "editor") {
+						em.activeFile.session = em.editor.state;
+					}
+				} catch {
+					/* View may be disposed */
+				}
+			}
+
+			if (em?.files) {
+				for (const file of em.files) {
+					if (file?.type !== "editor" || file.id === em.activeFile?.id)
+						continue;
+					const session = file.session;
+					if (session && typeof session.update === "function") {
+						try {
+							file.session = session.update({
+								effects: clearDiagnosticsEffect(),
+							}).state;
+						} catch {
+							/* State update failed */
+						}
+					}
+				}
+			}
+		} catch {
+			/* Ignore errors */
+		}
+
 		const disposeOps: Promise<void>[] = [];
 		for (const [key, state] of this.#clients.entries()) {
 			disposeOps.push(state.dispose());

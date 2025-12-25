@@ -56,6 +56,7 @@ import {
 import { indentUnit as indentUnitFacet } from "@codemirror/language";
 import {
 	closeLintPanel,
+	forceLinting,
 	nextDiagnostic,
 	openLintPanel,
 	previousDiagnostic,
@@ -76,6 +77,8 @@ import {
 } from "@codemirror/lsp-client";
 import { Compartment, EditorSelection } from "@codemirror/state";
 import { keymap } from "@codemirror/view";
+import { clearDiagnosticsEffect, clientManager } from "cm/lsp";
+import toast from "components/toast";
 import prompt from "dialogs/prompt";
 import actions from "handlers/quickTools";
 import keyBindings from "lib/keyBindings";
@@ -936,6 +939,47 @@ function registerLspCommands() {
 			const resolvedView = resolveView(view);
 			if (!resolvedView) return false;
 			return lspCloseReferencePanel(resolvedView);
+		},
+	});
+	addCommand({
+		name: "restartAllLspServers",
+		description: "Restart all running LSP servers",
+		readOnly: true,
+		requiresView: false,
+		async run() {
+			const activeClients = clientManager.getActiveClients();
+			if (!activeClients.length) {
+				toast("No LSP servers are currently running");
+				return true;
+			}
+			const count = activeClients.length;
+			toast(`Restarting ${count} LSP server${count > 1 ? "s" : ""}...`);
+
+			// Dispose all clients (also clears diagnostics)
+			await clientManager.dispose();
+
+			// Trigger reconnect for active file
+			editorManager?.restartLsp?.();
+			return true;
+		},
+	});
+	addCommand({
+		name: "stopAllLspServers",
+		description: "Stop all running LSP servers",
+		readOnly: true,
+		requiresView: false,
+		async run() {
+			const activeClients = clientManager.getActiveClients();
+			if (!activeClients.length) {
+				toast("No LSP servers are currently running");
+				return true;
+			}
+			const count = activeClients.length;
+
+			// Dispose all clients
+			await clientManager.dispose();
+			toast(`Stopped ${count} LSP server${count > 1 ? "s" : ""}`);
+			return true;
 		},
 	});
 }
