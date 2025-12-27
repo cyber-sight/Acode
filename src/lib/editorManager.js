@@ -1515,53 +1515,47 @@ async function EditorManager($header, $body) {
 		});
 		keyboardHandler.on("keyboardShow", scrollCursorIntoView);
 
-		// DOM event handlers for blur/focus and keydown
-		const domEventHandlersExtension = EditorView.domEventHandlers({
-			blur: async (_event, _view) => {
-				const { hardKeyboardHidden, keyboardHeight } =
-					await getSystemConfiguration();
-				const blur = () => {
-					const { activeFile } = manager;
-					if (activeFile) {
-						activeFile.focused = false;
-						activeFile.focusedBefore = false;
-					}
-				};
-				if (
-					hardKeyboardHidden === HARDKEYBOARDHIDDEN_NO &&
-					keyboardHeight < 100
-				) {
-					// external keyboard - blur immediately
-					blur();
-					return;
-				}
-				const onKeyboardHide = () => {
-					keyboardHandler.off("keyboardHide", onKeyboardHide);
-					blur();
-				};
-				keyboardHandler.on("keyboardHide", onKeyboardHide);
-			},
-			focus: (_event, _view) => {
-				const { activeFile } = manager;
-				if (activeFile) {
-					activeFile.focused = true;
-				}
-			},
-			keydown: (event, view) => {
-				if (event.key === "Escape") {
-					keydownState.esc = { value: true, target: view.contentDOM };
-				}
-				// Return false to allow default handling
-				return false;
-			},
+		// Attach native DOM event listeners directly to the editor's contentDOM
+		const contentDOM = editor.contentDOM;
+
+		contentDOM.addEventListener("focus", (_event) => {
+			const { activeFile } = manager;
+			if (activeFile) {
+				activeFile.focused = true;
+			}
 		});
 
-		// Append the DOM event handlers extension to the editor
-		try {
-			editor.dispatch({
-				effects: StateEffect.appendConfig.of(domEventHandlersExtension),
-			});
-		} catch (_) {}
+		contentDOM.addEventListener("blur", async (_event) => {
+			const { hardKeyboardHidden, keyboardHeight } =
+				await getSystemConfiguration();
+			const blur = () => {
+				const { activeFile } = manager;
+				if (activeFile) {
+					activeFile.focused = false;
+					activeFile.focusedBefore = false;
+				}
+			};
+			if (
+				hardKeyboardHidden === HARDKEYBOARDHIDDEN_NO &&
+				keyboardHeight < 100
+			) {
+				// external keyboard - blur immediately
+				blur();
+				return;
+			}
+			// soft keyboard - wait for keyboard to hide
+			const onKeyboardHide = () => {
+				keyboardHandler.off("keyboardHide", onKeyboardHide);
+				blur();
+			};
+			keyboardHandler.on("keyboardHide", onKeyboardHide);
+		});
+
+		contentDOM.addEventListener("keydown", (event) => {
+			if (event.key === "Escape") {
+				keydownState.esc = { value: true, target: contentDOM };
+			}
+		});
 
 		updateMargin(true);
 		updateSideButtonContainer();
