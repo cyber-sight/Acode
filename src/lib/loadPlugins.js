@@ -108,7 +108,7 @@ export default async function loadPlugins(loadOnlyTheme = false) {
 			console.error(`Error loading plugin ${pluginId}:`, error);
 			// mark plugin as broken to avoid repeated attempts until user intervenes
 			try {
-				BROKEN_PLUGINS.set(pluginId,  {
+				BROKEN_PLUGINS.set(pluginId, {
 					error: String(error.message || error),
 					timestamp: Date.now(),
 				});
