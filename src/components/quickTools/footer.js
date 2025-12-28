@@ -3,7 +3,7 @@
  */
 
 import settings from "lib/settings";
-import items, { ref } from "./items";
+import items from "./items";
 
 /**
  * Create a row with common buttons

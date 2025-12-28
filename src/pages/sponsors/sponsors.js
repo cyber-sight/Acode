@@ -207,7 +207,7 @@ function SponsorCard({ name, image, website, tier, tagline }) {
 function handleLinkClick(e) {
 	const target = e.target.closest(".sponsor-card");
 	if (!target) return;
-	const { website } = target.dataset;
+	let { website } = target.dataset;
 	if (!website) return;
 	if (!website.startsWith("http")) {
 		website = "http://" + website;

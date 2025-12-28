@@ -529,7 +529,7 @@ function terminateWorker(initializeNewWorkers = true) {
  * @returns {Worker} A new Worker object that runs the code in 'searchInFilesWorker.build.js'.
  */
 function getWorker() {
-	return new Worker(new URL("./worker.js", import.meta.url));
+	return new Worker("./build/searchInFilesWorker.js");
 }
 
 /**
