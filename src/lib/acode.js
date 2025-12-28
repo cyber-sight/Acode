@@ -29,6 +29,11 @@ import EditorFile from "lib/editorFile";
 import files from "lib/fileList";
 import fileTypeHandler from "lib/fileTypeHandler";
 import fonts from "lib/fonts";
+import {
+	LOADED_PLUGINS,
+	onPluginLoadCallback,
+	onPluginsLoadCompleteCallback,
+} from "lib/loadPlugins";
 import NotificationManager from "lib/notificationManager";
 import openFolder, { addedFolder } from "lib/openFolder";
 import projects from "lib/projects";
@@ -44,7 +49,6 @@ import helpers from "utils/helpers";
 import KeyboardEvent from "utils/keyboardEvent";
 import Url from "utils/Url";
 import constants from "./constants";
-import { onPluginLoadCallback, onPluginsLoadCompleteCallback, LOADED_PLUGINS } from "lib/loadPlugins";
 
 const { Fold } = ace.require("ace/edit_session/fold");
 const { Range } = ace.require("ace/range");
@@ -66,7 +70,23 @@ export default class Acode {
 			},
 		},
 	];
-	#pluginWatchers = {}
+	#pluginWatchers = {};
+
+	/**
+	 * Clear a plugin's broken mark (so it can be retried)
+	 * @param {string} pluginId
+	 */
+	clearBrokenPluginMark(pluginId) {
+		try {
+			const broken = appSettings.value.pluginsBroken || {};
+			if (broken[pluginId]) {
+				delete broken[pluginId];
+				appSettings.update(false);
+			}
+		} catch (e) {
+			console.warn("Failed to clear broken plugin mark:", e);
+		}
+	}
 
 	constructor() {
 		const encodingsModule = {
@@ -83,7 +103,7 @@ export default class Acode {
 			list: themes.list,
 			update: themes.update,
 			// Deprecated, not supported anymore
-			apply: () => { },
+			apply: () => {},
 		};
 
 		const sidebarAppsModule = {
@@ -301,101 +321,100 @@ export default class Acode {
 					confirm(
 						strings.install,
 						`Do you want to install plugin '${pluginId}'${installerPluginName ? ` requested by ${installerPluginName}` : ""}?`,
-					)
-						.then((confirmation) => {
-							if (!confirmation) {
-								reject(new Error("User cancelled installation"));
-								return;
-							}
+					).then((confirmation) => {
+						if (!confirmation) {
+							reject(new Error("User cancelled installation"));
+							return;
+						}
 
-							let purchaseToken;
-							let product;
-							const pluginUrl = Url.join(
-								constants.API_BASE,
-								`plugin/${pluginId}`,
-							);
-							fsOperation(pluginUrl)
-								.readFile("json")
-								.catch(() => {
-									reject(new Error("Failed to fetch plugin details"));
-									return null;
-								})
-								.then((remotePlugin) => {
-									if (remotePlugin) {
-										const isPaid = remotePlugin.price > 0;
-										helpers
-											.promisify(iap.getProducts, [remotePlugin.sku])
-											.then((products) => {
-												[product] = products;
-												if (product) {
-													return getPurchase(product.productId);
-												}
-												return null;
-											})
-											.then((purchase) => {
-												purchaseToken = purchase?.purchaseToken;
+						let purchaseToken;
+						let product;
+						const pluginUrl = Url.join(
+							constants.API_BASE,
+							`plugin/${pluginId}`,
+						);
+						fsOperation(pluginUrl)
+							.readFile("json")
+							.catch(() => {
+								reject(new Error("Failed to fetch plugin details"));
+								return null;
+							})
+							.then((remotePlugin) => {
+								if (remotePlugin) {
+									const isPaid = remotePlugin.price > 0;
+									helpers
+										.promisify(iap.getProducts, [remotePlugin.sku])
+										.then((products) => {
+											[product] = products;
+											if (product) {
+												return getPurchase(product.productId);
+											}
+											return null;
+										})
+										.then((purchase) => {
+											purchaseToken = purchase?.purchaseToken;
 
-												if (isPaid && !purchaseToken) {
-													if (!product) throw new Error("Product not found");
-													return helpers.checkAPIStatus().then((apiStatus) => {
-														if (!apiStatus) {
-															alert(strings.error, strings.api_error);
-															return;
-														}
+											if (isPaid && !purchaseToken) {
+												if (!product) throw new Error("Product not found");
+												return helpers.checkAPIStatus().then((apiStatus) => {
+													if (!apiStatus) {
+														alert(strings.error, strings.api_error);
+														return;
+													}
 
-														iap.setPurchaseUpdatedListener(
-															...purchaseListener(onpurchase, onerror),
-														);
-														return helpers.promisify(
-															iap.purchase,
-															product.productId,
-														);
+													iap.setPurchaseUpdatedListener(
+														...purchaseListener(onpurchase, onerror),
+													);
+													return helpers.promisify(
+														iap.purchase,
+														product.productId,
+													);
+												});
+											}
+										})
+										.then(() => {
+											import("lib/installPlugin").then(
+												({ default: installPlugin }) => {
+													installPlugin(
+														pluginId,
+														remotePlugin.name,
+														purchaseToken,
+													).then(() => {
+														resolve();
 													});
-												}
-											})
-											.then(() => {
-												import("lib/installPlugin").then(
-													({ default: installPlugin }) => {
-														installPlugin(
-															pluginId,
-															remotePlugin.name,
-															purchaseToken,
-														).then(() => {
-															resolve();
-														});
-													},
-												);
-											});
-
-										async function onpurchase(e) {
-											const purchase = await getPurchase(product.productId);
-											await ajax.post(
-												Url.join(constants.API_BASE, "plugin/order"),
-												{
-													data: {
-														id: remotePlugin.id,
-														token: purchase?.purchaseToken,
-														package: BuildInfo.packageName,
-													},
 												},
 											);
-											purchaseToken = purchase?.purchaseToken;
-										}
+										});
 
-										async function onerror(error) {
-											throw error;
-										}
+									async function onpurchase(e) {
+										const purchase = await getPurchase(product.productId);
+										await ajax.post(
+											Url.join(constants.API_BASE, "plugin/order"),
+											{
+												data: {
+													id: remotePlugin.id,
+													token: purchase?.purchaseToken,
+													package: BuildInfo.packageName,
+												},
+											},
+										);
+										purchaseToken = purchase?.purchaseToken;
 									}
-								});
 
-							async function getPurchase(sku) {
-								const purchases = await helpers.promisify(iap.getPurchases);
-								const purchase = purchases.find((p) =>
-									p.productIds.includes(sku),
-								);
-								return purchase;
-							}
-						});
+									async function onerror(error) {
+										throw error;
+									}
+								}
+							});
+
+						async function getPurchase(sku) {
+							const purchases = await helpers.promisify(iap.getPurchases);
+							const purchase = purchases.find((p) =>
+								p.productIds.includes(sku),
+							);
+							return purchase;
+						}
+					});
 				})
 				.catch((error) => {
 					reject(error);
@@ -423,8 +442,9 @@ export default class Acode {
 			}
 
 			this.#pluginWatchers[pluginId] = {
-				resolve, reject
-			}
+				resolve,
+				reject,
+			};
 		});
 	}
 
