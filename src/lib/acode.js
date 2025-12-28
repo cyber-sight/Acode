@@ -30,6 +30,7 @@ import files from "lib/fileList";
 import fileTypeHandler from "lib/fileTypeHandler";
 import fonts from "lib/fonts";
 import {
+	BROKEN_PLUGINS,
 	LOADED_PLUGINS,
 	onPluginLoadCallback,
 	onPluginsLoadCompleteCallback,
@@ -78,10 +79,8 @@ export default class Acode {
 	 */
 	clearBrokenPluginMark(pluginId) {
 		try {
-			const broken = appSettings.value.pluginsBroken || {};
-			if (broken[pluginId]) {
-				delete broken[pluginId];
-				appSettings.update(false);
+			if (BROKEN_PLUGINS.has(pluginId)) {
+				BROKEN_PLUGINS.delete(pluginId);
 			}
 		} catch (e) {
 			console.warn("Failed to clear broken plugin mark:", e);
