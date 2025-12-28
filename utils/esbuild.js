@@ -48,7 +48,7 @@ async function processCssFile(filePath) {
 	const postcssPlugins = postcssConfig.plugins || [];
 	const processed = await postcss(postcssPlugins).process(css, {
 		from: filePath,
-		map: false,
+		map: !isProd ? { inline: true } : false,
 	});
 
 	return processed.css;
@@ -62,7 +62,6 @@ const babelPlugin = {
 			const result = await babel.transformAsync(source, {
 				filename: args.path,
 				configFile: path.join(root, ".babelrc"),
-				babelrc: false,
 				sourceType: "unambiguous",
 				caller: {
 					name: "esbuild",
@@ -120,7 +119,6 @@ async function run() {
 		entryPoints: {
 			main: "./src/main.js",
 			console: "./src/lib/console.js",
-			searchInFilesWorker: "./src/sidebarApps/searchInFiles/worker.js",
 		},
 		outdir,
 		entryNames: "[name]",
@@ -132,6 +130,7 @@ async function run() {
 		platform: "browser",
 		target,
 		minify: isProd,
+		sourcemap: !isProd,
 		define: {
 			"process.env.NODE_ENV": JSON.stringify(mode),
 		},
