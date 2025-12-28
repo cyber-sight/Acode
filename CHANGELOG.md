@@ -1,5 +1,99 @@
 # Change Log
 
+## v1.11.7 (966) 
+
+* revert: sidebar/style.scss changes to fix collapse folders by @UnschooledGamer in https://github.com/Acode-Foundation/Acode/pull/1572
+* Terminal Service by @RohitKushvaha01 in https://github.com/Acode-Foundation/Acode/pull/1570
+* fix(i18n): fix typo in ./src/lang/id-id.json by @hyperz111 in https://github.com/Acode-Foundation/Acode/pull/1577
+* fix: browser download by @RohitKushvaha01 in https://github.com/Acode-Foundation/Acode/pull/1587
+* Terminal initrc support by @RohitKushvaha01 in https://github.com/Acode-Foundation/Acode/pull/1590
+* chore(i18n): update de-de.json by @Mr-Update in https://github.com/Acode-Foundation/Acode/pull/1600
+* Updated & Added Missing ar-ye.json (Arabic) translations by @Hussain96o in https://github.com/Acode-Foundation/Acode/pull/1601
+* Restore terminal tabs  by @bajrangCoder in https://github.com/Acode-Foundation/Acode/pull/1592
+  - fix: terminal font issue
+  - Breaking change: Changed default terminal configs
+* feat: service on/off by @RohitKushvaha01 in https://github.com/Acode-Foundation/Acode/pull/1602
+* fix: service stop on app exit by @RohitKushvaha01 in https://github.com/Acode-Foundation/Acode/pull/1603
+* fix: ED25519 SSH keys not working by @UnschooledGamer in https://github.com/Acode-Foundation/Acode/pull/1595
+* CI: Nightly Builds by @UnschooledGamer in https://github.com/Acode-Foundation/Acode/pull/1612
+* style(terminal): Some touch selection handle enhancements by @peasneovoyager2banana2 in https://github.com/Acode-Foundation/Acode/pull/1611
+* fix: pip by @RohitKushvaha01 in https://github.com/Acode-Foundation/Acode/pull/1617
+* feat: Enable all file access in nightly builds by @RohitKushvaha01 in https://github.com/Acode-Foundation/Acode/pull/1618
+* Add support for renaming documents in provider by @bajrangCoder in https://github.com/Acode-Foundation/Acode/pull/1619
+* fix: support for Acode terminal SAF URIs by @bajrangCoder in https://github.com/Acode-Foundation/Acode/pull/1621
+* fix: rm command by @RohitKushvaha01 in https://github.com/Acode-Foundation/Acode/pull/1623
+* feat: add 'check for app updates' setting to toggle the automatic behaviour by @bajrangCoder in https://github.com/Acode-Foundation/Acode/pull/1624
+* chore(i18n): update hu-hu.json by @summoner001 in https://github.com/Acode-Foundation/Acode/pull/1626
+* Enforce Unix lf endings for shell scripts by @RohitKushvaha01 in https://github.com/Acode-Foundation/Acode/pull/1637
+* AutoSuggest install command in terminal by @RohitKushvaha01 in https://github.com/Acode-Foundation/Acode/pull/1638
+* feat: add plugin filtering by author and keywords by @bajrangCoder in https://github.com/Acode-Foundation/Acode/pull/1625
+  - Refactored filtering logic to support multi-page results and improved UI feedback for filter actions.
+* Translation: Update hu-hu.json by @summoner001 in https://github.com/Acode-Foundation/Acode/pull/1640
+* fix: init-alpine by @RohitKushvaha01 in https://github.com/Acode-Foundation/Acode/pull/1641
+* fix: ANSI escape sequence in init-alpine by @RohitKushvaha01 in https://github.com/Acode-Foundation/Acode/pull/1643
+* chore(i18n): update de-de.json by @Mr-Update in https://github.com/Acode-Foundation/Acode/pull/1648
+* fix: update proot binaries to support 16kb page size by @RohitKushvaha01 in https://github.com/Acode-Foundation/Acode/pull/1649
+* chore(i18n): update id-id.json with new strings by @hyperz111 in https://github.com/Acode-Foundation/Acode/pull/1650
+* Translation: Update hu-Hu.json by @summoner001 in https://github.com/Acode-Foundation/Acode/pull/1653
+* Add confirmation prompt before closing terminal tabs by @bajrangCoder in https://github.com/Acode-Foundation/Acode/pull/1655
+* fix: compatibility for old android versions by @bajrangCoder in https://github.com/Acode-Foundation/Acode/pull/1656
+* fix: improve file sharing and URI handling by @bajrangCoder in https://github.com/Acode-Foundation/Acode/pull/1662
+  - Improved file sharing and fixed permission issue (also in case of open with , edit with)
+* fix: do not restore terminals if axs is dead by @RohitKushvaha01 in https://github.com/Acode-Foundation/Acode/pull/1664
+* fix: .capitalize() removed because it changes the translations (also English) by @Mr-Update in https://github.com/Acode-Foundation/Acode/pull/1665
+* fix: `switchFile` api to respect custom subtitle by @bajrangCoder in https://github.com/Acode-Foundation/Acode/pull/1672
+* Update zh-cn.json and zh-hant.json by @LaunchLee in https://github.com/Acode-Foundation/Acode/pull/1674
+* fix: Translation corrected in terminal settings by @Mr-Update in https://github.com/Acode-Foundation/Acode/pull/1676
+* fix: Added missing translation for info window in file browser and app settings. by @Mr-Update in https://github.com/Acode-Foundation/Acode/pull/1677
+* Translation: Update hungarian hu-HU.json by @summoner001 in https://github.com/Acode-Foundation/Acode/pull/1680
+* Update ads plugin and fix some issues of free version by @bajrangCoder in https://github.com/Acode-Foundation/Acode/pull/1683
+  - fix: system them on free version
+* fix: restore folds when formatting if available by @bajrangCoder in https://github.com/Acode-Foundation/Acode/pull/1682
+* fix: Added missing translation for info window in terminal settings by @Mr-Update in https://github.com/Acode-Foundation/Acode/pull/1681
+* Translation: Update hungarian hu-hu.json by @summoner001 in https://github.com/Acode-Foundation/Acode/pull/1687
+* feat: Add clean install state functionality to app settings by @UnschooledGamer in https://github.com/Acode-Foundation/Acode/pull/1690
+* Translation: Update hungarian hu-hu.json by @summoner001 in https://github.com/Acode-Foundation/Acode/pull/1693
+
+
+## v1.11.6 (965)
+
+* fix: Terminal in F-Droid flavour by @RohitKushvaha01 in https://github.com/Acode-Foundation/Acode/pull/1478
+* feat: update target SDK to API 35 and fix edge-to-edge compatibility by @bajrangCoder in https://github.com/Acode-Foundation/Acode/pull/1486
+* improve German translation by @brian200508 in https://github.com/Acode-Foundation/Acode/pull/1487
+* Translation: Update hu-hu.json by @summoner001 in https://github.com/Acode-Foundation/Acode/pull/1489
+* chore(update IAP library to lateset version) by @deadlyjack in https://github.com/Acode-Foundation/Acode/pull/1405
+* feat: font manager ui for managing custom fonts by @bajrangCoder in https://github.com/Acode-Foundation/Acode/pull/1491
+* feat: add package updated time display on plugin page by @bajrangCoder in https://github.com/Acode-Foundation/Acode/pull/1494
+* chore: update id-id.json by @hyperz111 in https://github.com/Acode-Foundation/Acode/pull/1495
+* fix: document provider by @RohitKushvaha01 in https://github.com/Acode-Foundation/Acode/pull/1497
+* feat(sponsor page) by @deadlyjack in https://github.com/Acode-Foundation/Acode/pull/1496
+* fix: load custom fonts on restart by @bajrangCoder in https://github.com/Acode-Foundation/Acode/pull/1499
+* Update hu-hu.json by @summoner001 in https://github.com/Acode-Foundation/Acode/pull/1498
+* fix: resolve GitHub URI preview issues in server by @bajrangCoder in https://github.com/Acode-Foundation/Acode/pull/1501
+* fix: plugins page scrolling by @deadlyjack in https://github.com/Acode-Foundation/Acode/pull/1505
+* [chore] bump workflow dependencies to latest versions by @Jvr2022 in https://github.com/Acode-Foundation/Acode/pull/1506
+* fix: load base app stylesheet in custom editor tab by @deadlyjack in https://github.com/Acode-Foundation/Acode/pull/1507
+* update src/lang/pt-br.json by @sebastianjnuwu in https://github.com/Acode-Foundation/Acode/pull/1510
+* Add code formatter keybind by @UnschooledGamer in https://github.com/Acode-Foundation/Acode/pull/1511
+* Added hyphen in quicktools and more strings for i18n by @bajrangCoder in https://github.com/Acode-Foundation/Acode/pull/1516
+* chore(i18n): update id-id.json with new strings by @hyperz111 in https://github.com/Acode-Foundation/Acode/pull/1521
+* chore(i18n): update hu-hu.json with new strings by @summoner001 in https://github.com/Acode-Foundation/Acode/pull/1520
+* Add/Update Bengali (bn-BD) Translation File by @thebadhonbiswas in https://github.com/Acode-Foundation/Acode/pull/1522
+* feat: take confirmation before uninstalling terminal by @bajrangCoder in https://github.com/Acode-Foundation/Acode/pull/1528
+* fix ui issue by @bajrangCoder in https://github.com/Acode-Foundation/Acode/pull/1527
+* fix: disable changing editor theme when system is selected by @RohitKushvaha01 in https://github.com/Acode-Foundation/Acode/pull/1529
+* fix: svg render issue by @RohitKushvaha01 in https://github.com/Acode-Foundation/Acode/pull/1530
+* fix: encoding detection by @bajrangCoder in https://github.com/Acode-Foundation/Acode/pull/1533
+* fix: big screen ui and global search worker issue by @deadlyjack in https://github.com/Acode-Foundation/Acode/pull/1534
+* fix: improved terminal mounts by @RohitKushvaha01 in https://github.com/Acode-Foundation/Acode/pull/1537
+* chore(i18n): refine Russian (ru-ru.json) localization with updated and new strings by @Nein-Ich-wurde-Gewinnen in https://github.com/Acode-Foundation/Acode/pull/1541
+* Fixed Plugin installation issues(in some cases) by @bajrangCoder in https://github.com/Acode-Foundation/Acode/pull/1546
+* feat: add option to auto detect encoding by @bajrangCoder in https://github.com/Acode-Foundation/Acode/pull/1547
+* fix: ftp infinite loading by @RohitKushvaha01 in https://github.com/Acode-Foundation/Acode/pull/1552
+* fix: tab active state when switching tab with api by @bajrangCoder in https://github.com/Acode-Foundation/Acode/pull/1557
+* fix: resize of terminal and some small patches by @bajrangCoder in https://github.com/Acode-Foundation/Acode/pull/1562
+* fix: fdroid builds by @RohitKushvaha01 in https://github.com/Acode-Foundation/Acode/pull/1565
+
 ## v1.11.5 (963)
 
 * Alpine Linux Backend by @RohitKushvaha01 in https://github.com/Acode-Foundation/Acode/pull/1401
@@ -164,7 +258,7 @@
 * Fixed an issue where the info dialog wouldn't appear for non-editor tabs in #1167
 * Fixed incorrect file attributes in FTP by @bajrangCoder in #1194
 * Fixed the palette not opening when triggered from an existing palette by @bajrangCoder in #1197
-* Fixed trigering of infinite scroll on plugin page while searching by @bajrangCoder in #1200
+* Fixed triggering of infinite scroll on plugin page while searching by @bajrangCoder in #1200
 
 ### Features
 * Improved tab view gesture handling to distinguish between scroll and swipe on the plugin page by @bajrangCoder in #1131

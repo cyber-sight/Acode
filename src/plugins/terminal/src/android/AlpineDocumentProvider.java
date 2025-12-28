@@ -20,6 +20,7 @@ import java.util.Collections;
 import java.util.LinkedList;
 import java.util.Locale;
 import com.foxdebug.acode.R;
+import com.foxdebug.acode.rk.exec.terminal.*;
 
 public class AlpineDocumentProvider extends DocumentsProvider {
     
@@ -60,7 +61,7 @@ public class AlpineDocumentProvider extends DocumentsProvider {
         MatrixCursor result = new MatrixCursor(
             projection != null ? projection : DEFAULT_ROOT_PROJECTION
         );
-        String applicationName = "Acode";
+        String applicationName = getApplicationLabel();
 
         MatrixCursor.RowBuilder row = result.newRow();
         row.add(DocumentsContract.Root.COLUMN_ROOT_ID, getDocIdForFile(BASE_DIR));
@@ -75,7 +76,7 @@ public class AlpineDocumentProvider extends DocumentsProvider {
         row.add(DocumentsContract.Root.COLUMN_TITLE, applicationName);
         row.add(DocumentsContract.Root.COLUMN_MIME_TYPES, ALL_MIME_TYPES);
         row.add(DocumentsContract.Root.COLUMN_AVAILABLE_BYTES, BASE_DIR.getFreeSpace());
-        row.add(DocumentsContract.Root.COLUMN_ICON, R.mipmap.ic_launcher);
+        row.add(DocumentsContract.Root.COLUMN_ICON, resolveLauncherIcon());
         return result;
     }
 
@@ -173,6 +174,33 @@ public class AlpineDocumentProvider extends DocumentsProvider {
     }
 
     @Override
+    public String renameDocument(String documentId, String displayName) throws FileNotFoundException {
+        File file = getFileForDocId(documentId);
+        File parent = file.getParentFile();
+        if (parent == null) {
+            throw new FileNotFoundException("Failed to rename root document with id " + documentId);
+        }
+        if (displayName == null || displayName.trim().isEmpty()) {
+            throw new FileNotFoundException("Failed to rename document with id " + documentId);
+        }
+        if (displayName.equals(file.getName())) {
+            return documentId;
+        }
+        if (displayName.contains(File.separator)) {
+            throw new FileNotFoundException("Invalid display name for rename: " + displayName);
+        }
+
+        File target = new File(parent, displayName);
+        if (target.exists()) {
+            throw new FileNotFoundException("Target already exists: " + target.getAbsolutePath());
+        }
+        if (!file.renameTo(target)) {
+            throw new FileNotFoundException("Failed to rename document with id " + documentId);
+        }
+        return getDocIdForFile(target);
+    }
+
+    @Override
     public String getDocumentType(String documentId) throws FileNotFoundException {
         File file = getFileForDocId(documentId);
         return getMimeType(file);
@@ -258,6 +286,7 @@ public class AlpineDocumentProvider extends DocumentsProvider {
         File parentFile = file.getParentFile();
         if (parentFile != null && parentFile.canWrite()) {
             flags = flags | DocumentsContract.Document.FLAG_SUPPORTS_DELETE;
+            flags = flags | DocumentsContract.Document.FLAG_SUPPORTS_RENAME;
         }
 
         String displayName = file.getName();
@@ -334,6 +363,24 @@ public class AlpineDocumentProvider extends DocumentsProvider {
                 }
             }
             return "application/octet-stream";
+        }
+    }
+    private int resolveLauncherIcon() {
+        Context context = getContext();
+        if (context == null) return android.R.mipmap.sym_def_app_icon;
+        int icon = context.getResources().getIdentifier("ic_launcher", "mipmap", context.getPackageName());
+        return icon != 0 ? icon : android.R.mipmap.sym_def_app_icon;
+    }
+
+    private String getApplicationLabel() {
+        Context context = getContext();
+        if (context == null) return "Acode";
+        PackageManager pm = context.getPackageManager();
+        try {
+            CharSequence label = pm.getApplicationLabel(context.getApplicationInfo());
+            return label != null ? label.toString() : "Acode";
+        } catch (Exception ignored) {
+            return "Acode";
         }
     }
 }

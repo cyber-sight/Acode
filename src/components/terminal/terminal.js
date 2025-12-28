@@ -32,6 +32,7 @@ export default class TerminalComponent {
 			rows: options.rows || 24,
 			cols: options.cols || 80,
 			port: options.port || 8767,
+			renderer: options.renderer || "auto", // 'auto' | 'canvas' | 'webgl'
 			fontSize: terminalSettings.fontSize,
 			fontFamily: terminalSettings.fontFamily,
 			fontWeight: terminalSettings.fontWeight,
@@ -80,7 +81,7 @@ export default class TerminalComponent {
 				system.openInBrowser(uri);
 			}
 		});
-		this.webglAddon = new WebglAddon();
+		this.webglAddon = null;
 
 		// Load addons
 		this.terminal.loadAddon(this.fitAddon);
@@ -119,6 +120,58 @@ export default class TerminalComponent {
 
 		// Handle copy/paste keybindings
 		this.setupCopyPasteHandlers();
+
+		// Handle custom OSC 7777 for acode CLI commands
+		this.setupOscHandler();
+	}
+
+	/**
+	 * Setup custom OSC handler for acode CLI integration
+	 * OSC 7777 format: \e]7777;command;arg1;arg2;...\a
+	 */
+	setupOscHandler() {
+		// Register custom OSC handler for ID 7777
+		// Format: command;arg1;arg2;... where arg2 (path) may contain semicolons
+		this.terminal.parser.registerOscHandler(7777, (data) => {
+			const firstSemi = data.indexOf(";");
+			if (firstSemi === -1) {
+				console.warn("Invalid OSC 7777 format:", data);
+				return true;
+			}
+
+			const command = data.substring(0, firstSemi);
+			const rest = data.substring(firstSemi + 1);
+
+			switch (command) {
+				case "open": {
+					// Format: open;type;path (path may contain semicolons)
+					const secondSemi = rest.indexOf(";");
+					if (secondSemi === -1) {
+						console.warn("Invalid OSC 7777 open format:", data);
+						return true;
+					}
+					const type = rest.substring(0, secondSemi);
+					const path = rest.substring(secondSemi + 1);
+					this.handleOscOpen(type, path);
+					break;
+				}
+				default:
+					console.warn("Unknown OSC 7777 command:", command);
+			}
+			return true;
+		});
+	}
+
+	/**
+	 * Handle OSC open command from acode CLI
+	 * @param {string} type - "file" or "folder"
+	 * @param {string} path - Path to open
+	 */
+	handleOscOpen(type, path) {
+		if (!path) return;
+
+		// Emit event for the app to handle
+		this.onOscOpen?.(type, path);
 	}
 
 	/**
@@ -244,36 +297,12 @@ export default class TerminalComponent {
 		// Ensure scroll position is within valid bounds
 		const safeScrollPosition = Math.min(targetScrollPosition, maxScroll);
 
-		// Only adjust if we have significant content and the position is different
+		// Only adjust if we have significant content and the position differs
 		if (
 			buffer.length > this.terminal.rows &&
-			Math.abs(buffer.viewportY - safeScrollPosition) > 2
+			buffer.viewportY !== safeScrollPosition
 		) {
-			// Gradually adjust to prevent jarring movements
-			const steps = 3;
-			const diff = safeScrollPosition - buffer.viewportY;
-			const stepSize = Math.ceil(Math.abs(diff) / steps);
-
-			let currentStep = 0;
-			const adjustStep = () => {
-				if (currentStep >= steps) return;
-
-				const currentPos = buffer.viewportY;
-				const remaining = safeScrollPosition - currentPos;
-				const adjustment =
-					Math.sign(remaining) * Math.min(stepSize, Math.abs(remaining));
-
-				if (Math.abs(adjustment) >= 1) {
-					this.terminal.scrollLines(adjustment);
-				}
-
-				currentStep++;
-				if (currentStep < steps && Math.abs(remaining) > 1) {
-					setTimeout(adjustStep, 50);
-				}
-			};
-
-			setTimeout(adjustStep, 100);
+			this.terminal.scrollToLine(safeScrollPosition);
 		}
 	}
 
@@ -468,7 +497,6 @@ export default class TerminalComponent {
       position: relative;
       background: ${this.options.theme.background};
       overflow: hidden;
-      padding: 0.25rem;
       box-sizing: border-box;
     `;
 
@@ -490,17 +518,28 @@ export default class TerminalComponent {
 		this.container.style.background = this.options.theme.background;
 
 		try {
-			try {
-				this.terminal.loadAddon(this.webglAddon);
-				this.terminal.open(container);
-			} catch (error) {
-				console.error("Failed to load WebglAddon:", error);
-				this.webglAddon.dispose();
-			}
+			// Open first to ensure a stable renderer is attached
+			this.terminal.open(container);
 
-			if (!this.terminal.element) {
-				// webgl loading failed for some reason, attach with DOM renderer
-				this.terminal.open(container);
+			// Renderer selection: 'canvas' (default core), 'webgl', or 'auto'
+			if (
+				this.options.renderer === "webgl" ||
+				this.options.renderer === "auto"
+			) {
+				try {
+					const addon = new WebglAddon();
+					this.terminal.loadAddon(addon);
+					if (typeof addon.onContextLoss === "function") {
+						addon.onContextLoss(() => this._handleWebglContextLoss());
+					}
+					this.webglAddon = addon;
+				} catch (error) {
+					console.error("Failed to enable WebGL renderer:", error);
+					try {
+						this.webglAddon?.dispose?.();
+					} catch {}
+					this.webglAddon = null; // stay on canvas
+				}
 			}
 			const terminalSettings = getTerminalSettings();
 			// Load ligatures addon if enabled
@@ -508,14 +547,20 @@ export default class TerminalComponent {
 				this.loadLigaturesAddon();
 			}
 
-			// Wait for terminal to render then fit
-			setTimeout(() => {
-				this.fitAddon.fit();
-				this.terminal.focus();
-
-				// Initialize touch selection after terminal is mounted
-				this.setupTouchSelection();
-			}, 10);
+			// First render pass: schedule a fit + focus once the frame is ready
+			if (typeof requestAnimationFrame === "function") {
+				requestAnimationFrame(() => {
+					this.fitAddon.fit();
+					this.terminal.focus();
+					this.setupTouchSelection();
+				});
+			} else {
+				setTimeout(() => {
+					this.fitAddon.fit();
+					this.terminal.focus();
+					this.setupTouchSelection();
+				}, 0);
+			}
 		} catch (error) {
 			console.error("Failed to mount terminal:", error);
 		}
@@ -726,32 +771,6 @@ export default class TerminalComponent {
 	 * Focus terminal
 	 */
 	focus() {
-		// Ensure cursor is visible before focusing to prevent half-visibility
-		if (this.terminal.buffer && this.terminal.buffer.active) {
-			const buffer = this.terminal.buffer.active;
-			const cursorY = buffer.cursorY;
-			const cursorViewportPos = buffer.baseY + cursorY;
-			const viewportTop = buffer.viewportY;
-			const viewportBottom = viewportTop + this.terminal.rows - 1;
-
-			// Check if cursor is fully visible (with margin to prevent half-visibility)
-			const isCursorFullyVisible =
-				cursorViewportPos >= viewportTop + 1 &&
-				cursorViewportPos <= viewportBottom - 2;
-
-			// If cursor is not fully visible, scroll to make it properly visible
-			if (!isCursorFullyVisible && buffer.length > this.terminal.rows) {
-				const targetScroll = Math.max(
-					0,
-					Math.min(
-						buffer.length - this.terminal.rows,
-						cursorViewportPos - Math.floor(this.terminal.rows * 0.25),
-					),
-				);
-				this.terminal.scrollToLine(targetScroll);
-			}
-		}
-
 		this.terminal.focus();
 	}
 
@@ -1018,3 +1037,16 @@ export default class TerminalComponent {
 	onBell() {}
 	onProcessExit(exitData) {}
 }
+
+// Internal helpers for WebGL renderer lifecycle
+TerminalComponent.prototype._handleWebglContextLoss = function () {
+	try {
+		console.warn("WebGL context lost; falling back to canvas renderer");
+		try {
+			this.webglAddon?.dispose?.();
+		} catch {}
+		this.webglAddon = null;
+	} catch (e) {
+		console.error("Error handling WebGL context loss:", e);
+	}
+};

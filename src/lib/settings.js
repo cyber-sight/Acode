@@ -149,6 +149,7 @@ class Settings {
 			lineHeight: 2,
 			leftMargin: 50,
 			checkFiles: true,
+			checkForAppUpdates: false,
 			desktopMode: false,
 			console: this.CONSOLE_LEGACY,
 			keyboardMode: this.KEYBOARD_MODE_NO_SUGGESTIONS_AGGRESSIVE,
@@ -184,12 +185,10 @@ class Settings {
 		if (this.#initialized) return;
 		this.settingsFile = Url.join(DATA_STORAGE, "settings.json");
 
-		if (!IS_FREE_VERSION) {
-			this.#defaultSettings.appTheme = "system";
-			this.#defaultSettings.editorTheme = getSystemEditorTheme(
-				isDeviceDarkTheme(),
-			);
-		}
+		this.#defaultSettings.appTheme = "system";
+		this.#defaultSettings.editorTheme = getSystemEditorTheme(
+			isDeviceDarkTheme(),
+		);
 
 		this.#initialized = true;
 

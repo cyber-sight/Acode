@@ -6,12 +6,136 @@
 import EditorFile from "lib/editorFile";
 import TerminalComponent from "./terminal";
 import "@xterm/xterm/css/xterm.css";
+import quickTools from "components/quickTools";
 import toast from "components/toast";
+import confirm from "dialogs/confirm";
+import openFile from "lib/openFile";
+import openFolder from "lib/openFolder";
+import appSettings from "lib/settings";
+import helpers from "utils/helpers";
+
+const TERMINAL_SESSION_STORAGE_KEY = "acodeTerminalSessions";
 
 class TerminalManager {
 	constructor() {
 		this.terminals = new Map();
 		this.terminalCounter = 0;
+	}
+
+	async getPersistedSessions() {
+		try {
+			const stored = helpers.parseJSON(
+				localStorage.getItem(TERMINAL_SESSION_STORAGE_KEY),
+			);
+			if (!Array.isArray(stored)) return [];
+			if (!(await Terminal.isAxsRunning())) {
+				return [];
+			}
+			return stored
+				.map((entry) => {
+					if (!entry) return null;
+					if (typeof entry === "string") {
+						return { pid: entry, name: `Terminal ${entry}` };
+					}
+					if (typeof entry === "object" && entry.pid) {
+						const pid = String(entry.pid);
+						return {
+							pid,
+							name: entry.name || `Terminal ${pid}`,
+						};
+					}
+					return null;
+				})
+				.filter(Boolean);
+		} catch (error) {
+			console.error("Failed to read persisted terminal sessions:", error);
+			return [];
+		}
+	}
+
+	savePersistedSessions(sessions) {
+		try {
+			localStorage.setItem(
+				TERMINAL_SESSION_STORAGE_KEY,
+				JSON.stringify(sessions),
+			);
+		} catch (error) {
+			console.error("Failed to persist terminal sessions:", error);
+		}
+	}
+
+	async persistTerminalSession(pid, name) {
+		if (!pid) return;
+
+		const pidStr = String(pid);
+		const sessions = await this.getPersistedSessions();
+		const existingIndex = sessions.findIndex(
+			(session) => session.pid === pidStr,
+		);
+		const sessionData = {
+			pid: pidStr,
+			name: name || `Terminal ${pidStr}`,
+		};
+
+		if (existingIndex >= 0) {
+			sessions[existingIndex] = {
+				...sessions[existingIndex],
+				...sessionData,
+			};
+		} else {
+			sessions.push(sessionData);
+		}
+
+		this.savePersistedSessions(sessions);
+	}
+
+	async removePersistedSession(pid) {
+		if (!pid) return;
+
+		const pidStr = String(pid);
+		const sessions = await this.getPersistedSessions();
+		const nextSessions = sessions.filter((session) => session.pid !== pidStr);
+
+		if (nextSessions.length !== sessions.length) {
+			this.savePersistedSessions(nextSessions);
+		}
+	}
+
+	async restorePersistedSessions() {
+		const sessions = await this.getPersistedSessions();
+		if (!sessions.length) return;
+
+		const manager = window.editorManager;
+		const activeFileId = manager?.activeFile?.id;
+		const restoredTerminals = [];
+
+		for (const session of sessions) {
+			if (!session?.pid) continue;
+			if (this.terminals.has(session.pid)) continue;
+
+			try {
+				const instance = await this.createServerTerminal({
+					pid: session.pid,
+					name: session.name,
+					reconnecting: true,
+					render: false,
+				});
+				if (instance) restoredTerminals.push(instance);
+			} catch (error) {
+				console.error(
+					`Failed to restore terminal session ${session.pid}:`,
+					error,
+				);
+				this.removePersistedSession(session.pid);
+			}
+		}
+
+		if (activeFileId && manager?.getFile) {
+			const fileToRestore = manager.getFile(activeFileId, "id");
+			fileToRestore?.makeActive();
+		} else if (!manager?.activeFile && restoredTerminals.length) {
+			restoredTerminals[0]?.file?.makeActive();
+		}
 	}
 
 	/**
@@ -21,11 +145,15 @@ class TerminalManager {
 	 */
 	async createTerminal(options = {}) {
 		try {
+			const { render, serverMode, ...terminalOptions } = options;
+			const shouldRender = render !== false;
+			const isServerMode = serverMode !== false;
+
 			const terminalId = `terminal_${++this.terminalCounter}`;
 			const terminalName = options.name || `Terminal ${this.terminalCounter}`;
 
 			// Check if terminal is installed before proceeding
-			if (options.serverMode !== false) {
+			if (isServerMode) {
 				const installationResult = await this.checkAndInstallTerminal();
 				if (!installationResult.success) {
 					throw new Error(installationResult.error);
@@ -34,8 +162,8 @@ class TerminalManager {
 
 			// Create terminal component
 			const terminalComponent = new TerminalComponent({
-				serverMode: options.serverMode !== false,
-				...options,
+				serverMode: isServerMode,
+				...terminalOptions,
 			});
 
 			// Create container
@@ -44,23 +172,26 @@ class TerminalManager {
 				id: `terminal-${terminalId}`,
 			});
 
-			// Terminal styles
-			const terminalStyles = this.getTerminalStyles();
-			const terminalStyle = tag("style", {
-				textContent: terminalStyles,
-			});
-			document.body.appendChild(terminalStyle);
+			// Terminal styles (inject once)
+			if (!document.getElementById("acode-terminal-styles")) {
+				const terminalStyles = this.getTerminalStyles();
+				const terminalStyle = tag("style", {
+					id: "acode-terminal-styles",
+					textContent: terminalStyles,
+				});
+				document.body.appendChild(terminalStyle);
+			}
 
 			// Create EditorFile for terminal
 			const terminalFile = new EditorFile(terminalName, {
 				type: "terminal",
 				content: terminalContainer,
 				tabIcon: "licons terminal",
-				render: true,
+				render: shouldRender,
 			});
 
 			// Wait for tab creation and setup
-			const terminalInstance = await new Promise((resolve, reject) => {
+			return await new Promise((resolve, reject) => {
 				setTimeout(async () => {
 					try {
 						// Mount terminal component
@@ -68,7 +199,7 @@ class TerminalManager {
 
 						// Connect to session if in server mode
 						if (terminalComponent.serverMode) {
-							await terminalComponent.connectToSession();
+							await terminalComponent.connectToSession(terminalOptions.pid);
 						} else {
 							// For local mode, just write a welcome message
 							terminalComponent.write(
@@ -95,6 +226,13 @@ class TerminalManager {
 						};
 
 						this.terminals.set(uniqueId, instance);
+
+						if (terminalComponent.serverMode && terminalComponent.pid) {
+							await this.persistTerminalSession(
+								terminalComponent.pid,
+								terminalName,
+							);
+						}
 						resolve(instance);
 					} catch (error) {
 						console.error("Failed to initialize terminal:", error);
@@ -102,8 +240,6 @@ class TerminalManager {
 					}
 				}, 100);
 			});
-
-			return terminalInstance;
 		} catch (error) {
 			console.error("Failed to create terminal:", error);
 			throw error;
@@ -188,12 +324,15 @@ class TerminalManager {
 			id: `terminal-${terminalId}`,
 		});
 
-		// Terminal styles
-		const terminalStyles = this.getTerminalStyles();
-		const terminalStyle = tag("style", {
-			textContent: terminalStyles,
-		});
-		document.body.appendChild(terminalStyle);
+		// Terminal styles (inject once)
+		if (!document.getElementById("acode-terminal-styles")) {
+			const terminalStyles = this.getTerminalStyles();
+			const terminalStyle = tag("style", {
+				id: "acode-terminal-styles",
+				textContent: terminalStyles,
+			});
+			document.body.appendChild(terminalStyle);
+		}
 
 		// Create EditorFile for terminal
 		const terminalFile = new EditorFile(terminalName, {
@@ -204,7 +343,7 @@ class TerminalManager {
 		});
 
 		// Wait for tab creation and setup
-		const terminalInstance = await new Promise((resolve, reject) => {
+		return await new Promise((resolve, reject) => {
 			setTimeout(async () => {
 				try {
 					// Mount terminal component
@@ -244,8 +383,6 @@ class TerminalManager {
 				}
 			}, 100);
 		});
-
-		return terminalInstance;
 	}
 
 	/**
@@ -254,13 +391,57 @@ class TerminalManager {
 	 * @param {TerminalComponent} terminalComponent - Terminal component
 	 * @param {string} terminalId - Terminal ID
 	 */
-	setupTerminalHandlers(terminalFile, terminalComponent, terminalId) {
+	async setupTerminalHandlers(terminalFile, terminalComponent, terminalId) {
+		const textarea = terminalComponent.terminal?.textarea;
+		if (textarea) {
+			const onFocus = () => {
+				const { $toggler } = quickTools;
+				$toggler.classList.add("hide");
+				clearTimeout(this.togglerTimeout);
+				this.togglerTimeout = setTimeout(() => {
+					$toggler.style.display = "none";
+				}, 300);
+			};
+
+			const onBlur = () => {
+				const { $toggler } = quickTools;
+				clearTimeout(this.togglerTimeout);
+				$toggler.style.display = "";
+				setTimeout(() => {
+					$toggler.classList.remove("hide");
+				}, 10);
+			};
+
+			textarea.addEventListener("focus", onFocus);
+			textarea.addEventListener("blur", onBlur);
+
+			terminalComponent.cleanupFocusHandlers = () => {
+				textarea.removeEventListener("focus", onFocus);
+				textarea.removeEventListener("blur", onBlur);
+			};
+		}
+
 		// Handle tab focus/blur
 		terminalFile.onfocus = () => {
-			setTimeout(() => {
+			// Guarded fit on focus: only fit if cols/rows would change, then focus
+			const run = () => {
+				try {
+					const pd = terminalComponent.fitAddon?.proposeDimensions?.();
+					if (
+						pd &&
+						(pd.cols !== terminalComponent.terminal.cols ||
+							pd.rows !== terminalComponent.terminal.rows)
+					) {
+						terminalComponent.fitAddon.fit();
+					}
+				} catch {}
 				terminalComponent.focus();
-				terminalComponent.fit();
-			}, 10);
+			};
+			if (typeof requestAnimationFrame === "function") {
+				requestAnimationFrame(run);
+			} else {
+				setTimeout(run, 0);
+			}
 		};
 
 		// Handle tab close
@@ -268,13 +449,35 @@ class TerminalManager {
 			this.closeTerminal(terminalId);
 		};
 
+		terminalFile._skipTerminalCloseConfirm = false;
+		const originalRemove = terminalFile.remove.bind(terminalFile);
+		terminalFile.remove = async (force = false) => {
+			if (
+				!terminalFile._skipTerminalCloseConfirm &&
+				this.shouldConfirmTerminalClose()
+			) {
+				const message = `${strings["close"]} ${strings["terminal"]}?`;
+				const shouldClose = await confirm(strings["confirm"], message);
+				if (!shouldClose) return;
+			}
+
+			terminalFile._skipTerminalCloseConfirm = false;
+			return originalRemove(force);
+		};
+
 		// Enhanced resize handling with debouncing
 		let resizeTimeout = null;
 		const RESIZE_DEBOUNCE = 200;
 		let lastResizeTime = 0;
 
+		let lastWidth = 0;
+		let lastHeight = 0;
 		const resizeObserver = new ResizeObserver((entries) => {
 			const now = Date.now();
+			const entry = entries && entries[0];
+			const cr = entry?.contentRect;
+			const width = cr?.width ?? terminalFile.content?.clientWidth ?? 0;
+			const height = cr?.height ?? terminalFile.content?.clientHeight ?? 0;
 
 			// Clear any pending resize
 			if (resizeTimeout) {
@@ -289,24 +492,14 @@ class TerminalManager {
 						return;
 					}
 
-					// Get current terminal state
-					const currentRows = terminalComponent.terminal.rows;
-					const currentCols = terminalComponent.terminal.cols;
-
-					// Fit the terminal to new container size
-					terminalComponent.fit();
-
-					// Check if dimensions actually changed after fit
-					const newRows = terminalComponent.terminal.rows;
-					const newCols = terminalComponent.terminal.cols;
-
+					// Only fit if actual size changed to reduce reflows
 					if (
-						Math.abs(newRows - currentRows) > 1 ||
-						Math.abs(newCols - currentCols) > 1
+						Math.abs(width - lastWidth) > 0.5 ||
+						Math.abs(height - lastHeight) > 0.5
 					) {
-						// console.log(
-						// 	`Terminal ${terminalId} resized: ${currentRows}x${currentCols} -> ${newRows}x${newCols}`,
-						// );
+						terminalComponent.fit();
+						lastWidth = width;
+						lastHeight = height;
 					}
 
 					// Update last resize time
@@ -322,6 +515,8 @@ class TerminalManager {
 			const containerElement = terminalFile.content;
 			if (containerElement && containerElement instanceof Element) {
 				resizeObserver.observe(containerElement);
+				// store observer so we can disconnect on close
+				terminalFile._resizeObserver = resizeObserver;
 			} else {
 				console.warn("Terminal container not available for ResizeObserver");
 			}
@@ -343,11 +538,18 @@ class TerminalManager {
 			this.closeTerminal(terminalId);
 		};
 
-		terminalComponent.onTitleChange = (title) => {
+		terminalComponent.onTitleChange = async (title) => {
 			if (title) {
 				// Format terminal title as "Terminal ! - title"
 				const formattedTitle = `Terminal ${this.terminalCounter} - ${title}`;
 				terminalFile.filename = formattedTitle;
+
+				if (terminalComponent.serverMode && terminalComponent.pid) {
+					await this.persistTerminalSession(
+						terminalComponent.pid,
+						formattedTitle,
+					);
+				}
 
 				// Refresh the header subtitle if this terminal is active
 				if (
@@ -372,8 +574,33 @@ class TerminalManager {
 			}
 
 			this.closeTerminal(terminalId);
+			terminalFile._skipTerminalCloseConfirm = true;
 			terminalFile.remove(true);
 			toast(message);
+		};
+
+		// Handle acode CLI open commands (OSC 7777)
+		terminalComponent.onOscOpen = async (type, path) => {
+			if (!path) return;
+
+			// Convert proot path
+			const fileUri = this.convertProotPath(path);
+			// Extract folder/file name from path
+			const name = path.split("/").filter(Boolean).pop() || "folder";
+
+			try {
+				if (type === "folder") {
+					// Open folder in sidebar
+					await openFolder(fileUri, { name, saveState: true, listFiles: true });
+					toast(`Opened folder: ${name}`);
+				} else {
+					// Open file in editor
+					await openFile(fileUri, { render: true });
+				}
+			} catch (error) {
+				console.error("Failed to open from terminal:", error);
+				toast(`Failed to open: ${path}`);
+			}
 		};
 
 		// Store references for cleanup
@@ -402,9 +629,18 @@ class TerminalManager {
 		if (!terminal) return;
 
 		try {
+			if (terminal.component.serverMode && terminal.component.pid) {
+				this.removePersistedSession(terminal.component.pid);
+			}
+
 			// Cleanup resize observer
 			if (terminal.file._resizeObserver) {
 				terminal.file._resizeObserver.disconnect();
+			}
+
+			// Cleanup focus handlers
+			if (terminal.component.cleanupFocusHandlers) {
+				terminal.component.cleanupFocusHandlers();
 			}
 
 			// Dispose terminal component
@@ -412,6 +648,10 @@ class TerminalManager {
 
 			// Remove from map
 			this.terminals.delete(terminalId);
+
+			if (this.getAllTerminals().size <= 0) {
+				Executor.stopService();
+			}
 
 			console.log(`Terminal ${terminalId} closed`);
 		} catch (error) {
@@ -472,7 +712,11 @@ class TerminalManager {
 				background: #1e1e1e;
 				overflow: hidden;
 				position: relative;
+			}
+
+			.terminal-content .xterm {
 				padding: 0.25rem;
+				box-sizing: border-box;
 			}
 		`;
 	}
@@ -571,6 +815,48 @@ class TerminalManager {
 				console.error(`Error stabilizing terminal ${terminal.id}:`, error);
 			}
 		});
+	}
+
+	/**
+	 * Convert proot internal path to app-accessible path
+	 * @param {string} prootPath - Path from inside proot environment
+	 * @returns {string} App filesystem path
+	 */
+	convertProotPath(prootPath) {
+		if (!prootPath) return prootPath;
+
+		const packageName = window.BuildInfo?.packageName || "com.foxdebug.acode";
+		const dataDir = `/data/user/0/${packageName}`;
+		const alpineRoot = `${dataDir}/files/alpine`;
+
+		let convertedPath;
+
+		if (prootPath.startsWith("/public")) {
+			// /public -> /data/user/0/com.foxdebug.acode/files/public
+			convertedPath = `file://${dataDir}/files${prootPath}`;
+		} else if (
+			prootPath.startsWith("/sdcard") ||
+			prootPath.startsWith("/storage") ||
+			prootPath.startsWith("/data")
+		) {
+			convertedPath = `file://${prootPath}`;
+		} else if (prootPath.startsWith("/")) {
+			// Everything else is relative to alpine root
+			convertedPath = `file://${alpineRoot}${prootPath}`;
+		} else {
+			convertedPath = prootPath;
+		}
+
+		//console.log(`Path conversion: ${prootPath} -> ${convertedPath}`);
+		return convertedPath;
+	}
+
+	shouldConfirmTerminalClose() {
+		const settings = appSettings?.value?.terminalSettings;
+		if (settings && settings.confirmTabClose === false) {
+			return false;
+		}
+		return true;
 	}
 }
 
