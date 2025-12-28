@@ -4,7 +4,7 @@ app="paid"
 mode="d"
 fdroidFlag=""
 packageType="apk"  # New default: apk or aar
-webpackmode="development"
+rspackmode="development"
 cordovamode=""
 
 # Check all arguments for specific values
@@ -65,7 +65,7 @@ fi
 if [ "$mode" = "p" ] || [ "$mode" = "prod" ]
 then
 mode="p"
-webpackmode="production"
+rspackmode="production"
 cordovamode="--release"
 fi
 
@@ -80,7 +80,7 @@ RED=''
 NC=''
 
 script1="node ./utils/config.js $mode $app"
-script2="webpack --progress --mode $webpackmode "
+script2="rspack --mode $rspackmode "
 # script3="node ./utils/loadStyles.js"
 
 echo "type : $packageType"

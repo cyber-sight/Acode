@@ -27,7 +27,7 @@ function getFileType(filename) {
 		tsconfig: /^tsconfig.json$/i,
 		android: /\.(apk|aab|slim)$/i,
 		jsbeautify: /^\.jsbeautifyrc$/i,
-		webpack: /^webpack\.config\.js$/i,
+		webpack: /^(webpack|rspack)\.config\.js$/i,
 		audio: /\.(mp3|wav|ogg|flac|aac)$/i,
 		git: /(^\.gitignore$)|(^\.gitmodules$)/i,
 		video: /\.(mp4|m4a|mov|3gp|wmv|flv|avi)$/i,

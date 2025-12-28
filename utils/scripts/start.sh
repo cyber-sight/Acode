@@ -3,7 +3,7 @@
 platform="$1"
 app="$2"
 mode="$3"
-webpackmode="development"
+rspackmode="development"
 cordovamode=""
 
 if [ -z "$platform" ]
@@ -23,14 +23,14 @@ fi
 
 if [ "$mode" = "p" ]
 then
-webpackmode="production"
+rspackmode="production"
 cordovamode="--release"
 fi
 
 RED=''
 NC=''
 script1="node ./utils/config.js $mode $app"
-script2="webpack --progress --mode $webpackmode "
+script2="rspack --mode $rspackmode "
 # script3="node ./utils/loadStyles.js"
 script4="cordova run $platform $cordovamode"
 eval "

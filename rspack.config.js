@@ -1,6 +1,5 @@
 const path = require('path');
-const fs = require('fs');
-const MiniCssExtractPlugin = require('mini-css-extract-plugin');
+const { CssExtractRspackPlugin } = require('@rspack/core');
 
 const WWW = path.resolve(__dirname, 'www');
 
@@ -27,7 +26,7 @@ module.exports = (env, options) => {
       test: /(?<!\.m)\.(sa|sc|c)ss$/,
       use: [
         {
-          loader: MiniCssExtractPlugin.loader,
+          loader: CssExtractRspackPlugin.loader,
         },
         'css-loader',
         'postcss-loader',
@@ -76,7 +75,7 @@ module.exports = (env, options) => {
       modules: ["node_modules", "src"],
     },
     plugins: [
-      new MiniCssExtractPlugin({
+      new CssExtractRspackPlugin({
         filename: '[name].css',
       }),
     ],
