@@ -37,7 +37,7 @@ const keys = {
 	46: "Delete",
 };
 
-const initKeyboardEventType = (function (event) {
+let initKeyboardEventType = (function (event) {
 	try {
 		event.initKeyboardEvent(
 			"keyup", // in DOMString typeArg
