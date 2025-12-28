@@ -429,8 +429,10 @@ export default class Acode {
 	}
 
 	[onPluginsLoadCompleteCallback]() {
-		for (const key in this.#pluginWatchers) {
-			this.#pluginWatchers[key].reject(new Error(`Plugin '${key}' failed to load.`));
+		for (const pluginId in this.#pluginWatchers) {
+			this.#pluginWatchers[pluginId].reject(
+				new Error(`Plugin '${pluginId}' failed to load.`),
+			);
 		}
 		this.#pluginWatchers = {};
 	}

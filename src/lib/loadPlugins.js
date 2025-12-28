@@ -105,16 +105,12 @@ export default async function loadPlugins(loadOnlyTheme = false) {
 				BROKEN_PLUGINS.delete(pluginId);
 			}
 		} catch (error) {
-			console.error(`Error loading plugin ${pluginId}:`, error);
+			console.error(`Error loading plugin ${pluginId}:`, error);git
 			// mark plugin as broken to avoid repeated attempts until user intervenes
-			try {
-				BROKEN_PLUGINS.set(pluginId, {
-					error: String(error.message || error),
-					timestamp: Date.now(),
-				});
-			} catch (e) {
-				console.warn("Failed to mark plugin as broken:", e);
-			}
+			BROKEN_PLUGINS.set(pluginId, {
+				error: String(error.message || error),
+				timestamp: Date.now(),
+			});
 			failedPlugins.push(pluginId);
 			results.push(false);
 		}
