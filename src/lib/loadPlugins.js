@@ -105,7 +105,7 @@ export default async function loadPlugins(loadOnlyTheme = false) {
 				BROKEN_PLUGINS.delete(pluginId);
 			}
 		} catch (error) {
-			console.error(`Error loading plugin ${pluginId}:`, error);git
+			console.error(`Error loading plugin ${pluginId}:`, error);
 			// mark plugin as broken to avoid repeated attempts until user intervenes
 			BROKEN_PLUGINS.set(pluginId, {
 				error: String(error.message || error),
