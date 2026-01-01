@@ -145,7 +145,9 @@ export default function lspServerDetail(serverId) {
 		info: "Edit custom initialization options (JSON)",
 	});
 
-	return settingsPage(title, items, callback);
+	return settingsPage(title, items, callback, undefined, {
+		preserveOrder: true,
+	});
 
 	async function callback(key, value) {
 		const override = getServerOverride(serverId);
