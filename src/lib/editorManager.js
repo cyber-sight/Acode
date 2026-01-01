@@ -65,7 +65,6 @@ import quickTools from "components/quickTools";
 import ScrollBar from "components/scrollbar";
 import SideButton, { sideButtonContainer } from "components/sideButton";
 import keyboardHandler, { keydownState } from "handlers/keyboard";
-import actions from "handlers/quickTools";
 // TODO: Update EditorFile for CodeMirror compatibility
 import EditorFile from "./editorFile";
 import openFile from "./openFile";
@@ -1931,18 +1930,6 @@ async function EditorManager($header, $body) {
 
 		file.tab.classList.add("active");
 		file.tab.scrollIntoView();
-
-		if (file?.hideQuickTools) {
-			root.classList.add("hide-floating-button");
-			actions("set-height", { height: 0, save: false });
-		} else {
-			root.classList.remove("hide-floating-button");
-			const quickToolsHeight =
-				appSettings.value.quickTools !== undefined
-					? appSettings.value.quickTools
-					: 1;
-			actions("set-height", { height: quickToolsHeight, save: true });
-		}
 
 		$header.text = file.filename;
 		$header.subText = file.headerSubtitle || "";

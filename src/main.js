@@ -46,6 +46,7 @@ import settings from "lib/settings";
 import startAd from "lib/startAd";
 import mustache from "mustache";
 import plugins from "pages/plugins";
+import openWelcomeTab from "pages/welcome";
 import otherSettings from "settings/appSettings";
 import themes from "theme/list";
 import { getEncoding, initEncodings } from "utils/encodings";
@@ -477,7 +478,13 @@ async function loadApp() {
 
 	window.log("info", "Started app and its services...");
 
-	new EditorFile();
+	// Show welcome tab on first launch, otherwise create default file
+	const isFirstLaunch = Number.isNaN(previousVersionCode);
+	if (isFirstLaunch) {
+		openWelcomeTab();
+	} else {
+		new EditorFile();
+	}
 
 	// load theme plugins
 	try {
