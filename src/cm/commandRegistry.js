@@ -552,6 +552,16 @@ function registerCoreCommands() {
 			return true;
 		},
 	});
+	addCommand({
+		name: "acode:showWelcome",
+		description: "Show Welcome",
+		readOnly: true,
+		requiresView: false,
+		run() {
+			acode.exec("welcome");
+			return true;
+		},
+	});
 
 	// Additional editor-centric helpers mapped to CodeMirror primitives that have existing key bindings in defaults.
 	addCommand({
