@@ -645,9 +645,9 @@ async function EditorManager($header, $body) {
 
 	await applyKeyBindings(editor);
 
-	editor.execCommand = function (commandName) {
+	editor.execCommand = function (commandName, args) {
 		if (!commandName) return false;
-		return executeCommand(String(commandName), editor);
+		return executeCommand(String(commandName), editor, args);
 	};
 
 	editor.commands = {

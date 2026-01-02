@@ -1300,7 +1300,7 @@ function commandRunsInReadOnly(command, view) {
 	return view.state?.readOnly ? !!command.readOnly : true;
 }
 
-export function executeCommand(name, view) {
+export function executeCommand(name, view, args) {
 	const command = resolveCommand(name);
 	if (!command) return false;
 	const targetView = command.requiresView
@@ -1309,7 +1309,7 @@ export function executeCommand(name, view) {
 	if (command.requiresView && !targetView) return false;
 	if (!commandRunsInReadOnly(command, targetView)) return false;
 	try {
-		const result = command.run(targetView);
+		const result = command.run(targetView, args);
 		return result !== false;
 	} catch (error) {
 		console.error(`Failed to execute command ${name}`, error);
@@ -1428,11 +1428,11 @@ function normalizeExternalCommand(descriptor) {
 		readOnly: !!descriptor?.readOnly,
 		requiresView,
 		key,
-		run(view) {
+		run(view, args) {
 			try {
 				const resolvedView = resolveView(view);
 				if (requiresView && !resolvedView) return false;
-				const result = exec(resolvedView || null);
+				const result = exec(resolvedView || null, args);
 				return result !== false;
 			} catch (error) {
 				console.error(`Command \"${name}\" failed`, error);

@@ -792,10 +792,10 @@ export default class Acode {
 		this.#refreshCommandBindings();
 	}
 
-	execCommand(name, view) {
+	execCommand(name, view, args) {
 		if (!name) return false;
 		const targetView = view || window.editorManager?.editor;
-		return runCommand(name, targetView);
+		return runCommand(name, targetView, args);
 	}
 
 	listCommands() {
