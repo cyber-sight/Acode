@@ -673,6 +673,14 @@ async function EditorManager($header, $body) {
 		},
 	});
 
+	// Provide editor.session for Ace API compatibility
+	// Returns the active file's session (Proxy with Ace-like methods)
+	Object.defineProperty(editor, "session", {
+		get() {
+			return manager.activeFile?.session ?? null;
+		},
+	});
+
 	// Provide minimal Ace-like API compatibility used by plugins
 	/**
 	 * Insert text at the current selection/cursor in the editor
@@ -977,7 +985,7 @@ async function EditorManager($header, $body) {
 
 		const doc = prevState ? prevState.doc.toString() : "";
 		const state = EditorState.create({ doc, extensions: exts });
-		file.session = state; // keep file.session in sync
+		file.session = state;
 		editor.setState(state);
 		// Re-apply selected theme after state replacement
 		const desiredTheme = appSettings?.value?.editorTheme;

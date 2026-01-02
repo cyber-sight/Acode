@@ -26,6 +26,189 @@ import saveFile from "./saveFile";
 import appSettings from "./settings";
 
 /**
+ * Creates a Proxy around an EditorState that provides Ace-compatible methods.
+ * @param {EditorState} state - The raw CodeMirror EditorState
+ * @param {EditorFile} file - The parent EditorFile instance
+ * @returns {Proxy} Proxied state with Ace-compatible methods
+ */
+function createSessionProxy(state, file) {
+	if (!state) return null;
+
+	/**
+	 * Convert Ace position {row, column} to CodeMirror offset
+	 */
+	function positionToOffset(pos, doc) {
+		if (!pos || !doc) return 0;
+		try {
+			const lineNum = Math.max(1, Math.min((pos.row ?? 0) + 1, doc.lines));
+			const line = doc.line(lineNum);
+			const col = Math.max(0, Math.min(pos.column ?? 0, line.length));
+			return line.from + col;
+		} catch (_) {
+			return 0;
+		}
+	}
+
+	/**
+	 * Convert CodeMirror offset to Ace position {row, column}
+	 */
+	function offsetToPosition(offset, doc) {
+		if (!doc) return { row: 0, column: 0 };
+		try {
+			const line = doc.lineAt(offset);
+			return { row: line.number - 1, column: offset - line.from };
+		} catch (_) {
+			return { row: 0, column: 0 };
+		}
+	}
+
+	return new Proxy(state, {
+		get(target, prop) {
+			// Ace-compatible method: getValue()
+			if (prop === "getValue") {
+				return () => target.doc.toString();
+			}
+
+			// Ace-compatible method: setValue(text)
+			if (prop === "setValue") {
+				return (text) => {
+					const newText = String(text ?? "");
+					const { activeFile, editor } = editorManager;
+					if (activeFile?.id === file.id && editor) {
+						// Active file: dispatch to live EditorView
+						editor.dispatch({
+							changes: {
+								from: 0,
+								to: editor.state.doc.length,
+								insert: newText,
+							},
+						});
+					} else {
+						// Inactive file: update stored state
+						file._setRawSession(
+							target.update({
+								changes: { from: 0, to: target.doc.length, insert: newText },
+							}).state,
+						);
+					}
+				};
+			}
+
+			// Ace-compatible method: getLine(row)
+			if (prop === "getLine") {
+				return (row) => {
+					try {
+						return target.doc.line(row + 1).text;
+					} catch (_) {
+						return "";
+					}
+				};
+			}
+
+			// Ace-compatible method: getLength()
+			if (prop === "getLength") {
+				return () => target.doc.lines;
+			}
+
+			// Ace-compatible method: getTextRange(range)
+			if (prop === "getTextRange") {
+				return (range) => {
+					if (!range) return "";
+					try {
+						const from = positionToOffset(range.start, target.doc);
+						const to = positionToOffset(range.end, target.doc);
+						return target.doc.sliceString(from, to);
+					} catch (_) {
+						return "";
+					}
+				};
+			}
+
+			// Ace-compatible method: insert(position, text)
+			if (prop === "insert") {
+				return (position, text) => {
+					const { activeFile, editor } = editorManager;
+					const offset = positionToOffset(position, target.doc);
+					if (activeFile?.id === file.id && editor) {
+						editor.dispatch({
+							changes: { from: offset, insert: String(text ?? "") },
+						});
+					} else {
+						file._setRawSession(
+							target.update({
+								changes: { from: offset, insert: String(text ?? "") },
+							}).state,
+						);
+					}
+				};
+			}
+
+			// Ace-compatible method: remove(range)
+			if (prop === "remove") {
+				return (range) => {
+					if (!range) return "";
+					const from = positionToOffset(range.start, target.doc);
+					const to = positionToOffset(range.end, target.doc);
+					const removed = target.doc.sliceString(from, to);
+					const { activeFile, editor } = editorManager;
+					if (activeFile?.id === file.id && editor) {
+						editor.dispatch({ changes: { from, to, insert: "" } });
+					} else {
+						file._setRawSession(
+							target.update({ changes: { from, to, insert: "" } }).state,
+						);
+					}
+					return removed;
+				};
+			}
+
+			// Ace-compatible method: replace(range, text)
+			if (prop === "replace") {
+				return (range, text) => {
+					if (!range) return;
+					const from = positionToOffset(range.start, target.doc);
+					const to = positionToOffset(range.end, target.doc);
+					const { activeFile, editor } = editorManager;
+					if (activeFile?.id === file.id && editor) {
+						editor.dispatch({
+							changes: { from, to, insert: String(text ?? "") },
+						});
+					} else {
+						file._setRawSession(
+							target.update({
+								changes: { from, to, insert: String(text ?? "") },
+							}).state,
+						);
+					}
+				};
+			}
+
+			// Ace-compatible method: getWordRange(row, column)
+			if (prop === "getWordRange") {
+				return (row, column) => {
+					const offset = positionToOffset({ row, column }, target.doc);
+					const word = target.wordAt(offset);
+					if (word) {
+						return {
+							start: offsetToPosition(word.from, target.doc),
+							end: offsetToPosition(word.to, target.doc),
+						};
+					}
+					return { start: { row, column }, end: { row, column } };
+				};
+			}
+
+			// Pass through all other properties to the real EditorState
+			const value = target[prop];
+			if (typeof value === "function") {
+				return value.bind(target);
+			}
+			return value;
+		},
+	});
+}
+
+/**
  * @typedef {'run'|'save'|'change'|'focus'|'blur'|'close'|'rename'|'load'|'loadError'|'loadStart'|'loadEnd'|'changeMode'|'changeEncoding'|'changeReadOnly'} FileEvents
  */
 
@@ -99,10 +282,10 @@ export default class EditorFile {
 	 */
 	deletedFile = false;
 	/**
-	 * CodeMirror document state for the file
+	 * Raw CodeMirror EditorState. Use session getter to access with Ace-compatible methods.
 	 * @type {EditorState}
 	 */
-	session = null;
+	#rawSession = null;
 	/**
 	 * Encoding of the text e.g. 'gbk'
 	 * @type {string}
@@ -346,7 +529,7 @@ export default class EditorFile {
 		editorManager.emit("new-file", this);
 
 		if (this.#type === "editor") {
-			this.session = EditorState.create({
+			this.#rawSession = EditorState.create({
 				doc: options?.text || "",
 			});
 			this.setMode();
@@ -366,6 +549,32 @@ export default class EditorFile {
 
 	get content() {
 		return this.#content;
+	}
+
+	/**
+	 * Session with Ace-compatible methods
+	 * Returns a Proxy over the raw EditorState.
+	 * @returns {Proxy<EditorState>}
+	 */
+	get session() {
+		return createSessionProxy(this.#rawSession, this);
+	}
+
+	/**
+	 * Set the session
+	 * @param {EditorState} value
+	 */
+	set session(value) {
+		this.#rawSession = value;
+	}
+
+	/**
+	 * Internal method to update the raw session state.
+	 * Used by the Proxy for inactive file updates.
+	 * @param {EditorState} state
+	 */
+	_setRawSession(state) {
+		this.#rawSession = state;
 	}
 
 	/**
@@ -517,9 +726,7 @@ export default class EditorFile {
 		}
 
 		// Update the document in the session
-		this.session = this.session.update({
-			changes: { from: 0, to: this.session.doc.length, insert: text },
-		}).state;
+		this.session.setValue(text);
 	}
 
 	/**
@@ -1074,13 +1281,7 @@ export default class EditorFile {
 		this.loading = true;
 		this.markChanged = false;
 		this.#emit("loadstart", createFileEvent(this));
-		this.session = this.session.update({
-			changes: {
-				from: 0,
-				to: this.session.doc.length,
-				insert: strings["loading..."],
-			},
-		}).state;
+		this.session.setValue(strings["loading..."]);
 
 		// Immediately reflect "loading..." in the visible editor if this tab is active
 		try {
@@ -1113,9 +1314,7 @@ export default class EditorFile {
 			}
 
 			this.markChanged = false;
-			this.session = this.session.update({
-				changes: { from: 0, to: this.session.doc.length, insert: value },
-			}).state;
+			this.session.setValue(value);
 			this.loaded = true;
 			this.loading = false;
 
