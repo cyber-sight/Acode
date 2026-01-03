@@ -1458,6 +1458,8 @@ async function EditorManager($header, $body) {
 	manager.on(["rename-file"], (file) => {
 		if (file?.type !== "editor") return;
 		if (manager.activeFile?.id === file.id) {
+			// Re-apply file to editor to update language/syntax highlighting
+			applyFileToEditor(file);
 			void configureLspForFile(file);
 		}
 	});

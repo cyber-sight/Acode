@@ -630,10 +630,10 @@ export default class EditorFile {
 			this.#tab.text = value;
 			this.#name = value;
 
+			if (oldExt !== newExt) this.setMode();
+
 			editorManager.onupdate("rename-file");
 			editorManager.emit("rename-file", this);
-
-			if (oldExt !== newExt) this.setMode();
 		})();
 	}
 
