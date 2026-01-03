@@ -48,6 +48,16 @@ interface Executor {
 	write: (uuid: string, input: string) => Promise<void>;
 	stop: (uuid: string) => Promise<void>;
 	isRunning: (uuid: string) => Promise<boolean>;
+	/** Move the executor service to the foreground (shows notification) */
+	moveToForeground: () => Promise<void>;
+	/** Move the executor service to the background (hides notification) */
+	moveToBackground: () => Promise<void>;
+	/** Stop the executor service completely */
+	stopService: () => Promise<void>;
+	/**
+	 * Background executor
+	 */
+	BackgroundExecutor: Executor;
 }
 
 declare const Executor: Executor | undefined;

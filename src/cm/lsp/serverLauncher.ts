@@ -31,6 +31,14 @@ function getExecutor(): Executor {
 	return executor;
 }
 
+/**
+ * Get the background executor
+ */
+function getBackgroundExecutor(): Executor {
+	const executor = getExecutor();
+	return executor.BackgroundExecutor ?? executor;
+}
+
 function joinCommand(command: string, args: string[] = []): string {
 	if (!Array.isArray(args)) return command;
 	return [command, ...args].join(" ");
@@ -42,7 +50,18 @@ function wrapShellCommand(command: string): string {
 	return `sh -lc "set -e; ${escaped}"`;
 }
 
-async function runCommand(command: string): Promise<string> {
+/**
+ * Run a quick shell command using the background executor.
+ */
+async function runQuickCommand(command: string): Promise<string> {
+	const wrapped = wrapShellCommand(command);
+	return getBackgroundExecutor().execute(wrapped, true);
+}
+
+/**
+ * Run a shell command using the foreground executor
+ */
+async function runForegroundCommand(command: string): Promise<string> {
 	const wrapped = wrapShellCommand(command);
 	return getExecutor().execute(wrapped, true);
 }
@@ -396,7 +415,7 @@ async function performInstallCheck(
 ): Promise<boolean> {
 	try {
 		if (launcher.checkCommand) {
-			await runCommand(launcher.checkCommand);
+			await runQuickCommand(launcher.checkCommand);
 		}
 		checkedCommands.set(cacheKey, STATUS_PRESENT);
 		return true;
@@ -434,7 +453,7 @@ async function performInstallCheck(
 				`Installing ${server.label}...`,
 			);
 			loadingDialog.show();
-			await runCommand(install.command);
+			await runForegroundCommand(install.command);
 			toast(`${server.label} installed`);
 			checkedCommands.set(cacheKey, STATUS_PRESENT);
 			return true;
@@ -663,13 +682,17 @@ export async function ensureServerRunning(
 export function stopManagedServer(serverId: string): void {
 	const entry = managedServers.get(serverId);
 	if (!entry) return;
-	getExecutor()
-		.stop(entry.uuid)
-		.catch((error: Error) => {
-			console.warn(`Failed to stop language server ${serverId}`, error);
-		});
+	const executor = getExecutor();
+	executor.stop(entry.uuid).catch((error: Error) => {
+		console.warn(`Failed to stop language server ${serverId}`, error);
+	});
 	managedServers.delete(serverId);
 	announcedServers.delete(serverId);
+
+	// Stop foreground service when all servers are stopped
+	if (managedServers.size === 0) {
+		executor.stopService().catch(() => {});
+	}
 }
 
 export function resetManagedServers(): void {
@@ -677,4 +700,8 @@ export function resetManagedServers(): void {
 		stopManagedServer(id);
 	}
 	managedServers.clear();
+	// Ensure foreground service is stopped
+	getExecutor()
+		.stopService()
+		.catch(() => {});
 }
