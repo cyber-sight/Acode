@@ -8,6 +8,7 @@ import type {
 	LauncherConfig,
 	LspServerDefinition,
 	ManagedServerEntry,
+	PortInfo,
 	WaitOptions,
 } from "./types";
 
@@ -53,16 +54,252 @@ function quoteArg(value: unknown): string {
 	return `'${str.replace(/'/g, "'\\''")}'`;
 }
 
-function buildAxsBridgeCommand(
-	bridge: BridgeConfig | undefined,
-): string | null {
-	if (!bridge || bridge.kind !== "axs") return null;
-	const port = Number(bridge.port);
-	if (!Number.isInteger(port) || port <= 0 || port > 65535) {
-		throw new Error(
-			`Bridge requires a valid TCP port (received ${bridge.port})`,
+// ============================================================================
+// Auto-Port Discovery
+// ============================================================================
+
+// Cache for the filesDir path
+let cachedFilesDir: string | null = null;
+
+/**
+ * Get the terminal home directory from system.getFilesDir().
+ * This is where axs stores port files.
+ */
+async function getTerminalHomeDir(): Promise<string> {
+	if (cachedFilesDir) {
+		return `${cachedFilesDir}/alpine/home`;
+	}
+
+	const system = (
+		globalThis as unknown as {
+			system?: {
+				getFilesDir: (
+					success: (filesDir: string) => void,
+					error: (error: string) => void,
+				) => void;
+			};
+		}
+	).system;
+
+	if (!system?.getFilesDir) {
+		throw new Error("System plugin is not available");
+	}
+
+	return new Promise((resolve, reject) => {
+		system.getFilesDir(
+			(filesDir: string) => {
+				cachedFilesDir = filesDir;
+				resolve(`${filesDir}/alpine/home`);
+			},
+			(error: string) => reject(new Error(error)),
+		);
+	});
+}
+
+/**
+ * Get the port file path for a given server and session.
+ * Port file format: ~/.axs/lsp_ports/{serverName}_{session}
+ */
+async function getPortFilePath(
+	serverName: string,
+	session: string,
+): Promise<string> {
+	const homeDir = await getTerminalHomeDir();
+	// Use just the binary name (not full path), mirroring axs behavior
+	const baseName = serverName.split("/").pop() || serverName;
+	return `file://${homeDir}/.axs/lsp_ports/${baseName}_${session}`;
+}
+
+/**
+ * Read the port from a port file using the filesystem API.
+ * Returns null if the file doesn't exist or contains invalid data.
+ */
+async function readPortFromFile(filePath: string): Promise<number | null> {
+	try {
+		// Dynamic import to get fsOperation
+		const { default: fsOperation } = await import("fileSystem");
+		const fs = fsOperation(filePath);
+
+		// Check if file exists first
+		const exists = await fs.exists();
+		if (!exists) {
+			return null;
+		}
+
+		// Read the file content as text
+		const content = (await fs.readFile("utf-8")) as string;
+		const port = Number.parseInt(content.trim(), 10);
+
+		if (!Number.isFinite(port) || port <= 0 || port > 65535) {
+			return null;
+		}
+
+		return port;
+	} catch {
+		// File doesn't exist or couldn't be read
+		return null;
+	}
+}
+
+/**
+ * Get the port for a running LSP server from the axs port file.
+ * @param serverName - The LSP server binary name (e.g., "typescript-language-server")
+ * @param session - Session ID for port file naming
+ */
+export async function getLspPort(
+	serverName: string,
+	session: string,
+): Promise<PortInfo | null> {
+	try {
+		const filePath = await getPortFilePath(serverName, session);
+		const port = await readPortFromFile(filePath);
+
+		if (port === null) {
+			return null;
+		}
+
+		return { port, filePath, session };
+	} catch {
+		return null;
+	}
+}
+
+/**
+ * Wait for the server ready signal (when axs prints "listening on").
+ * The axs proxy writes the port file immediately after binding, then prints the message.
+ * So once the signal is received, the port file should be available.
+ */
+async function waitForServerReady(
+	serverId: string,
+	timeout = 10000,
+): Promise<boolean> {
+	const deadline = Date.now() + timeout;
+	const pollInterval = 50;
+
+	while (Date.now() < deadline) {
+		if (serverReadySignals.has(serverId)) {
+			serverReadySignals.delete(serverId);
+			return true;
+		}
+		await sleep(pollInterval);
+	}
+
+	return false;
+}
+
+/**
+ * Wait for the port file to be available after server signals ready.
+ * This is the most efficient approach: wait for ready signal, then read port.
+ */
+async function waitForPort(
+	serverId: string,
+	serverName: string,
+	session: string,
+	timeout = 10000,
+): Promise<PortInfo | null> {
+	// First, wait for the server to signal it's ready
+	const ready = await waitForServerReady(serverId, timeout);
+
+	if (!ready) {
+		console.warn(
+			`[LSP:${serverId}] Server did not signal ready within timeout`,
 		);
 	}
+
+	// The port file should be available now (axs writes it before printing "listening on")
+	// Read it directly
+	const portInfo = await getLspPort(serverName, session);
+
+	if (!portInfo && ready) {
+		// Server signaled ready but port file not found - retry a few times
+		for (let i = 0; i < 5; i++) {
+			await sleep(100);
+			const retryPortInfo = await getLspPort(serverName, session);
+			if (retryPortInfo) {
+				return retryPortInfo;
+			}
+		}
+	}
+
+	return portInfo;
+}
+
+/**
+ * Quick check if a server is running and connectable.
+ * Attempts a fast WebSocket connection test.
+ */
+async function checkServerAlive(url: string, timeout = 1000): Promise<boolean> {
+	return new Promise((resolve) => {
+		try {
+			const ws = new WebSocket(url);
+			const timer = setTimeout(() => {
+				try {
+					ws.close();
+				} catch {}
+				resolve(false);
+			}, timeout);
+
+			ws.onopen = () => {
+				clearTimeout(timer);
+				try {
+					ws.close();
+				} catch {}
+				resolve(true);
+			};
+
+			ws.onerror = () => {
+				clearTimeout(timer);
+				resolve(false);
+			};
+
+			ws.onclose = () => {
+				clearTimeout(timer);
+				resolve(false);
+			};
+		} catch {
+			resolve(false);
+		}
+	});
+}
+
+/**
+ * Check if we can reuse an existing server by testing the port.
+ * Returns the port number if the server is alive, null otherwise.
+ */
+export async function canReuseExistingServer(
+	server: LspServerDefinition,
+	session: string,
+): Promise<number | null> {
+	const bridge = server.launcher?.bridge;
+	const serverName = bridge?.command || server.launcher?.command || server.id;
+
+	const portInfo = await getLspPort(serverName, session);
+	if (!portInfo) {
+		return null;
+	}
+
+	const url = `ws://127.0.0.1:${portInfo.port}/`;
+	const alive = await checkServerAlive(url, 1000);
+
+	if (alive) {
+		console.info(
+			`[LSP:${server.id}] Reusing existing server on port ${portInfo.port}`,
+		);
+		return portInfo.port;
+	}
+
+	console.info(
+		`[LSP:${server.id}] Found stale port file, will start new server`,
+	);
+	return null;
+}
+
+function buildAxsBridgeCommand(
+	bridge: BridgeConfig | undefined,
+	session?: string,
+): string | null {
+	if (!bridge || bridge.kind !== "axs") return null;
+
 	const binary = bridge.command
 		? String(bridge.command)
 		: (() => {
@@ -72,7 +309,25 @@ function buildAxsBridgeCommand(
 		? bridge.args.map((arg) => String(arg))
 		: [];
 
-	const parts = [AXS_BINARY, "--port", String(port), "lsp", quoteArg(binary)];
+	// Use session ID or bridge session or server command as fallback session
+	const effectiveSession = session || bridge.session || binary;
+
+	const parts = [AXS_BINARY, "lsp"];
+
+	// Add --session flag for port file naming
+	parts.push("--session", quoteArg(effectiveSession));
+
+	// Only add --port if explicitly specified
+	if (
+		typeof bridge.port === "number" &&
+		bridge.port > 0 &&
+		bridge.port <= 65535
+	) {
+		parts.push("--port", String(bridge.port));
+	}
+
+	parts.push(quoteArg(binary));
+
 	if (args.length) {
 		parts.push("--");
 		args.forEach((arg) => parts.push(quoteArg(arg)));
@@ -80,7 +335,10 @@ function buildAxsBridgeCommand(
 	return parts.join(" ");
 }
 
-function resolveStartCommand(server: LspServerDefinition): string | null {
+function resolveStartCommand(
+	server: LspServerDefinition,
+	session?: string,
+): string | null {
 	const launcher = server.launcher;
 	if (!launcher) return null;
 
@@ -93,7 +351,7 @@ function resolveStartCommand(server: LspServerDefinition): string | null {
 		return joinCommand(launcher.command, launcher.args);
 	}
 	if (launcher.bridge) {
-		return buildAxsBridgeCommand(launcher.bridge);
+		return buildAxsBridgeCommand(launcher.bridge, session);
 	}
 	return null;
 }
@@ -289,11 +547,35 @@ interface LspError extends Error {
 	code?: string;
 }
 
+export interface EnsureServerResult {
+	uuid: string | null;
+	/** Port discovered from port file (for auto-port discovery) */
+	discoveredPort?: number;
+}
+
 export async function ensureServerRunning(
 	server: LspServerDefinition,
-): Promise<string | null> {
+	session?: string,
+): Promise<EnsureServerResult> {
 	const launcher = server.launcher;
-	if (!launcher) return null;
+	if (!launcher) return { uuid: null };
+
+	// Derive session from server ID if not provided
+	const effectiveSession = session || server.id;
+
+	// Check if server is already running via port file (dead client detection)
+	const bridge = launcher.bridge;
+	const serverName = bridge?.command || launcher.command || server.id;
+
+	try {
+		const existingPort = await canReuseExistingServer(server, effectiveSession);
+		if (existingPort !== null) {
+			// Server is already running and responsive, no need to start
+			return { uuid: null, discoveredPort: existingPort };
+		}
+	} catch {
+		// Failed to check, proceed with normal startup
+	}
 
 	const installed = await ensureInstalled(server);
 	if (!installed) {
@@ -307,28 +589,47 @@ export async function ensureServerRunning(
 	const key = server.id;
 	if (managedServers.has(key)) {
 		const existing = managedServers.get(key);
-		return existing?.uuid ?? null;
+		return { uuid: existing?.uuid ?? null };
 	}
 
-	const command = resolveStartCommand(server);
+	const command = resolveStartCommand(server, effectiveSession);
 	if (!command) {
-		return null;
+		return { uuid: null };
 	}
 
 	try {
 		const uuid = await startInteractiveServer(command, key);
-		if (
+
+		// For auto-port discovery, wait for server ready signal then read port
+		let discoveredPort: number | undefined;
+		if (bridge && !bridge.port) {
+			// Auto-port mode - wait for server ready signal and then read port file
+			const portInfo = await waitForPort(
+				key,
+				serverName,
+				effectiveSession,
+				10000,
+			);
+			if (portInfo) {
+				discoveredPort = portInfo.port;
+				console.info(
+					`[LSP:${server.id}] Auto-discovered port ${discoveredPort}`,
+				);
+			}
+		} else if (
 			server.transport?.url &&
 			(server.transport.kind === "websocket" ||
 				server.transport.kind === "stdio")
 		) {
+			// Fixed port mode - wait for the server to signal ready
 			await waitForWebSocket(server.transport.url);
 		}
+
 		if (!announcedServers.has(key)) {
 			console.info(`[LSP:${server.id}] ${server.label} connected`);
 			announcedServers.add(key);
 		}
-		return uuid;
+		return { uuid, discoveredPort };
 	} catch (error) {
 		console.error(`Failed to start language server ${server.id}`, error);
 		const errorMessage = error instanceof Error ? error.message : String(error);

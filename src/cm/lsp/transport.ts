@@ -35,11 +35,22 @@ function createWebSocketTransport(
 		);
 	}
 
-	const url = transport.url;
+	let url = transport.url;
 	const options: WebSocketTransportOptions = transport.options ?? {};
 
+	// Use dynamic port from auto-port discovery if available
+	if (context.dynamicPort && context.dynamicPort > 0) {
+		url = `ws://127.0.0.1:${context.dynamicPort}/`;
+		console.info(
+			`[LSP:${server.id}] Using auto-discovered port ${context.dynamicPort}`,
+		);
+	}
+
+	// URL is only required when not using dynamic port
 	if (!url) {
-		throw new Error(`WebSocket transport for ${server.id} is missing a url`);
+		throw new Error(
+			`WebSocket transport for ${server.id} has no URL (and no dynamic port available)`,
+		);
 	}
 
 	// Store validated URL in a const for TypeScript narrowing in nested functions

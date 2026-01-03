@@ -53,6 +53,7 @@ interface RawBridgeConfig {
 	port?: unknown;
 	command?: string;
 	args?: unknown[];
+	session?: string;
 }
 
 function sanitizeBridge(
@@ -66,10 +67,8 @@ function sanitizeBridge(
 			`LSP server ${serverId} declares unsupported bridge kind ${kind}`,
 		);
 	}
-	const port = parsePort(bridge.port);
-	if (!port) {
-		throw new Error(`LSP server ${serverId} bridge requires a valid port`);
-	}
+	// Port is now optional - if not provided, auto-port discovery will be used
+	const port = bridge.port ? (parsePort(bridge.port) ?? undefined) : undefined;
 	const command = bridge.command ? String(bridge.command) : null;
 	if (!command) {
 		throw new Error(`LSP server ${serverId} bridge must supply a command`);
@@ -82,6 +81,7 @@ function sanitizeBridge(
 		port,
 		command,
 		args,
+		session: bridge.session ? String(bridge.session) : undefined,
 	};
 }
 
@@ -120,6 +120,7 @@ interface RawServerDefinition {
 		| ((context: LanguageResolverContext) => string | null)
 		| null;
 	launcher?: RawLauncherConfig | LauncherConfig;
+	useWorkspaceFolders?: boolean;
 }
 
 function sanitizeDefinition(
@@ -215,6 +216,7 @@ function sanitizeDefinition(
 				? definition.resolveLanguageId
 				: null,
 		launcher,
+		useWorkspaceFolders: definition.useWorkspaceFolders === true,
 	};
 
 	if (!Object.keys(transportOptions).length) {
@@ -348,6 +350,7 @@ function registerBuiltinServers(): void {
 		{
 			id: "typescript",
 			label: "TypeScript / JavaScript",
+			useWorkspaceFolders: true,
 			languages: [
 				"javascript",
 				"javascriptreact",
@@ -358,12 +361,10 @@ function registerBuiltinServers(): void {
 			],
 			transport: {
 				kind: "websocket",
-				url: "ws://127.0.0.1:2090",
 			},
 			launcher: {
 				bridge: {
 					kind: "axs",
-					port: 2090,
 					command: "typescript-language-server",
 					args: ["--stdio"],
 				},
@@ -416,6 +417,7 @@ function registerBuiltinServers(): void {
 		{
 			id: "vtsls",
 			label: "TypeScript / JavaScript (vtsls)",
+			useWorkspaceFolders: true,
 			languages: [
 				"javascript",
 				"javascriptreact",
@@ -426,12 +428,10 @@ function registerBuiltinServers(): void {
 			],
 			transport: {
 				kind: "websocket",
-				url: "ws://127.0.0.1:2095",
 			},
 			launcher: {
 				bridge: {
 					kind: "axs",
-					port: 2095,
 					command: "vtsls",
 					args: ["--stdio"],
 				},
@@ -583,15 +583,16 @@ function registerBuiltinServers(): void {
 			languages: ["python"],
 			transport: {
 				kind: "websocket",
-				url: "ws://127.0.0.1:2087",
 			},
 			launcher: {
-				command: "pylsp",
-				args: ["--ws", "--host", "127.0.0.1", "--port", "2087"],
+				bridge: {
+					kind: "axs",
+					command: "pylsp",
+				},
 				checkCommand: "which pylsp",
 				install: {
 					command:
-						"apk update && apk upgrade && apk add python3 py3-pip && PIP_BREAK_SYSTEM_PACKAGES=1 pip install 'python-lsp-server[websockets,all]'",
+						"apk update && apk upgrade && apk add python3 py3-pip && PIP_BREAK_SYSTEM_PACKAGES=1 pip install 'python-lsp-server[all]'",
 				},
 			},
 			initializationOptions: {
@@ -624,12 +625,10 @@ function registerBuiltinServers(): void {
 			],
 			transport: {
 				kind: "websocket",
-				url: "ws://127.0.0.1:2096",
 			},
 			launcher: {
 				bridge: {
 					kind: "axs",
-					port: 2096,
 					command: "vscode-eslint-language-server",
 					args: ["--stdio"],
 				},
@@ -694,12 +693,10 @@ function registerBuiltinServers(): void {
 			languages: ["c", "cpp"],
 			transport: {
 				kind: "websocket",
-				url: "ws://127.0.0.1:2094",
 			},
 			launcher: {
 				bridge: {
 					kind: "axs",
-					port: 2094,
 					command: "clangd",
 				},
 				checkCommand: "which clangd",
@@ -715,12 +712,10 @@ function registerBuiltinServers(): void {
 			languages: ["html", "vue", "svelte"],
 			transport: {
 				kind: "websocket",
-				url: "ws://127.0.0.1:2091",
 			},
 			launcher: {
 				bridge: {
 					kind: "axs",
-					port: 2091,
 					command: "vscode-html-language-server",
 					args: ["--stdio"],
 				},
@@ -738,12 +733,10 @@ function registerBuiltinServers(): void {
 			languages: ["css", "scss", "less"],
 			transport: {
 				kind: "websocket",
-				url: "ws://127.0.0.1:2092",
 			},
 			launcher: {
 				bridge: {
 					kind: "axs",
-					port: 2092,
 					command: "vscode-css-language-server",
 					args: ["--stdio"],
 				},
@@ -761,12 +754,10 @@ function registerBuiltinServers(): void {
 			languages: ["json", "jsonc"],
 			transport: {
 				kind: "websocket",
-				url: "ws://127.0.0.1:2093",
 			},
 			launcher: {
 				bridge: {
 					kind: "axs",
-					port: 2093,
 					command: "vscode-json-language-server",
 					args: ["--stdio"],
 				},
@@ -784,12 +775,10 @@ function registerBuiltinServers(): void {
 			languages: ["go", "go.mod", "go.sum", "gotmpl"],
 			transport: {
 				kind: "websocket",
-				url: "ws://127.0.0.1:2097",
 			},
 			launcher: {
 				bridge: {
 					kind: "axs",
-					port: 2097,
 					command: "gopls",
 					args: ["serve"],
 				},
@@ -847,15 +836,14 @@ function registerBuiltinServers(): void {
 		{
 			id: "rust-analyzer",
 			label: "Rust (rust-analyzer)",
+			useWorkspaceFolders: true,
 			languages: ["rust"],
 			transport: {
 				kind: "websocket",
-				url: "ws://127.0.0.1:2098",
 			},
 			launcher: {
 				bridge: {
 					kind: "axs",
-					port: 2098,
 					command: "rust-analyzer",
 				},
 				checkCommand: "which rust-analyzer",

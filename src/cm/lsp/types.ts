@@ -77,6 +77,8 @@ export interface TransportContext {
 	rootUri?: string | null;
 	originalRootUri?: string;
 	debugWebSocket?: boolean;
+	/** Dynamically discovered port from auto-port discovery */
+	dynamicPort?: number;
 }
 
 // ============================================================================
@@ -85,9 +87,12 @@ export interface TransportContext {
 
 export interface BridgeConfig {
 	kind: "axs";
-	port: number;
+	/** Optional port - if not provided, auto-port discovery will be used */
+	port?: number;
 	command: string;
 	args?: string[];
+	/** Session ID for port file naming (defaults to command name) */
+	session?: string;
 }
 
 export interface LauncherInstallConfig {
@@ -147,6 +152,12 @@ export interface LspServerDefinition {
 		| ((context: LanguageResolverContext) => string | null)
 		| null;
 	launcher?: LauncherConfig;
+	/**
+	 * When true, uses a single server instance with workspace folders
+	 * instead of starting separate servers per project root.
+	 * Heavy LSP servers like TypeScript and rust-analyzer should use this.
+	 */
+	useWorkspaceFolders?: boolean;
 }
 
 export interface RootUriContext {
@@ -226,10 +237,31 @@ export interface ManagedServerEntry {
 
 export type InstallStatus = "present" | "declined" | "failed";
 
+/**
+ * Port information from auto-port discovery
+ */
+export interface PortInfo {
+	/** The discovered port number */
+	port: number;
+	/** Path to the port file */
+	filePath: string;
+	/** Session ID used for the port file */
+	session: string;
+}
+
 export interface WaitOptions {
 	attempts?: number;
 	delay?: number;
 	probeTimeout?: number;
+}
+
+/**
+ * Result from ensureServerRunning
+ */
+export interface EnsureServerResult {
+	uuid: string | null;
+	/** Port discovered from port file (for auto-port discovery) */
+	discoveredPort?: number;
 }
 
 // ============================================================================

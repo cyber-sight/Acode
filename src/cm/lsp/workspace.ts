@@ -41,6 +41,7 @@ export default class AcodeWorkspace extends Workspace {
 
 	#fileMap: Map<string, AcodeWorkspaceFile>;
 	#versions: Record<string, number>;
+	#workspaceFolders: Set<string>;
 
 	constructor(
 		client: ConstructorParameters<typeof Workspace>[0],
@@ -50,6 +51,7 @@ export default class AcodeWorkspace extends Workspace {
 		this.files = [];
 		this.#fileMap = new Map();
 		this.#versions = Object.create(null) as Record<string, number>;
+		this.#workspaceFolders = new Set();
 		this.options = options;
 	}
 
@@ -232,5 +234,75 @@ export default class AcodeWorkspace extends Workspace {
 			}
 		}
 		return null;
+	}
+
+	// ========================================================================
+	// Workspace Folders Support
+	// ========================================================================
+
+	#getFolderName(uri: string): string {
+		const parts = uri.replace(/\/$/, "").split("/");
+		return parts[parts.length - 1] || uri;
+	}
+
+	#sendNotification(method: string, params: unknown): void {
+		// Access the client's transport to send raw JSON-RPC notification
+		const client = this.client as unknown as {
+			connected: boolean;
+			transport?: { send: (message: string) => void };
+		};
+
+		if (!client.connected || !client.transport) {
+			console.warn(`[LSP:Workspace] Cannot send notification: not connected`);
+			return;
+		}
+
+		const message = JSON.stringify({
+			jsonrpc: "2.0",
+			method,
+			params,
+		});
+
+		client.transport.send(message);
+	}
+
+	hasWorkspaceFolder(uri: string): boolean {
+		return this.#workspaceFolders.has(uri);
+	}
+
+	getWorkspaceFolders(): string[] {
+		return Array.from(this.#workspaceFolders);
+	}
+
+	addWorkspaceFolder(uri: string): boolean {
+		if (this.#workspaceFolders.has(uri)) {
+			return false;
+		}
+
+		this.#workspaceFolders.add(uri);
+		this.#sendNotification("workspace/didChangeWorkspaceFolders", {
+			event: {
+				added: [{ uri, name: this.#getFolderName(uri) }],
+				removed: [],
+			},
+		});
+		console.info(`[LSP:Workspace] Added workspace folder: ${uri}`);
+		return true;
+	}
+
+	removeWorkspaceFolder(uri: string): boolean {
+		if (!this.#workspaceFolders.has(uri)) {
+			return false;
+		}
+
+		this.#workspaceFolders.delete(uri);
+		this.#sendNotification("workspace/didChangeWorkspaceFolders", {
+			event: {
+				added: [],
+				removed: [{ uri, name: this.#getFolderName(uri) }],
+			},
+		});
+		console.info(`[LSP:Workspace] Removed workspace folder: ${uri}`);
+		return true;
 	}
 }

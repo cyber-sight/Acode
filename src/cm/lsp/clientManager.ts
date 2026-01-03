@@ -26,6 +26,7 @@ import type {
 	BuiltinExtensionsConfig,
 	ClientManagerOptions,
 	ClientState,
+	EnsureServerResult,
 	FileMetadata,
 	FormattingOptions,
 	LspServerDefinition,
@@ -45,7 +46,12 @@ function asArray<T>(value: T | T[] | null | undefined): T[] {
 function pluginKey(
 	serverId: string,
 	rootUri: string | null | undefined,
+	useWorkspaceFolders?: boolean,
 ): string {
+	// For workspace folders mode, use just the server ID (one client per server type)
+	if (useWorkspaceFolders) {
+		return serverId;
+	}
 	return `${serverId}::${rootUri ?? "__global__"}`;
 }
 
@@ -311,16 +317,27 @@ export class LspClientManager {
 		server: LspServerDefinition,
 		context: RootUriContext,
 	): Promise<ClientState> {
+		const useWsFolders = server.useWorkspaceFolders === true;
 		const resolvedRoot = await this.#resolveRootUri(server, context);
 		const { normalizedRootUri, originalRootUri } = normalizeRootUriForServer(
 			server,
 			resolvedRoot,
 		);
-		const key = pluginKey(server.id, normalizedRootUri);
+
+		// For workspace folders mode, use a shared key based on server ID only
+		const key = pluginKey(server.id, normalizedRootUri, useWsFolders);
 
 		// Return existing client if already initialized
 		if (this.#clients.has(key)) {
-			return this.#clients.get(key)!;
+			const existing = this.#clients.get(key)!;
+			// For workspace folders mode, add the new folder to the existing server
+			if (useWsFolders && normalizedRootUri) {
+				const workspace = existing.client.workspace as AcodeWorkspace | null;
+				if (workspace && !workspace.hasWorkspaceFolder(normalizedRootUri)) {
+					workspace.addWorkspaceFolder(normalizedRootUri);
+				}
+			}
+			return existing;
 		}
 
 		// If initialization is already in progress, wait for it
@@ -331,8 +348,8 @@ export class LspClientManager {
 		// Create and track the pending initialization
 		const initPromise = this.#initializeClient(server, context, {
 			key,
-			normalizedRootUri,
-			originalRootUri,
+			normalizedRootUri: useWsFolders ? null : normalizedRootUri,
+			originalRootUri: useWsFolders ? null : originalRootUri,
 		});
 		this.#pendingClients.set(key, initPromise);
 
@@ -604,11 +621,18 @@ export class LspClientManager {
 		let client: ExtendedLSPClient | undefined;
 
 		try {
-			await ensureServerRunning(server);
+			// Get session from server ID for auto-port discovery
+			const session = server.id;
+			const serverResult = await ensureServerRunning(server, session);
+
+			// Use discovered port if available (for auto-port discovery)
+			const dynamicPort = serverResult.discoveredPort;
+
 			transportHandle = createTransport(server, {
 				...context,
 				rootUri: normalizedRootUri ?? null,
 				originalRootUri: originalRootUri ?? undefined,
+				dynamicPort,
 			});
 			await transportHandle.ready;
 			client = new LSPClient(clientConfig) as ExtendedLSPClient;
