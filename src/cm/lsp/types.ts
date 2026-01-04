@@ -115,6 +115,7 @@ export interface BuiltinExtensionsConfig {
 	keymaps?: boolean;
 	diagnostics?: boolean;
 	inlayHints?: boolean;
+	documentHighlights?: boolean;
 }
 
 export interface AcodeClientConfig {

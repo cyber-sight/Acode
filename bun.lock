@@ -79,6 +79,7 @@
         "@types/url-parse": "^1.4.11",
         "autoprefixer": "^10.4.22",
         "babel-loader": "^10.0.0",
+        "com.foxdebug.acode.rk.auth": "file:src/plugins/auth",
         "com.foxdebug.acode.rk.customtabs": "file:src/plugins/custom-tabs",
         "com.foxdebug.acode.rk.exec.proot": "file:src/plugins/proot",
         "com.foxdebug.acode.rk.exec.terminal": "file:src/plugins/terminal",
@@ -729,6 +730,8 @@
     "color-name": ["color-name@1.1.4", "", {}, "sha512-dOy+3AuW3a2wNbZHIuMZpTcgjGuLU/uBL/ubcZF9OXbDo8ff4O8yVp5Bf0efS8uEoYo5q4Fx7dY9OgQGXgAsQA=="],
 
     "colorette": ["colorette@2.0.19", "", {}, ""],
+
+    "com.foxdebug.acode.rk.auth": ["com.foxdebug.acode.rk.auth@file:src/plugins/auth", {}],
 
     "com.foxdebug.acode.rk.customtabs": ["com.foxdebug.acode.rk.customtabs@file:src/plugins/custom-tabs", {}],
 

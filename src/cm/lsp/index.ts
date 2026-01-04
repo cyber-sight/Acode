@@ -7,6 +7,12 @@ export {
 	lspDiagnosticsExtension,
 	lspDiagnosticsUiExtension,
 } from "./diagnostics";
+export type { DocumentHighlightsConfig } from "./documentHighlights";
+export {
+	documentHighlightsClientExtension,
+	documentHighlightsEditorExtension,
+	documentHighlightsExtension,
+} from "./documentHighlights";
 export { registerLspFormatter } from "./formatter";
 export type { InlayHintsConfig } from "./inlayHints";
 export {

@@ -118,6 +118,13 @@ export default function lspServerDetail(serverId) {
 	});
 
 	items.push({
+		key: "ext_documentHighlights",
+		text: "Document Highlights",
+		checkbox: builtinExts.documentHighlights !== false,
+		info: "Highlight all occurrences of the word under cursor",
+	});
+
+	items.push({
 		key: "ext_formatting",
 		text: "Formatting",
 		checkbox: builtinExts.formatting !== false,
@@ -168,6 +175,7 @@ export default function lspServerDetail(serverId) {
 			case "ext_signature":
 			case "ext_diagnostics":
 			case "ext_inlayHints":
+			case "ext_documentHighlights":
 			case "ext_formatting": {
 				const extKey = key.replace("ext_", "");
 				const currentClientConfig = override.clientConfig || {};
