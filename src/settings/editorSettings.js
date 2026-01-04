@@ -169,6 +169,11 @@ export default function editorSettings() {
 			checkbox: values.rainbowBrackets ?? true,
 		},
 		{
+			key: "indentGuides",
+			text: strings["indent guides"] || "Indent guides",
+			checkbox: values.indentGuides ?? true,
+		},
+		{
 			index: 0,
 			key: "scroll-settings",
 			text: strings["scroll settings"],

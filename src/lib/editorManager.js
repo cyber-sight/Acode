@@ -58,6 +58,7 @@ import {
 	restoreSelection,
 	setScrollPosition,
 } from "cm/editorUtils";
+import indentGuides from "cm/indentGuides";
 import rainbowBrackets from "cm/rainbowBrackets";
 import themeRegistry, { getThemeById, getThemes } from "cm/themes";
 import list from "components/collapsableList";
@@ -178,6 +179,8 @@ async function EditorManager($header, $body) {
 	const completionCompartment = new Compartment();
 	// Compartment for rainbow bracket colorizer
 	const rainbowCompartment = new Compartment();
+	// Compartment for indent guides
+	const indentGuidesCompartment = new Compartment();
 	// Compartment for read-only toggling
 	const readOnlyCompartment = new Compartment();
 	// Compartment for language mode (allows async loading/reconfigure)
@@ -268,6 +271,18 @@ async function EditorManager($header, $body) {
 				const enabled = appSettings?.value?.rainbowBrackets ?? true;
 				if (!enabled) return [];
 				return rainbowBrackets();
+			},
+		},
+		{
+			keys: ["indentGuides"],
+			compartments: [indentGuidesCompartment],
+			build() {
+				const enabled = appSettings?.value?.indentGuides ?? true;
+				if (!enabled) return [];
+				return indentGuides({
+					highlightActiveGuide: true,
+					hideOnBlankLines: false,
+				});
 			},
 		},
 		{
@@ -1384,6 +1399,11 @@ async function EditorManager($header, $body) {
 	// Toggle rainbow brackets
 	appSettings.on("update:rainbowBrackets", function () {
 		applyOptions(["rainbowBrackets"]);
+	});
+
+	// Toggle indent guides
+	appSettings.on("update:indentGuides", function () {
+		applyOptions(["indentGuides"]);
 	});
 
 	// Keep file.session and cache in sync on every edit

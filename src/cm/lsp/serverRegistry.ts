@@ -157,7 +157,9 @@ function sanitizeDefinition(
 	// Websocket transport requires a URL unless a bridge is configured for auto-port discovery
 	const hasBridge = definition.launcher?.bridge?.command;
 	if (kind === "websocket" && !transport.url && !hasBridge) {
-		throw new Error(`LSP server ${id} (websocket) requires a url or a launcher bridge`);
+		throw new Error(
+			`LSP server ${id} (websocket) requires a url or a launcher bridge`,
+		);
 	}
 
 	const transportOptions: Record<string, unknown> =
