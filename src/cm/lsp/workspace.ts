@@ -113,16 +113,6 @@ export default class AcodeWorkspace extends Workspace {
 		return "plaintext";
 	}
 
-	#getOpenFileCallback(): ((uri: string) => Promise<EditorView | null>) | null {
-		if (typeof this.options.openFile === "function") {
-			return this.options.openFile;
-		}
-		if (typeof this.options.displayFile === "function") {
-			return this.options.displayFile;
-		}
-		return null;
-	}
-
 	syncFiles(): readonly WorkspaceFileUpdate[] {
 		const updates: WorkspaceFileUpdate[] = [];
 		for (const file of this.files) {
@@ -164,22 +154,8 @@ export default class AcodeWorkspace extends Workspace {
 		return this.#getFileEntry(uri);
 	}
 
-	async requestFile(uri: string): Promise<AcodeWorkspaceFile | null> {
-		const existing = this.#getFileEntry(uri);
-		if (existing) return existing;
-
-		const openFileCallback = this.#getOpenFileCallback();
-		if (!openFileCallback) return null;
-
-		try {
-			const view = await openFileCallback(uri);
-			if (!view?.state?.doc) return null;
-			const languageId = this.#resolveLanguageIdForUri(uri);
-			return this.#getOrCreateFile(uri, languageId, view);
-		} catch (error) {
-			console.error(`[LSP:Workspace] Failed to open file: ${uri}`, error);
-			return null;
-		}
+	requestFile(uri: string): Promise<AcodeWorkspaceFile | null> {
+		return Promise.resolve(this.#getFileEntry(uri));
 	}
 
 	connected(): void {
@@ -209,16 +185,16 @@ export default class AcodeWorkspace extends Workspace {
 		uri: string,
 		update: TransactionSpec,
 	): Promise<void> {
-		const openFileCallback = this.#getOpenFileCallback();
-		if (!openFileCallback) return;
+		if (typeof this.options.displayFile !== "function") return;
 
 		try {
-			const file = await this.requestFile(uri);
-			if (!file) return;
-
-			const view = file.getView();
-			if (view) {
-				view.dispatch(update);
+			const view = await this.options.displayFile(uri);
+			if (!view?.state?.doc) return;
+			const languageId = this.#resolveLanguageIdForUri(uri);
+			const file = this.#getOrCreateFile(uri, languageId, view);
+			const fileView = file.getView();
+			if (fileView) {
+				fileView.dispatch(update);
 			}
 		} catch (error) {
 			console.error(`[LSP:Workspace] Failed to apply update: ${uri}`, error);
