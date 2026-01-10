@@ -2,6 +2,10 @@
 #import <Cordova/CDVPluginResult.h>
 #import <UIKit/UIKit.h>
 #import <Foundation/Foundation.h>
+#import <UserNotifications/UserNotifications.h>
+#import <SafariServices/SafariServices.h>
+#import <AVFoundation/AVFoundation.h>
+#import <Photos/Photos.h>
 #import <sys/sysctl.h>
 
 @interface System ()
@@ -24,6 +28,10 @@
         [result setKeepCallback:@YES];
         [self.commandDelegate sendPluginResult:result callbackId:self.intentHandlerCallbackId];
     }
+}
+
+- (void)pluginInitialize {
+    [[NSNotificationCenter defaultCenter] addObserver:self selector:@selector(handleOpenURL:) name:CDVPluginHandleOpenURLNotification object:nil];
 }
 
 - (void)getFilesDir:(CDVInvokedUrlCommand *)command {
@@ -83,6 +91,22 @@
     [self.commandDelegate sendPluginResult:[CDVPluginResult resultWithStatus:CDVCommandStatus_OK messageAsInt:1] callbackId:command.callbackId];
 }
 
+- (void)isManageExternalStorageDeclared:(CDVInvokedUrlCommand *)command {
+    [self.commandDelegate sendPluginResult:[CDVPluginResult resultWithStatus:CDVCommandStatus_OK messageAsString:@"false"] callbackId:command.callbackId];
+}
+
+- (void)hasGrantedStorageManager:(CDVInvokedUrlCommand *)command {
+    [self.commandDelegate sendPluginResult:[CDVPluginResult resultWithStatus:CDVCommandStatus_OK messageAsString:@"false"] callbackId:command.callbackId];
+}
+
+- (void)requestStorageManager:(CDVInvokedUrlCommand *)command {
+    [self.commandDelegate sendPluginResult:[CDVPluginResult resultWithStatus:CDVCommandStatus_OK messageAsString:@"false"] callbackId:command.callbackId];
+}
+
+- (void)isExternalStorageManager:(CDVInvokedUrlCommand *)command {
+    [self.commandDelegate sendPluginResult:[CDVPluginResult resultWithStatus:CDVCommandStatus_OK messageAsString:@"false"] callbackId:command.callbackId];
+}
+
 - (void)writeText:(CDVInvokedUrlCommand *)command {
     NSString *path = command.arguments.count > 0 ? command.arguments[0] : @"";
     NSString *content = command.arguments.count > 1 ? command.arguments[1] : @"";
@@ -140,6 +164,10 @@
         @"userAgent": @""
     };
     [self.commandDelegate sendPluginResult:[CDVPluginResult resultWithStatus:CDVCommandStatus_OK messageAsDictionary:info] callbackId:command.callbackId];
+}
+
+- (void)getWebkitInfo:(CDVInvokedUrlCommand *)command {
+    [self getWebviewInfo:command];
 }
 
 - (void)isPowerSaveMode:(CDVInvokedUrlCommand *)command {
@@ -202,16 +230,156 @@
 }
 
 - (void)requestPermissions:(CDVInvokedUrlCommand *)command {
-    CDVPluginResult *result = [CDVPluginResult resultWithStatus:CDVCommandStatus_OK messageAsArray:@[]];
-    [self.commandDelegate sendPluginResult:result callbackId:command.callbackId];
+    id permsArg = command.arguments.count > 0 ? command.arguments[0] : @[];
+    NSArray *permissions = [permsArg isKindOfClass:[NSArray class]] ? permsArg : @[];
+    NSMutableArray *denied = [NSMutableArray array];
+
+    dispatch_group_t group = dispatch_group_create();
+    BOOL needsNotification = NO;
+    BOOL needsCamera = NO;
+    BOOL needsMicrophone = NO;
+    BOOL needsPhotos = NO;
+    for (NSString *perm in permissions) {
+        if ([self isNotificationPermission:perm]) {
+            needsNotification = YES;
+        } else if ([self isCameraPermission:perm]) {
+            needsCamera = YES;
+        } else if ([self isMicrophonePermission:perm]) {
+            needsMicrophone = YES;
+        } else if ([self isPhotoPermission:perm]) {
+            needsPhotos = YES;
+        } else if ([self isStoragePermission:perm]) {
+            continue;
+        } else {
+            [denied addObject:perm ?: @""];
+        }
+    }
+
+    if (needsNotification) {
+        dispatch_group_enter(group);
+        [self requestNotificationPermission:^(BOOL granted) {
+            if (!granted) {
+                [denied addObject:@"android.permission.POST_NOTIFICATIONS"];
+            }
+            dispatch_group_leave(group);
+        }];
+    }
+
+    if (needsCamera) {
+        dispatch_group_enter(group);
+        [self requestCameraPermission:^(BOOL granted) {
+            if (!granted) {
+                [denied addObject:@"android.permission.CAMERA"];
+            }
+            dispatch_group_leave(group);
+        }];
+    }
+
+    if (needsMicrophone) {
+        dispatch_group_enter(group);
+        [self requestMicrophonePermission:^(BOOL granted) {
+            if (!granted) {
+                [denied addObject:@"android.permission.RECORD_AUDIO"];
+            }
+            dispatch_group_leave(group);
+        }];
+    }
+
+    if (needsPhotos) {
+        dispatch_group_enter(group);
+        [self requestPhotoPermission:^(BOOL granted) {
+            if (!granted) {
+                [denied addObject:@"android.permission.READ_EXTERNAL_STORAGE"];
+            }
+            dispatch_group_leave(group);
+        }];
+    }
+
+    dispatch_group_notify(group, dispatch_get_main_queue(), ^{
+        CDVPluginResult *result = [CDVPluginResult resultWithStatus:CDVCommandStatus_OK messageAsArray:denied];
+        [self.commandDelegate sendPluginResult:result callbackId:command.callbackId];
+    });
 }
 
 - (void)requestPermission:(CDVInvokedUrlCommand *)command {
-    [self.commandDelegate sendPluginResult:[CDVPluginResult resultWithStatus:CDVCommandStatus_OK messageAsInt:1] callbackId:command.callbackId];
+    NSString *permission = command.arguments.count > 0 ? command.arguments[0] : @"";
+    if ([self isNotificationPermission:permission]) {
+        [self requestNotificationPermission:^(BOOL granted) {
+            CDVPluginResult *result = [CDVPluginResult resultWithStatus:CDVCommandStatus_OK messageAsInt:(granted ? 1 : 0)];
+            [self.commandDelegate sendPluginResult:result callbackId:command.callbackId];
+        }];
+        return;
+    }
+
+    if ([self isCameraPermission:permission]) {
+        [self requestCameraPermission:^(BOOL granted) {
+            CDVPluginResult *result = [CDVPluginResult resultWithStatus:CDVCommandStatus_OK messageAsInt:(granted ? 1 : 0)];
+            [self.commandDelegate sendPluginResult:result callbackId:command.callbackId];
+        }];
+        return;
+    }
+
+    if ([self isMicrophonePermission:permission]) {
+        [self requestMicrophonePermission:^(BOOL granted) {
+            CDVPluginResult *result = [CDVPluginResult resultWithStatus:CDVCommandStatus_OK messageAsInt:(granted ? 1 : 0)];
+            [self.commandDelegate sendPluginResult:result callbackId:command.callbackId];
+        }];
+        return;
+    }
+
+    if ([self isPhotoPermission:permission]) {
+        [self requestPhotoPermission:^(BOOL granted) {
+            CDVPluginResult *result = [CDVPluginResult resultWithStatus:CDVCommandStatus_OK messageAsInt:(granted ? 1 : 0)];
+            [self.commandDelegate sendPluginResult:result callbackId:command.callbackId];
+        }];
+        return;
+    }
+
+    if ([self isStoragePermission:permission]) {
+        [self.commandDelegate sendPluginResult:[CDVPluginResult resultWithStatus:CDVCommandStatus_OK messageAsInt:1] callbackId:command.callbackId];
+        return;
+    }
+
+    [self.commandDelegate sendPluginResult:[CDVPluginResult resultWithStatus:CDVCommandStatus_OK messageAsInt:0] callbackId:command.callbackId];
 }
 
 - (void)hasPermission:(CDVInvokedUrlCommand *)command {
-    [self.commandDelegate sendPluginResult:[CDVPluginResult resultWithStatus:CDVCommandStatus_OK messageAsInt:1] callbackId:command.callbackId];
+    NSString *permission = command.arguments.count > 0 ? command.arguments[0] : @"";
+    if ([self isNotificationPermission:permission]) {
+        [self notificationPermissionStatus:^(BOOL granted) {
+            CDVPluginResult *result = [CDVPluginResult resultWithStatus:CDVCommandStatus_OK messageAsInt:(granted ? 1 : 0)];
+            [self.commandDelegate sendPluginResult:result callbackId:command.callbackId];
+        }];
+        return;
+    }
+
+    if ([self isCameraPermission:permission]) {
+        AVAuthorizationStatus status = [AVCaptureDevice authorizationStatusForMediaType:AVMediaTypeVideo];
+        BOOL granted = status == AVAuthorizationStatusAuthorized;
+        [self.commandDelegate sendPluginResult:[CDVPluginResult resultWithStatus:CDVCommandStatus_OK messageAsInt:(granted ? 1 : 0)] callbackId:command.callbackId];
+        return;
+    }
+
+    if ([self isMicrophonePermission:permission]) {
+        AVAuthorizationStatus status = [AVCaptureDevice authorizationStatusForMediaType:AVMediaTypeAudio];
+        BOOL granted = status == AVAuthorizationStatusAuthorized;
+        [self.commandDelegate sendPluginResult:[CDVPluginResult resultWithStatus:CDVCommandStatus_OK messageAsInt:(granted ? 1 : 0)] callbackId:command.callbackId];
+        return;
+    }
+
+    if ([self isPhotoPermission:permission]) {
+        PHAuthorizationStatus status = [PHPhotoLibrary authorizationStatus];
+        BOOL granted = status == PHAuthorizationStatusAuthorized || status == PHAuthorizationStatusLimited;
+        [self.commandDelegate sendPluginResult:[CDVPluginResult resultWithStatus:CDVCommandStatus_OK messageAsInt:(granted ? 1 : 0)] callbackId:command.callbackId];
+        return;
+    }
+
+    if ([self isStoragePermission:permission]) {
+        [self.commandDelegate sendPluginResult:[CDVPluginResult resultWithStatus:CDVCommandStatus_OK messageAsInt:1] callbackId:command.callbackId];
+        return;
+    }
+
+    [self.commandDelegate sendPluginResult:[CDVPluginResult resultWithStatus:CDVCommandStatus_OK messageAsInt:0] callbackId:command.callbackId];
 }
 
 - (void)openInBrowser:(CDVInvokedUrlCommand *)command {
@@ -231,6 +399,28 @@
     });
 
     [self.commandDelegate sendPluginResult:[CDVPluginResult resultWithStatus:CDVCommandStatus_OK] callbackId:command.callbackId];
+}
+
+- (void)inAppBrowser:(CDVInvokedUrlCommand *)command {
+    NSString *urlString = command.arguments.count > 0 ? command.arguments[0] : @"";
+    NSURL *url = [NSURL URLWithString:urlString];
+    if (!url) {
+        [self.commandDelegate sendPluginResult:[CDVPluginResult resultWithStatus:CDVCommandStatus_ERROR messageAsString:@"Invalid URL"] callbackId:command.callbackId];
+        return;
+    }
+
+    dispatch_async(dispatch_get_main_queue(), ^{
+        if (@available(iOS 9.0, *)) {
+            SFSafariViewController *safari = [[SFSafariViewController alloc] initWithURL:url];
+            [self.viewController presentViewController:safari animated:YES completion:nil];
+        } else {
+            [[UIApplication sharedApplication] openURL:url];
+        }
+    });
+
+    CDVPluginResult *result = [CDVPluginResult resultWithStatus:CDVCommandStatus_NO_RESULT];
+    [result setKeepCallback:@YES];
+    [self.commandDelegate sendPluginResult:result callbackId:command.callbackId];
 }
 
 - (void)launchApp:(CDVInvokedUrlCommand *)command {
@@ -281,6 +471,10 @@
 
 - (void)getGlobalSetting:(CDVInvokedUrlCommand *)command {
     [self.commandDelegate sendPluginResult:[CDVPluginResult resultWithStatus:CDVCommandStatus_OK messageAsString:@""] callbackId:command.callbackId];
+}
+
+- (void)manageAllFiles:(CDVInvokedUrlCommand *)command {
+    [self.commandDelegate sendPluginResult:[CDVPluginResult resultWithStatus:CDVCommandStatus_OK] callbackId:command.callbackId];
 }
 
 - (void)getAndroidVersion:(CDVInvokedUrlCommand *)command {
@@ -355,6 +549,100 @@
         return;
     }
     [self.commandDelegate sendPluginResult:[CDVPluginResult resultWithStatus:CDVCommandStatus_OK] callbackId:command.callbackId];
+}
+
+- (BOOL)isNotificationPermission:(NSString *)permission {
+    return [permission isKindOfClass:[NSString class]] && [permission isEqualToString:@"android.permission.POST_NOTIFICATIONS"];
+}
+
+- (BOOL)isStoragePermission:(NSString *)permission {
+    if (![permission isKindOfClass:[NSString class]]) {
+        return NO;
+    }
+    return [permission isEqualToString:@"android.permission.READ_EXTERNAL_STORAGE"] ||
+        [permission isEqualToString:@"android.permission.WRITE_EXTERNAL_STORAGE"] ||
+        [permission isEqualToString:@"android.permission.MANAGE_EXTERNAL_STORAGE"];
+}
+
+- (BOOL)isCameraPermission:(NSString *)permission {
+    return [permission isKindOfClass:[NSString class]] && [permission isEqualToString:@"android.permission.CAMERA"];
+}
+
+- (BOOL)isMicrophonePermission:(NSString *)permission {
+    return [permission isKindOfClass:[NSString class]] && [permission isEqualToString:@"android.permission.RECORD_AUDIO"];
+}
+
+- (BOOL)isPhotoPermission:(NSString *)permission {
+    return [permission isKindOfClass:[NSString class]] &&
+        ([permission isEqualToString:@"android.permission.READ_MEDIA_IMAGES"] || [permission isEqualToString:@"android.permission.READ_EXTERNAL_STORAGE"]);
+}
+
+- (void)requestNotificationPermission:(void (^)(BOOL granted))completion {
+    if (@available(iOS 10.0, *)) {
+        UNUserNotificationCenter *center = [UNUserNotificationCenter currentNotificationCenter];
+        [center requestAuthorizationWithOptions:(UNAuthorizationOptionAlert | UNAuthorizationOptionSound | UNAuthorizationOptionBadge)
+                              completionHandler:^(BOOL granted, NSError * _Nullable error) {
+            if (completion) {
+                completion(granted && error == nil);
+            }
+        }];
+    } else {
+        if (completion) {
+            completion(YES);
+        }
+    }
+}
+
+- (void)requestCameraPermission:(void (^)(BOOL granted))completion {
+    AVAuthorizationStatus status = [AVCaptureDevice authorizationStatusForMediaType:AVMediaTypeVideo];
+    if (status == AVAuthorizationStatusAuthorized) {
+        completion(YES);
+        return;
+    }
+    [AVCaptureDevice requestAccessForMediaType:AVMediaTypeVideo completionHandler:^(BOOL granted) {
+        completion(granted);
+    }];
+}
+
+- (void)requestMicrophonePermission:(void (^)(BOOL granted))completion {
+    AVAuthorizationStatus status = [AVCaptureDevice authorizationStatusForMediaType:AVMediaTypeAudio];
+    if (status == AVAuthorizationStatusAuthorized) {
+        completion(YES);
+        return;
+    }
+    [AVCaptureDevice requestAccessForMediaType:AVMediaTypeAudio completionHandler:^(BOOL granted) {
+        completion(granted);
+    }];
+}
+
+- (void)requestPhotoPermission:(void (^)(BOOL granted))completion {
+    PHAuthorizationStatus status = [PHPhotoLibrary authorizationStatus];
+    if (status == PHAuthorizationStatusAuthorized || status == PHAuthorizationStatusLimited) {
+        completion(YES);
+        return;
+    }
+    [PHPhotoLibrary requestAuthorization:^(PHAuthorizationStatus status) {
+        BOOL granted = status == PHAuthorizationStatusAuthorized || status == PHAuthorizationStatusLimited;
+        completion(granted);
+    }];
+}
+
+- (void)notificationPermissionStatus:(void (^)(BOOL granted))completion {
+    if (@available(iOS 10.0, *)) {
+        UNUserNotificationCenter *center = [UNUserNotificationCenter currentNotificationCenter];
+        [center getNotificationSettingsWithCompletionHandler:^(UNNotificationSettings * _Nonnull settings) {
+            BOOL granted = settings.authorizationStatus == UNAuthorizationStatusAuthorized ||
+                settings.authorizationStatus == UNAuthorizationStatusProvisional ||
+                settings.authorizationStatus == UNAuthorizationStatusEphemeral;
+            if (completion) {
+                completion(granted);
+            }
+        }];
+    } else {
+        if (completion) {
+            completion(YES);
+        }
+    }
 }
 
 @end
