@@ -21,6 +21,11 @@ export {
 	inlayHintsExtension,
 } from "./inlayHints";
 export {
+	acodeRenameExtension,
+	acodeRenameKeymap,
+	renameSymbol,
+} from "./rename";
+export {
 	ensureServerRunning,
 	resetManagedServers,
 	stopManagedServer,

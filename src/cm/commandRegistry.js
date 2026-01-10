@@ -72,12 +72,15 @@ import {
 	jumpToTypeDefinition as lspJumpToTypeDefinition,
 	nextSignature as lspNextSignature,
 	prevSignature as lspPrevSignature,
-	renameSymbol as lspRenameSymbol,
 	showSignatureHelp as lspShowSignatureHelp,
 } from "@codemirror/lsp-client";
 import { Compartment, EditorSelection } from "@codemirror/state";
 import { keymap } from "@codemirror/view";
-import { clearDiagnosticsEffect, clientManager } from "cm/lsp";
+import {
+	renameSymbol as acodeRenameSymbol,
+	clearDiagnosticsEffect,
+	clientManager,
+} from "cm/lsp";
 import toast from "components/toast";
 import prompt from "dialogs/prompt";
 import actions from "handlers/quickTools";
@@ -882,7 +885,7 @@ function registerLspCommands() {
 		description: "Rename symbol (Language Server)",
 		readOnly: false,
 		requiresView: true,
-		run: runLspCommand(lspRenameSymbol),
+		run: runLspCommand(acodeRenameSymbol),
 	});
 	addCommand({
 		name: "showSignatureHelp",

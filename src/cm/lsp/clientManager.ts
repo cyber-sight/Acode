@@ -7,7 +7,6 @@ import {
 	jumpToDefinitionKeymap,
 	LSPClient,
 	LSPPlugin,
-	renameKeymap,
 	serverCompletion,
 	serverDiagnostics,
 	signatureHelp,
@@ -20,6 +19,7 @@ import Uri from "utils/Uri";
 import { clearDiagnosticsEffect } from "./diagnostics";
 import { documentHighlightsExtension } from "./documentHighlights";
 import { inlayHintsExtension } from "./inlayHints";
+import { acodeRenameKeymap } from "./rename";
 import { ensureServerRunning } from "./serverLauncher";
 import serverRegistry from "./serverRegistry";
 import { createTransport } from "./transport";
@@ -62,7 +62,7 @@ function safeString(value: unknown): string {
 
 const defaultKeymaps = keymap.of([
 	...formatKeymap,
-	...renameKeymap,
+	...acodeRenameKeymap,
 	...jumpToDefinitionKeymap,
 	...findReferencesKeymap,
 ]);
