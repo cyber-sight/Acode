@@ -300,6 +300,11 @@ static NSString *const kSeparator = @"::";
     [self.commandDelegate sendPluginResult:[CDVPluginResult resultWithStatus:CDVCommandStatus_OK messageAsDictionary:result] callbackId:command.callbackId];
 }
 
+- (void)listEncodings:(CDVInvokedUrlCommand *)command {
+    CDVPluginResult *result = [CDVPluginResult resultWithStatus:CDVCommandStatus_OK messageAsArray:@[]];
+    [self.commandDelegate sendPluginResult:result callbackId:command.callbackId];
+}
+
 - (void)watchFile:(CDVInvokedUrlCommand *)command {
     NSString *path = command.arguments.count > 0 ? command.arguments[0] : @"";
     NSString *observerId = command.arguments.count > 1 ? command.arguments[1] : @"";

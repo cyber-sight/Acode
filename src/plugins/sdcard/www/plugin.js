@@ -1,12 +1,29 @@
+const isIOS = typeof cordova !== "undefined" && cordova.platformId === "ios";
+const actionMap = {
+  "create directory": "createDir",
+  "create file": "createFile",
+  "open document file": "openDocumentFile",
+  "get image": "getImage",
+  "list volumes": "listStorages",
+  "storage permission": "getStorageAccessPermission",
+  "list directory": "listDir",
+  "format uri": "formatUri",
+  "get path": "getPath",
+  "watch file": "watchFile",
+  "unwatch file": "unwatchFile",
+  "list encodings": "listEncodings"
+};
+const action = (name) => (isIOS && actionMap[name]) ? actionMap[name] : name;
+
 module.exports = {
   copy: function (srcPathname, destPathname, onSuccess, onFail) {
     cordova.exec(onSuccess, onFail, 'SDcard', 'copy', [srcPathname, destPathname]);
   },
   createDir: function (pathname, dir, onSuccess, onFail) {
-    cordova.exec(onSuccess, onFail, 'SDcard', 'create directory', [pathname, dir]);
+    cordova.exec(onSuccess, onFail, 'SDcard', action('create directory'), [pathname, dir]);
   },
   createFile: function (pathname, file, onSuccess, onFail) {
-    cordova.exec(onSuccess, onFail, 'SDcard', 'create file', [pathname, file]);
+    cordova.exec(onSuccess, onFail, 'SDcard', action('create file'), [pathname, file]);
   },
   delete: function (pathname, onSuccess, onFail) {
     cordova.exec(onSuccess, onFail, 'SDcard', 'delete', [pathname]);
@@ -15,28 +32,28 @@ module.exports = {
     cordova.exec(onSuccess, onFail, 'SDcard', 'exists', [pathName]);
   },
   formatUri: function (pathName, onSuccess, onFail) {
-    cordova.exec(onSuccess, onFail, 'SDcard', 'format uri', [pathName]);
+    cordova.exec(onSuccess, onFail, 'SDcard', action('format uri'), [pathName]);
   },
   getPath: function (uri, filename, onSuccess, onFail) {
-    cordova.exec(onSuccess, onFail, 'SDcard', 'get path', [uri, filename]);
+    cordova.exec(onSuccess, onFail, 'SDcard', action('get path'), [uri, filename]);
   },
   getStorageAccessPermission: function (uuid, onSuccess, onFail) {
-    cordova.exec(onSuccess, onFail, 'SDcard', 'storage permission', [uuid]);
+    cordova.exec(onSuccess, onFail, 'SDcard', action('storage permission'), [uuid]);
   },
   listStorages: function (onSuccess, onFail) {
-    cordova.exec(onSuccess, onFail, 'SDcard', 'list volumes', []);
+    cordova.exec(onSuccess, onFail, 'SDcard', action('list volumes'), []);
   },
   listDir: function (src, onSuccess, onFail) {
-    cordova.exec(onSuccess, onFail, 'SDcard', 'list directory', [src]);
+    cordova.exec(onSuccess, onFail, 'SDcard', action('list directory'), [src]);
   },
   move: function (srcPathname, destPathname, onSuccess, onFail) {
     cordova.exec(onSuccess, onFail, 'SDcard', 'move', [srcPathname, destPathname]);
   },
   openDocumentFile: function (onSuccess, onFail, mimeType) {
-    cordova.exec(onSuccess, onFail, 'SDcard', 'open document file', mimeType ? [mimeType] : []);
+    cordova.exec(onSuccess, onFail, 'SDcard', action('open document file'), mimeType ? [mimeType] : []);
   },
   getImage: function (onSuccess, onFail, mimeType) {
-    cordova.exec(onSuccess, onFail, 'SDcard', 'get image', mimeType ? [mimeType] : []);
+    cordova.exec(onSuccess, onFail, 'SDcard', action('get image'), mimeType ? [mimeType] : []);
   },
   rename: function (pathname, newFilename, onSuccess, onFail) {
     cordova.exec(onSuccess, onFail, 'SDcard', 'rename', [pathname, newFilename]);
@@ -53,14 +70,14 @@ module.exports = {
   },
   watchFile: function (filename, listener, onFail) {
     var id = parseInt(Date.now() + Math.random() * 1000000) + '';
-    cordova.exec(listener, onFail, 'SDcard', 'watch file', [filename, id]);
+    cordova.exec(listener, onFail, 'SDcard', action('watch file'), [filename, id]);
     return {
       unwatch: function () {
-        cordova.exec(null, null, 'SDcard', 'unwatch file', [id]);
+        cordova.exec(null, null, 'SDcard', action('unwatch file'), [id]);
       }
     };
   },
   listEncodings: function (onSuccess, onFail) {
-    cordova.exec(onSuccess, onFail, 'SDcard', 'list encodings', []);
+    cordova.exec(onSuccess, onFail, 'SDcard', action('list encodings'), []);
   }
 };

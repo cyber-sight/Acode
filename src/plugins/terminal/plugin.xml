@@ -86,5 +86,11 @@
         <source-file src="src/ios/Executor.m" />
         <header-file src="src/ios/BackgroundExecutor.h" />
         <source-file src="src/ios/BackgroundExecutor.m" />
+        <header-file src="src/ios/IshBridge.h" />
+        <source-file src="src/ios/IshBridge.m" />
+        <header-file src="src/ios/IshRootfs.h" />
+        <source-file src="src/ios/IshRootfs.c" />
+        <header-file src="src/ios/ish/include/LinuxInterop.h" />
+        <header-file src="src/ios/ish/include/Terminal.h" />
     </platform>
 </plugin>

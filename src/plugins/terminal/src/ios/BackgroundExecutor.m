@@ -1,18 +1,51 @@
 #import "BackgroundExecutor.h"
-#import <Cordova/CDVPluginResult.h>
-#import <objc/runtime.h>
-
-static void notSupportedIMP(id self, SEL _cmd, CDVInvokedUrlCommand *command) {
-    CDVPluginResult *result = [CDVPluginResult resultWithStatus:CDVCommandStatus_ERROR
-                                                 messageAsString:@"Not supported on iOS."];
-    [self.commandDelegate sendPluginResult:result callbackId:command.callbackId];
-}
+#import "Executor.h"
 
 @implementation BackgroundExecutor
 
-+ (BOOL)resolveInstanceMethod:(SEL)sel {
-    class_addMethod(self, sel, (IMP)notSupportedIMP, "v@:@");
-    return YES;
+- (void)start:(CDVInvokedUrlCommand *)command {
+    Executor *executor = [Executor new];
+    [executor start:command];
+}
+
+- (void)write:(CDVInvokedUrlCommand *)command {
+    Executor *executor = [Executor new];
+    [executor write:command];
+}
+
+- (void)stop:(CDVInvokedUrlCommand *)command {
+    Executor *executor = [Executor new];
+    [executor stop:command];
+}
+
+- (void)exec:(CDVInvokedUrlCommand *)command {
+    Executor *executor = [Executor new];
+    [executor exec:command];
+}
+
+- (void)stopService:(CDVInvokedUrlCommand *)command {
+    Executor *executor = [Executor new];
+    [executor stopService:command];
+}
+
+- (void)isRunning:(CDVInvokedUrlCommand *)command {
+    Executor *executor = [Executor new];
+    [executor isRunning:command];
+}
+
+- (void)moveToBackground:(CDVInvokedUrlCommand *)command {
+    Executor *executor = [Executor new];
+    [executor moveToBackground:command];
+}
+
+- (void)moveToForeground:(CDVInvokedUrlCommand *)command {
+    Executor *executor = [Executor new];
+    [executor moveToForeground:command];
+}
+
+- (void)loadLibrary:(CDVInvokedUrlCommand *)command {
+    Executor *executor = [Executor new];
+    [executor loadLibrary:command];
 }
 
 @end

@@ -74,5 +74,22 @@
         <hook type="before_prepare" src="hooks/modify-java-files.js" />
         <hook type="after_prepare" src="hooks/post-process.js" />
     </platform>
+    <platform name="ios">
+        <edit-config file="*-Info.plist" mode="merge" target="NSCameraUsageDescription">
+            <string>Camera access is needed for capturing media.</string>
+        </edit-config>
+        <edit-config file="*-Info.plist" mode="merge" target="NSMicrophoneUsageDescription">
+            <string>Microphone access is needed for capturing audio.</string>
+        </edit-config>
+        <edit-config file="*-Info.plist" mode="merge" target="NSPhotoLibraryUsageDescription">
+            <string>Photo library access is needed to select files.</string>
+        </edit-config>
+        <edit-config file="*-Info.plist" mode="merge" target="NSPhotoLibraryAddUsageDescription">
+            <string>Photo library access is needed to save files.</string>
+        </edit-config>
+        <edit-config file="*-Info.plist" mode="merge" target="NSLocalNetworkUsageDescription">
+            <string>Local network access is needed for device-to-device connections.</string>
+        </edit-config>
+    </platform>
     <preference name="AndroidBlacklistSecureSocketProtocols" value="SSLv3,TLSv1" />
 </widget>

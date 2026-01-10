@@ -52,5 +52,6 @@
 
     <header-file src="src/ios/System.h"/>
     <source-file src="src/ios/System.m"/>
+    <framework src="UserNotifications.framework" />
   </platform>
 </plugin>
