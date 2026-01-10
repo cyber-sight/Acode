@@ -49,6 +49,7 @@ import plugins from "pages/plugins";
 import openWelcomeTab from "pages/welcome";
 import otherSettings from "settings/appSettings";
 import themes from "theme/list";
+import { initHighlighting } from "utils/codeHighlight";
 import { getEncoding, initEncodings } from "utils/encodings";
 import helpers from "utils/helpers";
 import loadPolyFill from "utils/polyfill";
@@ -216,6 +217,7 @@ async function onDeviceReady() {
 	acode.setLoadingMessage("Loading settings...");
 	await settings.init();
 	themes.init();
+	initHighlighting();
 
 	registerPrettierFormatter();
 

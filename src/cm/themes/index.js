@@ -13,11 +13,27 @@ import tokyoNight, { config as tokyoNightConfig } from "./tokyoNight";
 import tokyoNightDay, { config as tokyoNightDayConfig } from "./tokyoNightDay";
 import vscodeDark, { config as vscodeDarkConfig } from "./vscodeDark";
 
-// Registry of CodeMirror editor themes
-// key: id, value: { id, caption, isDark, getExtension: () => Extension[] }
+const oneDarkConfig = {
+	name: "one_dark",
+	dark: true,
+	background: "#282c34",
+	foreground: "#abb2bf",
+	keyword: "#c678dd",
+	string: "#98c379",
+	number: "#d19a66",
+	comment: "#5c6370",
+	function: "#61afef",
+	variable: "#e06c75",
+	type: "#e5c07b",
+	class: "#e5c07b",
+	constant: "#d19a66",
+	operator: "#56b6c2",
+	invalid: "#ff6b6b",
+};
+
 const themes = new Map();
 
-export function addTheme(id, caption, isDark, getExtension) {
+export function addTheme(id, caption, isDark, getExtension, config = null) {
 	const key = String(id).toLowerCase();
 	if (themes.has(key)) return;
 	themes.set(key, {
@@ -25,6 +41,7 @@ export function addTheme(id, caption, isDark, getExtension) {
 		caption: caption || id,
 		isDark: !!isDark,
 		getExtension,
+		config: config || null,
 	});
 }
 
@@ -37,54 +54,94 @@ export function getThemeById(id) {
 	return themes.get(String(id).toLowerCase()) || null;
 }
 
+export function getThemeConfig(id) {
+	if (!id) return oneDarkConfig;
+	const theme = themes.get(String(id).toLowerCase());
+	return theme?.config || oneDarkConfig;
+}
+
 export function removeTheme(id) {
 	if (!id) return;
 	themes.delete(String(id).toLowerCase());
 }
 
-// Register built-ins
-addTheme("one_dark", "One Dark", true, () => [oneDark]);
-addTheme(auraConfig.name, "Aura", !!auraConfig.dark, () => aura());
+addTheme("one_dark", "One Dark", true, () => [oneDark], oneDarkConfig);
+addTheme(auraConfig.name, "Aura", !!auraConfig.dark, () => aura(), auraConfig);
 addTheme(
 	noctisLilacConfig.name,
 	noctisLilacConfig.caption || "Noctis Lilac",
 	!!noctisLilacConfig.dark,
 	() => noctisLilac(),
+	noctisLilacConfig,
 );
-addTheme(draculaConfig.name, "Dracula", !!draculaConfig.dark, () => dracula());
-addTheme(githubDarkConfig.name, "GitHub Dark", !!githubDarkConfig.dark, () =>
-	githubDark(),
+addTheme(
+	draculaConfig.name,
+	"Dracula",
+	!!draculaConfig.dark,
+	() => dracula(),
+	draculaConfig,
 );
-addTheme(githubLightConfig.name, "GitHub Light", !!githubLightConfig.dark, () =>
-	githubLight(),
+addTheme(
+	githubDarkConfig.name,
+	"GitHub Dark",
+	!!githubDarkConfig.dark,
+	() => githubDark(),
+	githubDarkConfig,
+);
+addTheme(
+	githubLightConfig.name,
+	"GitHub Light",
+	!!githubLightConfig.dark,
+	() => githubLight(),
+	githubLightConfig,
 );
 addTheme(
 	solarizedDarkConfig.name,
 	"Solarized Dark",
 	!!solarizedDarkConfig.dark,
 	() => solarizedDark(),
+	solarizedDarkConfig,
 );
 addTheme(
 	solarizedLightConfig.name,
 	"Solarized Light",
 	!!solarizedLightConfig.dark,
 	() => solarizedLight(),
+	solarizedLightConfig,
 );
 addTheme(
 	tokyoNightDayConfig.name,
 	"Tokyo Night Day",
 	!!tokyoNightDayConfig.dark,
 	() => tokyoNightDay(),
+	tokyoNightDayConfig,
 );
-addTheme(tokyoNightConfig.name, "Tokyo Night", !!tokyoNightConfig.dark, () =>
-	tokyoNight(),
+addTheme(
+	tokyoNightConfig.name,
+	"Tokyo Night",
+	!!tokyoNightConfig.dark,
+	() => tokyoNight(),
+	tokyoNightConfig,
 );
-addTheme(noctisLilacConfig.name, "Noctis Lilac", !!noctisLilacConfig.dark, () =>
-	noctisLilac(),
+addTheme(
+	monokaiConfig.name,
+	"Monokai",
+	!!monokaiConfig.dark,
+	() => monokai(),
+	monokaiConfig,
 );
-addTheme(monokaiConfig.name, "Monokai", !!monokaiConfig.dark, () => monokai());
-addTheme(vscodeDarkConfig.name, "VS Code Dark", !!vscodeDarkConfig.dark, () =>
-	vscodeDark(),
+addTheme(
+	vscodeDarkConfig.name,
+	"VS Code Dark",
+	!!vscodeDarkConfig.dark,
+	() => vscodeDark(),
+	vscodeDarkConfig,
 );
 
-export default { getThemes, getThemeById, addTheme, removeTheme };
+export default {
+	getThemes,
+	getThemeById,
+	getThemeConfig,
+	addTheme,
+	removeTheme,
+};
