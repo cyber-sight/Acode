@@ -71,4 +71,20 @@
         <config-file target="AndroidManifest.xml" parent="/manifest"></config-file>
 
     </platform>
+
+    <platform name="ios">
+        <config-file parent="/*" target="config.xml">
+            <feature name="Executor">
+                <param name="ios-package" value="Executor" />
+            </feature>
+            <feature name="BackgroundExecutor">
+                <param name="ios-package" value="BackgroundExecutor" />
+            </feature>
+        </config-file>
+
+        <header-file src="src/ios/Executor.h" />
+        <source-file src="src/ios/Executor.m" />
+        <header-file src="src/ios/BackgroundExecutor.h" />
+        <source-file src="src/ios/BackgroundExecutor.m" />
+    </platform>
 </plugin>

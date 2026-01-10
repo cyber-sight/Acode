@@ -22,4 +22,15 @@
         <framework src="commons-net:commons-net:3.12.0" />
     </platform>
 
+    <platform name="ios">
+        <config-file target="config.xml" parent="/*">
+            <feature name="Ftp">
+                <param name="ios-package" value="Ftp" />
+            </feature>
+        </config-file>
+
+        <header-file src="src/ios/Ftp.h" />
+        <source-file src="src/ios/Ftp.m" />
+        <framework src="GRRequests" type="podspec" />
+    </platform>
 </plugin>

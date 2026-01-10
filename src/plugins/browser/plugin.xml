@@ -30,4 +30,15 @@
     <source-file src="android/com/foxdebug/browser/Plugin.java" target-dir="src/com/foxdebug/browser"/>
     <source-file src="android/com/foxdebug/browser/Menu.java" target-dir="src/com/foxdebug/browser"/>
   </platform>
+
+  <platform name="ios">
+    <config-file target="config.xml" parent="/*">
+      <feature name="Browser">
+        <param name="ios-package" value="Browser"/>
+      </feature>
+    </config-file>
+
+    <header-file src="ios/Browser.h"/>
+    <source-file src="ios/Browser.m"/>
+  </platform>
 </plugin>

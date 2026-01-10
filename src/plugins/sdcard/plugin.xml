@@ -23,4 +23,17 @@
     <source-file src="src/android/SDcard.java" target-dir="src/com/foxdebug/sdcard"/>
     <config-file target="AndroidManifest.xml" parent="/manifest"></config-file>
   </platform>
+
+  <platform name="ios">
+    <config-file target="config.xml" parent="/*">
+      <feature name="SDcard">
+        <param name="ios-package" value="SDcard"/>
+      </feature>
+    </config-file>
+
+    <header-file src="src/ios/SDcard.h"/>
+    <source-file src="src/ios/SDcard.m"/>
+    <framework src="MobileCoreServices.framework" />
+    <framework src="UniformTypeIdentifiers.framework" />
+  </platform>
 </plugin>
