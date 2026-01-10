@@ -23,4 +23,16 @@
       </feature>
     </config-file>
   </platform>
+
+  <platform name="ios">
+    <config-file target="config.xml" parent="/*">
+      <feature name="Server">
+        <param name="ios-package" value="Server"/>
+      </feature>
+    </config-file>
+
+    <header-file src="src/ios/Server.h"/>
+    <source-file src="src/ios/Server.m"/>
+    <framework src="GCDWebServer" type="podspec" />
+  </platform>
 </plugin>

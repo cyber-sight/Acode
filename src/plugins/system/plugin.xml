@@ -42,4 +42,15 @@
     <framework src="androidx.core:core-google-shortcuts:1.0.0" />
     <framework src="androidx.documentfile:documentfile:1.0.1" />
   </platform>
+
+  <platform name="ios">
+    <config-file target="config.xml" parent="/*">
+      <feature name="System">
+        <param name="ios-package" value="System"/>
+      </feature>
+    </config-file>
+
+    <header-file src="src/ios/System.h"/>
+    <source-file src="src/ios/System.m"/>
+  </platform>
 </plugin>

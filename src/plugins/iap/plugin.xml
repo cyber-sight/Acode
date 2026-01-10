@@ -24,4 +24,16 @@
     <source-file src="src/com/foxdebug/iap/Iap.java" target-dir="src/com/foxdebug/iap"/>
     <framework src="com.android.billingclient:billing:8.0.0" />
   </platform>
+
+  <platform name="ios">
+    <config-file target="config.xml" parent="/*">
+      <feature name="Iap">
+        <param name="ios-package" value="Iap"/>
+      </feature>
+    </config-file>
+
+    <header-file src="src/ios/Iap.h"/>
+    <source-file src="src/ios/Iap.m"/>
+    <framework src="StoreKit.framework" />
+  </platform>
 </plugin>
