@@ -21,6 +21,11 @@ export {
 	inlayHintsExtension,
 } from "./inlayHints";
 export {
+	closeReferencesPanel,
+	findAllReferences,
+	findAllReferencesInTab,
+} from "./references";
+export {
 	acodeRenameExtension,
 	acodeRenameKeymap,
 	renameSymbol,

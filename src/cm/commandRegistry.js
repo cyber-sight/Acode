@@ -81,6 +81,11 @@ import {
 	clearDiagnosticsEffect,
 	clientManager,
 } from "cm/lsp";
+import {
+	closeReferencesPanel as acodeCloseReferencesPanel,
+	findAllReferences as acodeFindAllReferences,
+	findAllReferencesInTab as acodeFindAllReferencesInTab,
+} from "cm/lsp/references";
 import toast from "components/toast";
 import prompt from "dialogs/prompt";
 import actions from "handlers/quickTools";
@@ -938,20 +943,43 @@ function registerLspCommands() {
 	});
 	addCommand({
 		name: "findReferences",
-		description: "Find references (Language Server)",
+		description: "Find all references (Language Server)",
 		readOnly: true,
 		requiresView: true,
-		run: runLspCommand(lspFindReferences),
+		async run(view) {
+			const resolvedView = resolveView(view);
+			if (!resolvedView) return false;
+			const plugin = LSPPlugin.get(resolvedView);
+			if (!plugin) {
+				notifyLspUnavailable();
+				return false;
+			}
+			return acodeFindAllReferences(resolvedView);
+		},
 	});
 	addCommand({
 		name: "closeReferencePanel",
 		description: "Close references panel",
 		readOnly: true,
+		requiresView: false,
+		run() {
+			return acodeCloseReferencesPanel();
+		},
+	});
+	addCommand({
+		name: "findReferencesInTab",
+		description: "Find all references in new tab (Language Server)",
+		readOnly: true,
 		requiresView: true,
-		run(view) {
+		async run(view) {
 			const resolvedView = resolveView(view);
 			if (!resolvedView) return false;
-			return lspCloseReferencePanel(resolvedView);
+			const plugin = LSPPlugin.get(resolvedView);
+			if (!plugin) {
+				notifyLspUnavailable();
+				return false;
+			}
+			return acodeFindAllReferencesInTab(resolvedView);
 		},
 	});
 	addCommand({
