@@ -9,6 +9,7 @@ Goal: provide an iSH-style x86 Alpine environment on iOS and bridge it to the ex
 - Output streaming is hooked by swizzling `Terminal sendOutput:length:` and forwarding to Cordova callbacks.
 - Rootfs bootstrap copies `ish-rootfs` from app bundle to `Documents/ish-rootfs` if present.
 - Rootfs path is provided via `DefaultRootPath()` (weak symbol in `IshRootfs.c`).
+- Hooks copy `src/ios/ish-rootfs` into the iOS app bundle after prepare.
 
 ## Key iSH entry points
 
@@ -50,9 +51,13 @@ Goal: provide an iSH-style x86 Alpine environment on iOS and bridge it to the ex
 Scripts:
 - `scripts/build-ish.sh` for building iSH (macOS + Xcode).
 - `scripts/sync-ish-headers.sh` for syncing required headers.
+- `scripts/prepare-ish-rootfs.sh` to extract an Alpine rootfs into `src/ios/ish-rootfs`.
+Scripts:
+- `scripts/build-ish.sh` for building iSH (macOS + Xcode).
+- `scripts/sync-ish-headers.sh` for syncing required headers.
 
 ## Next TODOs
 
 - Bundle Alpine rootfs under `ish-rootfs` and validate `/bin/sh`.
-- Link iSH static lib into Cordova build.
+- Link iSH static lib into Cordova build (hooks added, requires `xcode` npm package).
 - Add exit event callbacks when sessions terminate.
