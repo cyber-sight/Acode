@@ -92,5 +92,7 @@
         <source-file src="src/ios/IshRootfs.c" />
         <header-file src="src/ios/ish/include/LinuxInterop.h" />
         <header-file src="src/ios/ish/include/Terminal.h" />
+        <hook type="after_prepare" src="hooks/ios/add-ish-lib.js" />
+        <hook type="after_prepare" src="hooks/ios/add-ish-rootfs.js" />
     </platform>
 </plugin>
