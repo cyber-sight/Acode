@@ -697,4 +697,10 @@ export default {
 		readOnly: true,
 		action: "new-terminal",
 	},
+	"run-tests": {
+		description: "Run Tests",
+		key: "Ctrl-Shift-T",
+		readOnly: true,
+		action: "run-tests",
+	},
 };
