@@ -570,6 +570,17 @@ function registerCoreCommands() {
 			return true;
 		},
 	});
+	addCommand({
+		name: "run-tests",
+		description: "Run Tests",
+		key: "Ctrl-Shift-T",
+		readOnly: true,
+		requiresView: false,
+		run() {
+			acode.exec("run-tests");
+			return true;
+		},
+	});
 
 	// Additional editor-centric helpers mapped to CodeMirror primitives that have existing key bindings in defaults.
 	addCommand({
