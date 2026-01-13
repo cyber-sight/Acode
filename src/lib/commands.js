@@ -21,6 +21,7 @@ import findFile from "palettes/findFile";
 import browser from "plugins/browser";
 import help from "settings/helpSettings";
 import mainSettings from "settings/mainSettings";
+import { runAllTests } from "test/tester";
 import { getColorRange } from "utils/color/regex";
 import helpers from "utils/helpers";
 import Url from "utils/Url";
@@ -35,6 +36,9 @@ import appSettings from "./settings";
 import showFileInfo from "./showFileInfo";
 
 export default {
+	async "run-tests"() {
+		await runAllTests();
+	},
 	async "close-all-tabs"() {
 		let save = false;
 		const unsavedFiles = editorManager.files.filter(
