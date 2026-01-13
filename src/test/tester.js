@@ -1,4 +1,4 @@
-import { runAceEditorTests } from "./editor.tests";
+import { runCodeMirrorTests } from "./editor.tests";
 import { runSanityTests } from "./sanity.tests";
 
 export async function runAllTests() {
@@ -15,7 +15,7 @@ export async function runAllTests() {
 	try {
 		// Run unit tests
 		await runSanityTests(write);
-		await runAceEditorTests(write);
+		await runCodeMirrorTests(write);
 
 		write("\x1b[36m\x1b[1mTests completed!\x1b[0m\n");
 	} catch (error) {
