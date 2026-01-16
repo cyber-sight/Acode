@@ -270,7 +270,7 @@ async function run(
 				const htmlUrl = Url.join(pathName, reqPath + ".html");
 				const htmlFile = editorManager.getFile(htmlUrl, "uri");
 				if (htmlFile?.loaded && htmlFile.isUnsaved) {
-					sendHTML(htmlFile.session?.getValue(), reqId);
+					sendHTML(htmlFile.session?.doc?.toString(), reqId);
 					return;
 				}
 				const htmlFs = fsOperation(htmlUrl);
