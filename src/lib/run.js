@@ -256,6 +256,41 @@ async function run(
 				file = activeFile;
 			}
 
+			// Handle extensionless URLs (e.g., "about" -> "about.html" or "about/index.html")
+			if (!ext && pathName) {
+				// Try exact match first for extensionless files (LICENSE, README, etc.)
+				const exactUrl = Url.join(pathName, reqPath);
+				const exactFs = fsOperation(exactUrl);
+				if (await exactFs.exists()) {
+					sendFile(exactUrl, reqId);
+					return;
+				}
+
+				// Try path.html
+				const htmlUrl = Url.join(pathName, reqPath + ".html");
+				const htmlFile = editorManager.getFile(htmlUrl, "uri");
+				if (htmlFile?.loaded && htmlFile.isUnsaved) {
+					sendHTML(htmlFile.session?.getValue(), reqId);
+					return;
+				}
+				const htmlFs = fsOperation(htmlUrl);
+				if (await htmlFs.exists()) {
+					sendFileContent(htmlUrl, reqId, MIMETYPE_HTML);
+					return;
+				}
+
+				// Try path/index.html
+				const indexUrl = Url.join(pathName, reqPath, "index.html");
+				const indexFs = fsOperation(indexUrl);
+				if (await indexFs.exists()) {
+					sendFileContent(indexUrl, reqId, MIMETYPE_HTML);
+					return;
+				}
+
+				error(reqId);
+				return;
+			}
+
 			switch (ext) {
 				case ".htm":
 				case ".html":
