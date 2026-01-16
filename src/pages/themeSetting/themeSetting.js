@@ -234,8 +234,8 @@ export default function () {
 	}
 
 	function Item({ name, color, isDark, onclick, isCurrent, isPremium }) {
-		const check = <span ref={check} className="icon check"></span>;
-		const star = <span ref={star} className="icon stars"></span>;
+		const check = <span className="icon check"></span>;
+		const star = <span className="icon stars"></span>;
 		let style = {};
 		let className = "icon color";
 
