@@ -584,18 +584,23 @@ function registerCoreCommands() {
 	addCommand({
 		name: "dev:openInspector",
 		description: "Open Inspector",
-		exec() {
+		run() {
 			acode.exec("open-inspector");
+			return true;
 		},
 		readOnly: true,
+		requiresView: false,
 	});
 	addCommand({
 		name: "dev:toggleDevTools",
 		description: "Toggle Developer Tools",
-		exec() {
+		run() {
 			acode.exec("toggle-inspector");
+			return true;
 		},
 		readOnly: true,
+		requiresView: false,
+		key: "Ctrl-Shift-I",
 	});
 
 	// Additional editor-centric helpers mapped to CodeMirror primitives that have existing key bindings in defaults.
