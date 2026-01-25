@@ -144,15 +144,6 @@ if [ -f "/etc/profile" ]; then
     source "/etc/profile"
 fi
 
-
-if [ -f "$HOME/.bashrc" ]; then
-    source "$HOME/.bashrc"
-fi
-
-if [ -f /etc/bash/bashrc ]; then
-    source /etc/bash/bashrc
-fi
-
 # Environment setup
 export PATH=$PATH:/bin:/sbin:/usr/bin:/usr/sbin:/usr/share/bin:/usr/share/sbin:/usr/local/bin:/usr/local/sbin
 
@@ -161,7 +152,9 @@ export TERM=xterm-256color
 SHELL=/bin/bash
 export PIP_BREAK_SYSTEM_PACKAGES=1
 
-# Smart path shortening function (fish-style: ~/p/s/components)
+# Default prompt with fish-style path shortening (~/p/s/components)
+# To use custom prompts (Starship, Oh My Posh, etc.), just init them in ~/.bashrc:
+#   eval "$(starship init bash)"
 _shorten_path() {
     local path="$PWD"
     
@@ -190,8 +183,16 @@ _shorten_path() {
     [[ "$path" == /* ]] && echo "/$result" || echo "$result"
 }
 
-# Update prompt vars before each command
 PROMPT_COMMAND='_PS1_PATH=$(_shorten_path); _PS1_EXIT=$?'
+
+# Source user configs AFTER defaults (so user can override PROMPT_COMMAND)
+if [ -f "$HOME/.bashrc" ]; then
+    source "$HOME/.bashrc"
+fi
+
+if [ -f /etc/bash/bashrc ]; then
+    source /etc/bash/bashrc
+fi
 
 
 # Display MOTD if available
