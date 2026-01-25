@@ -469,6 +469,13 @@ const APP_BINDING_CONFIG = [
 		readOnly: true,
 		editorOnly: true,
 	},
+	{
+		name: "dev:toggleDevTools",
+		description: "Toggle Developer Tools",
+		key: "Ctrl-Shift-I",
+		readOnly: true,
+		editorOnly: true,
+	},
 ];
 
 const APP_KEY_BINDINGS = buildAppBindings(APP_BINDING_CONFIG);

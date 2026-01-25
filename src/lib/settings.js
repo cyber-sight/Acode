@@ -183,6 +183,7 @@ class Settings {
 			lsp: {
 				servers: {},
 			},
+			developerMode: false,
 		};
 		this.value = structuredClone(this.#defaultSettings);
 	}

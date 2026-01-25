@@ -488,11 +488,15 @@
 	"backup invalid plugins": "Neplatný formát instalovaných pluginů",
 	"issues found": "Nalezené problémy",
 	"error details": "Podrobnosti o chybě",
-	"active tools": "Active tools",
-	"available tools": "Available tools",
-	"recent": "Recent Files",
-	"command palette": "Open Command Palette",
-	"change theme": "Change Theme",
-	"documentation": "Documentation",
-	"open in terminal": "Open in Terminal"
+	"active tools": "Aktivní nástroje",
+	"available tools": "Dostupné nástroje",
+	"recent": "Nedávné soubory",
+	"command palette": "Otevřít paletu příkazů",
+	"change theme": "Změnit motiv",
+	"documentation": "Dokumentace",
+	"open in terminal": "Otevřít v terminálu",
+	"developer mode": "Developer Mode",
+	"info-developermode": "Enable developer tools (Eruda) for debugging plugins and inspecting app state. Inspector will be initialized on app start.",
+	"developer mode enabled": "Developer mode enabled. Use command palette to toggle inspector (Ctrl+Shift+I).",
+	"developer mode disabled": "Developer mode disabled"
 }

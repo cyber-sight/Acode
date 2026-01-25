@@ -494,5 +494,9 @@
 	"command palette": "Parancspaletta megnyitása",
 	"change theme": "Téma módosítása",
 	"documentation": "Dokumentáció",
-	"open in terminal": "Megnyitás terminálban"
+	"open in terminal": "Megnyitás terminálban",
+	"developer mode": "Fejlesztői mód",
+	"info-developermode": "Engedélyezze a fejlesztői eszközöket (Eruda) a bővítmények hibakereséséhez és az alkalmazás állapotának megfigyeléséhez. A megfigyelő az alkalmazás indításakor előkészítődik.",
+	"developer mode enabled": "Fejlesztői mód engedélyezve. A parancspaletta használatával kapcsolhatja be/ki a megfigyelőt (Ctrl+Shift+I).",
+	"developer mode disabled": "Fejlesztői mód letiltva"
 }
