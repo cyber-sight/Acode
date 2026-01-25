@@ -703,8 +703,8 @@ export default {
 		readOnly: true,
 		action: "run-tests",
 	},
-	toggleInspector: {
-		description: "Toggle Inspector",
+	"dev:toggleDevTools": {
+		description: "Toggle DevTools",
 		key: "Ctrl-Shift-I",
 		readOnly: true,
 		action: "toggle-inspector",
