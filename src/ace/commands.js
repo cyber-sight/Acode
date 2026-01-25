@@ -366,8 +366,8 @@ const commands = [
 		readOnly: true,
 	},
 	{
-		name: "dev:toggleInspector",
-		description: "Toggle Inspector",
+		name: "dev:toggleDevTools",
+		description: "Toggle Developer Tools",
 		exec() {
 			acode.exec("toggle-inspector");
 		},
