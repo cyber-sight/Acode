@@ -581,6 +581,22 @@ function registerCoreCommands() {
 			return true;
 		},
 	});
+	addCommand({
+		name: "dev:openInspector",
+		description: "Open Inspector",
+		exec() {
+			acode.exec("open-inspector");
+		},
+		readOnly: true,
+	});
+	addCommand({
+		name: "dev:toggleDevTools",
+		description: "Toggle Developer Tools",
+		exec() {
+			acode.exec("toggle-inspector");
+		},
+		readOnly: true,
+	});
 
 	// Additional editor-centric helpers mapped to CodeMirror primitives that have existing key bindings in defaults.
 	addCommand({
