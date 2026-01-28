@@ -288,6 +288,13 @@ const APP_BINDING_CONFIG = [
 		readOnly: true,
 	},
 	{
+		name: "documentSymbols",
+		description: "Go to symbol in document",
+		key: null,
+		readOnly: true,
+		editorOnly: true,
+	},
+	{
 		name: "duplicateSelection",
 		description: "Duplicate selection",
 		key: "Ctrl-Shift-D",

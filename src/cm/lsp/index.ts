@@ -13,6 +13,21 @@ export {
 	documentHighlightsEditorExtension,
 	documentHighlightsExtension,
 } from "./documentHighlights";
+export type {
+	DocumentSymbolsResult,
+	FlatSymbol,
+	ProcessedSymbol,
+} from "./documentSymbols";
+export {
+	fetchDocumentSymbols,
+	getDocumentSymbols,
+	getDocumentSymbolsFlat,
+	getSymbolKindIcon,
+	getSymbolKindName,
+	navigateToSymbol,
+	SymbolKind,
+	supportsDocumentSymbols,
+} from "./documentSymbols";
 export { registerLspFormatter } from "./formatter";
 export type { InlayHintsConfig } from "./inlayHints";
 export {

@@ -8,7 +8,7 @@ import {
 } from "utils/codeHighlight";
 import helpers from "utils/helpers";
 
-export { sanitize, clearHighlightCache };
+export { clearHighlightCache, sanitize };
 
 export function getFilename(uri) {
 	if (!uri) return "";
@@ -72,41 +72,38 @@ export async function buildFlatList(references, symbolName) {
 	return items;
 }
 
-export function createReferenceItemRenderer(options = {}) {
+export function createReferenceItem(item, options = {}) {
 	const { collapsedFiles, onToggleFile, onNavigate } = options;
 
-	return function renderItem(item, recycledEl) {
-		const $el = recycledEl || tag("div");
-		$el.className = "";
-		$el.onclick = null;
-		$el.innerHTML = "";
+	if (item.type === "file-header") {
+		const isCollapsed = collapsedFiles?.has(item.uri);
+		const iconClass = helpers.getIconForFile(item.fileName);
 
-		if (item.type === "file-header") {
-			const isCollapsed = collapsedFiles?.has(item.uri);
-			$el.className = `ref-file-header ${isCollapsed ? "collapsed" : ""}`;
-			const iconClass = helpers.getIconForFile(item.fileName);
-
-			$el.innerHTML = `
-				<span class="icon chevron keyboard_arrow_down"></span>
-				<span class="${iconClass} file-icon"></span>
-				<span class="file-name">${sanitize(item.fileName)}</span>
-				<span class="ref-count">${item.count}</span>
-			`;
-
-			$el.onclick = () => onToggleFile?.(item.uri);
-		} else {
-			$el.className = "ref-item";
-
-			$el.innerHTML = `
-				<span class="line-number">${item.line}</span>
-				<span class="ref-preview">${item.highlightedText}</span>
-			`;
-
-			$el.onclick = () => onNavigate?.(item.ref);
-		}
+		const $el = (
+			<div
+				className={`ref-file-header ${isCollapsed ? "collapsed" : ""}`}
+				onclick={() => onToggleFile?.(item.uri)}
+			>
+				<span className="icon chevron keyboard_arrow_down" />
+				<span className={`${iconClass} file-icon`} />
+				<span className="file-name">{sanitize(item.fileName)}</span>
+				<span className="ref-count">{item.count}</span>
+			</div>
+		);
 
 		return $el;
-	};
+	}
+
+	const $el = (
+		<div className="ref-item" onclick={() => onNavigate?.(item.ref)}>
+			<span className="line-number">{item.line}</span>
+			<span className="ref-preview" />
+		</div>
+	);
+
+	$el.get(".ref-preview").innerHTML = item.highlightedText;
+
+	return $el;
 }
 
 export async function navigateToReference(ref) {

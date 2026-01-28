@@ -1,11 +1,10 @@
 import "./styles.scss";
-import VirtualList from "components/virtualList";
 import actionStack from "lib/actionStack";
 import { openReferencesTab } from "./referencesTab";
 import {
 	buildFlatList,
 	clearHighlightCache,
-	createReferenceItemRenderer,
+	createReferenceItem,
 	getReferencesStats,
 	navigateToReference,
 	sanitize,
@@ -24,17 +23,44 @@ function createReferencesPanel() {
 		flatItems: [],
 	};
 
-	let virtualList = null;
+	const $mask = <span className="references-panel-mask" />;
+	const $panel = <div className="references-panel" />;
+	const $dragHandle = <div className="drag-handle" />;
+	const $title = <div className="header-title" />;
+	const $subtitle = <span className="header-subtitle" />;
+	const $content = <div className="panel-content" />;
+	const $refList = <div className="references-list" />;
 
-	const $mask = tag("span", { className: "references-panel-mask" });
-	const $panel = tag("div", { className: "references-panel" });
+	const $openTabBtn = (
+		<button
+			className="action-btn open-tab-btn"
+			title="Open in Tab"
+			onclick={openInTab}
+		>
+			<span className="icon fullscreen" />
+		</button>
+	);
 
-	const $dragHandle = tag("div", { className: "drag-handle" });
-	const $header = createHeader();
-	const $content = tag("div", { className: "panel-content" });
+	const $closeBtn = (
+		<button className="action-btn close-btn" onclick={hide}>
+			<span className="icon clearclose" />
+		</button>
+	);
 
-	$panel.append($dragHandle, $header.el, $content);
+	const $header = (
+		<div className="panel-header">
+			<div className="header-content">
+				{$title}
+				{$subtitle}
+			</div>
+			<div className="header-actions">
+				{$openTabBtn}
+				{$closeBtn}
+			</div>
+		</div>
+	);
 
+	$panel.append($dragHandle, $header, $content);
 	$mask.onclick = hide;
 
 	let startY = 0;
@@ -93,38 +119,17 @@ function createReferencesPanel() {
 		}
 	}
 
-	function createHeader() {
-		const $el = tag("div", { className: "panel-header" });
-		const $content = tag("div", { className: "header-content" });
-		const $title = tag("div", { className: "header-title" });
-		const $subtitle = tag("span", { className: "header-subtitle" });
+	function setTitle(symbolName) {
+		$title.innerHTML = "";
+		$title.append(
+			<span className="icon linkinsert_link" />,
+			<span>References to </span>,
+			<span className="symbol-name">{sanitize(symbolName)}</span>,
+		);
+	}
 
-		const $actions = tag("div", { className: "header-actions" });
-		const $openTabBtn = tag("button", {
-			className: "action-btn open-tab-btn",
-			title: "Open in Tab",
-			innerHTML: '<span class="icon fullscreen"></span>',
-			onclick: openInTab,
-		});
-		const $closeBtn = tag("button", {
-			className: "action-btn close-btn",
-			innerHTML: '<span class="icon clearclose"></span>',
-			onclick: hide,
-		});
-
-		$actions.append($openTabBtn, $closeBtn);
-		$content.append($title, $subtitle);
-		$el.append($content, $actions);
-
-		return {
-			el: $el,
-			setTitle(symbolName) {
-				$title.innerHTML = `<span class="icon linkinsert_link"></span><span>References to </span><span class="symbol-name">${sanitize(symbolName)}</span>`;
-			},
-			setSubtitle(text) {
-				$subtitle.textContent = text;
-			},
-		};
+	function setSubtitle(text) {
+		$subtitle.textContent = text;
 	}
 
 	function openInTab() {
@@ -137,70 +142,77 @@ function createReferencesPanel() {
 		});
 	}
 
-	function getVisibleItems() {
-		return state.flatItems.filter((item) => {
-			if (item.type === "file-header") return true;
-			return !state.collapsedFiles.has(item.uri);
-		});
-	}
-
 	function toggleFile(uri) {
 		if (state.collapsedFiles.has(uri)) {
 			state.collapsedFiles.delete(uri);
 		} else {
 			state.collapsedFiles.add(uri);
 		}
-		virtualList?.setItems(getVisibleItems());
+		renderReferencesList();
 	}
 
 	function renderLoading() {
-		$content.innerHTML = `
-			<div class="loading-state">
-				<div class="loader"></div>
+		$content.innerHTML = "";
+		$content.append(
+			<div className="loading-state">
+				<div className="loader" />
 				<span>Finding references...</span>
-			</div>
-		`;
+			</div>,
+		);
 	}
 
 	function renderEmpty() {
-		$content.innerHTML = `
-			<div class="empty-state">
-				<span class="icon search"></span>
+		$content.innerHTML = "";
+		$content.append(
+			<div className="empty-state">
+				<span className="icon search" />
 				<span>No references found</span>
-			</div>
-		`;
+			</div>,
+		);
+	}
+
+	function renderReferencesList() {
+		$refList.innerHTML = "";
+
+		const visibleItems = state.flatItems.filter((item) => {
+			if (item.type === "file-header") return true;
+			return !state.collapsedFiles.has(item.uri);
+		});
+
+		const fragment = document.createDocumentFragment();
+
+		for (const item of visibleItems) {
+			const $el = createReferenceItem(item, {
+				collapsedFiles: state.collapsedFiles,
+				onToggleFile: toggleFile,
+				onNavigate: (ref) => {
+					hide();
+					navigateToReference(ref);
+				},
+			});
+			fragment.appendChild($el);
+		}
+
+		$refList.appendChild(fragment);
+		$content.innerHTML = "";
+		$content.appendChild($refList);
 	}
 
 	async function renderReferences() {
-		$content.innerHTML = `
-			<div class="loading-state">
-				<div class="loader"></div>
+		$content.innerHTML = "";
+		$content.append(
+			<div className="loading-state">
+				<div className="loader" />
 				<span>Highlighting code...</span>
-			</div>
-		`;
+			</div>,
+		);
 
 		const stats = getReferencesStats(state.references);
-		$header.setSubtitle(stats.text);
+		setSubtitle(stats.text);
 
 		state.flatItems = await buildFlatList(state.references, state.symbolName);
 
-		$content.innerHTML = "";
-
-		const renderItem = createReferenceItemRenderer({
-			collapsedFiles: state.collapsedFiles,
-			onToggleFile: toggleFile,
-			onNavigate: (ref) => {
-				hide();
-				navigateToReference(ref);
-			},
-		});
-
-		virtualList = new VirtualList($content, {
-			itemHeight: 40,
-			buffer: 15,
-			renderItem,
-		});
-		virtualList.setItems(getVisibleItems());
+		renderReferencesList();
 	}
 
 	function show(options = {}) {
@@ -216,15 +228,10 @@ function createReferencesPanel() {
 		state.collapsedFiles.clear();
 		state.flatItems = [];
 
-		if (virtualList) {
-			virtualList.destroy();
-			virtualList = null;
-		}
-
 		clearHighlightCache();
 
-		$header.setTitle(state.symbolName);
-		$header.setSubtitle("Searching...");
+		setTitle(state.symbolName);
+		setSubtitle("Searching...");
 		renderLoading();
 
 		document.body.append($mask, $panel);
@@ -252,11 +259,6 @@ function createReferencesPanel() {
 
 		actionStack.remove("references-panel");
 
-		if (virtualList) {
-			virtualList.destroy();
-			virtualList = null;
-		}
-
 		setTimeout(() => {
 			$mask.remove();
 			$panel.remove();
@@ -272,7 +274,7 @@ function createReferencesPanel() {
 		state.references = references || [];
 
 		if (state.references.length === 0) {
-			$header.setSubtitle("No references found");
+			setSubtitle("No references found");
 			renderEmpty();
 		} else {
 			renderReferences();
@@ -281,13 +283,14 @@ function createReferencesPanel() {
 
 	function setError(message) {
 		state.loading = false;
-		$header.setSubtitle("Error");
-		$content.innerHTML = `
-			<div class="empty-state">
-				<span class="icon error_outline"></span>
-				<span>${sanitize(message)}</span>
-			</div>
-		`;
+		setSubtitle("Error");
+		$content.innerHTML = "";
+		$content.append(
+			<div className="empty-state">
+				<span className="icon error_outline" />
+				<span>{sanitize(message)}</span>
+			</div>,
+		);
 	}
 
 	const panelInstance = {

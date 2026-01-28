@@ -86,6 +86,7 @@ import {
 	findAllReferences as acodeFindAllReferences,
 	findAllReferencesInTab as acodeFindAllReferencesInTab,
 } from "cm/lsp/references";
+import { showDocumentSymbols } from "components/symbolsPanel";
 import toast from "components/toast";
 import prompt from "dialogs/prompt";
 import actions from "handlers/quickTools";
@@ -1053,6 +1054,17 @@ function registerLspCommands() {
 			await clientManager.dispose();
 			toast(`Stopped ${count} LSP server${count > 1 ? "s" : ""}`);
 			return true;
+		},
+	});
+	addCommand({
+		name: "documentSymbols",
+		description: "Go to Symbol in Document...",
+		readOnly: true,
+		requiresView: true,
+		async run(view) {
+			const resolvedView = resolveView(view);
+			if (!resolvedView) return false;
+			return showDocumentSymbols(resolvedView);
 		},
 	});
 }

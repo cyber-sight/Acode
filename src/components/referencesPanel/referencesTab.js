@@ -1,9 +1,8 @@
-import VirtualList from "components/virtualList";
 import EditorFile from "lib/editorFile";
 import {
 	buildFlatList,
 	clearHighlightCache,
-	createReferenceItemRenderer,
+	createReferenceItem,
 	getReferencesStats,
 	navigateToReference,
 	sanitize,
@@ -17,30 +16,32 @@ export function createReferencesTab(options = {}) {
 	} = options;
 	const collapsedFiles = new Set();
 	let flatItems = prebuiltItems || [];
-	let virtualList = null;
 	let isInitialized = false;
 
-	const $container = tag("div", {
-		className: "references-tab-container",
-	});
+	const $container = <div className="references-tab-container" />;
+	const $listContainer = <div className="references-list-container" />;
+	const $refList = <div className="references-list" />;
 
 	const stats = getReferencesStats(references);
 
-	const $header = tag("div", { className: "references-tab-header" });
-	$header.innerHTML = `
-		<div class="header-info">
-			<span class="icon linkinsert_link"></span>
-			<span class="header-title">References to <code>${sanitize(symbolName)}</code></span>
-			<span class="header-stats">${stats.text}</span>
+	const $header = (
+		<div className="references-tab-header">
+			<div className="header-info">
+				<span className="icon linkinsert_link" />
+				<span className="header-title">
+					References to <code>{sanitize(symbolName)}</code>
+				</span>
+				<span className="header-stats">{stats.text}</span>
+			</div>
 		</div>
-	`;
+	);
 
-	const $listContainer = tag("div", { className: "references-list-container" });
-	const $loadingState = tag("div", { className: "loading-state" });
-	$loadingState.innerHTML = `
-		<div class="loader"></div>
-		<span>Highlighting code...</span>
-	`;
+	const $loadingState = (
+		<div className="loading-state">
+			<div className="loader" />
+			<span>Highlighting code...</span>
+		</div>
+	);
 
 	$container.append($header, $listContainer);
 
@@ -57,14 +58,26 @@ export function createReferencesTab(options = {}) {
 		} else {
 			collapsedFiles.add(uri);
 		}
-		virtualList?.setItems(getVisibleItems());
+		renderList();
 	}
 
-	const renderItem = createReferenceItemRenderer({
-		collapsedFiles,
-		onToggleFile: toggleFile,
-		onNavigate: navigateToReference,
-	});
+	function renderList() {
+		$refList.innerHTML = "";
+
+		const visibleItems = getVisibleItems();
+		const fragment = document.createDocumentFragment();
+
+		for (const item of visibleItems) {
+			const $el = createReferenceItem(item, {
+				collapsedFiles,
+				onToggleFile: toggleFile,
+				onNavigate: navigateToReference,
+			});
+			fragment.appendChild($el);
+		}
+
+		$refList.appendChild(fragment);
+	}
 
 	async function init() {
 		if (isInitialized) return;
@@ -76,19 +89,12 @@ export function createReferencesTab(options = {}) {
 			$loadingState.remove();
 		}
 
-		virtualList = new VirtualList($listContainer, {
-			itemHeight: 40,
-			buffer: 20,
-			renderItem,
-		});
-		virtualList.setItems(getVisibleItems());
+		renderList();
+		$listContainer.appendChild($refList);
 	}
 
 	function destroy() {
-		if (virtualList) {
-			virtualList.destroy();
-			virtualList = null;
-		}
+		$refList.innerHTML = "";
 	}
 
 	return {
@@ -121,7 +127,7 @@ export async function openReferencesTab(options = {}) {
 	const tabView = createReferencesTab({ symbolName, references, flatItems });
 
 	const file = new EditorFile(tabName, {
-		type: "terminal", // just to avoid shadowdom
+		type: "terminal",
 		content: tabView.container,
 		tabIcon: "icon linkinsert_link",
 		render: true,
