@@ -1488,7 +1488,7 @@ function normalizeExternalCommand(descriptor) {
 	return {
 		name,
 		description: descriptor?.description || humanizeCommandName(name),
-		readOnly: !!descriptor?.readOnly,
+		readOnly: descriptor?.readOnly ?? true,
 		requiresView,
 		key,
 		run(view, args) {
