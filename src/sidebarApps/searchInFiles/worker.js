@@ -1,5 +1,5 @@
 import "core-js/stable";
-import { minimatch } from "minimatch";
+import picomatch from "picomatch/posix";
 
 const resolvers = {};
 
@@ -283,12 +283,8 @@ function Skip({ exclude, include }) {
 	function test(file) {
 		if (!file.path) return false;
 		const match = (pattern) =>
-			minimatch(file.path, pattern, { matchBase: true });
-		const isExcluded = excludeFiles.some(match);
-		const isIncluded = includeFiles.some(match);
-		const userIncluded = include && include.trim().length > 0 && isIncluded;
-		if (userIncluded) return false;
-		return isExcluded || !isIncluded;
+			picomatch.isMatch(file.path, pattern, { matchBase: true });
+		return excludeFiles.some(match) || !includeFiles.some(match);
 	}
 
 	return {
