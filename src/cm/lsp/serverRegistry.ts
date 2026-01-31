@@ -378,7 +378,7 @@ function registerBuiltinServers(): void {
 						"apk add --no-cache nodejs npm && npm install -g typescript-language-server typescript",
 				},
 			},
-			enabled: false,
+			enabled: true,
 			initializationOptions: {
 				provideFormatter: true,
 				hostInfo: "acode",
@@ -608,7 +608,7 @@ function registerBuiltinServers(): void {
 					},
 				},
 			},
-			enabled: false,
+			enabled: true,
 		},
 		{
 			id: "eslint",
@@ -729,7 +729,7 @@ function registerBuiltinServers(): void {
 						"apk add --no-cache nodejs npm && npm install -g vscode-langservers-extracted",
 				},
 			},
-			enabled: false,
+			enabled: true,
 		},
 		{
 			id: "css",
@@ -750,7 +750,7 @@ function registerBuiltinServers(): void {
 						"apk add --no-cache nodejs npm && npm install -g vscode-langservers-extracted",
 				},
 			},
-			enabled: false,
+			enabled: true,
 		},
 		{
 			id: "json",
@@ -771,7 +771,7 @@ function registerBuiltinServers(): void {
 						"apk add --no-cache nodejs npm && npm install -g vscode-langservers-extracted",
 				},
 			},
-			enabled: false,
+			enabled: true,
 		},
 		{
 			id: "gopls",
