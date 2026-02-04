@@ -144,13 +144,27 @@ export class LspClientManager {
 	}
 
 	async getExtensionsForFile(metadata: FileMetadata): Promise<Extension[]> {
-		const { uri, languageId, languageName, view, file, rootUri } = metadata;
+		const {
+			uri: originalUri,
+			languageId,
+			languageName,
+			view,
+			file,
+			rootUri,
+		} = metadata;
 
 		const effectiveLang = safeString(languageId ?? languageName).toLowerCase();
 		if (!effectiveLang) return [];
 
 		const servers = serverRegistry.getServersForLanguage(effectiveLang);
 		if (!servers.length) return [];
+
+		// Normalize the document URI for LSP (convert content:// to file://)
+		const normalizedUri = normalizeDocumentUri(originalUri);
+		if (!normalizedUri) {
+			console.warn(`Cannot normalize document URI for LSP: ${originalUri}`);
+			return [];
+		}
 
 		const lspExtensions: Extension[] = [];
 		const diagnosticsUiExtension = this.options.diagnosticsUiExtension;
@@ -162,13 +176,13 @@ export class LspClientManager {
 					const resolved = server.resolveLanguageId({
 						languageId: effectiveLang,
 						languageName,
-						uri,
+						uri: normalizedUri,
 						file,
 					});
 					if (resolved) targetLanguageId = safeString(resolved);
 				} catch (error) {
 					console.warn(
-						`LSP server ${server.id} failed to resolve language id for ${uri}`,
+						`LSP server ${server.id} failed to resolve language id for ${normalizedUri}`,
 						error,
 					);
 				}
@@ -176,14 +190,17 @@ export class LspClientManager {
 
 			try {
 				const clientState = await this.#ensureClient(server, {
-					uri,
+					uri: normalizedUri,
 					file,
 					view,
 					languageId: targetLanguageId,
 					rootUri,
 				});
-				const plugin = clientState.client.plugin(uri, targetLanguageId);
-				clientState.attach(uri, view as EditorView);
+				const plugin = clientState.client.plugin(
+					normalizedUri,
+					targetLanguageId,
+				);
+				clientState.attach(normalizedUri, view as EditorView);
 				lspExtensions.push(plugin);
 			} catch (error) {
 				const lspError = error as LSPError;
@@ -211,16 +228,25 @@ export class LspClientManager {
 		metadata: FileMetadata,
 		options: FormattingOptions = {},
 	): Promise<boolean> {
-		const { uri, languageId, languageName, view, file } = metadata;
+		const { uri: originalUri, languageId, languageName, view, file } = metadata;
 		const effectiveLang = safeString(languageId ?? languageName).toLowerCase();
 		if (!effectiveLang || !view) return false;
+
+		const normalizedUri = normalizeDocumentUri(originalUri);
+		if (!normalizedUri) {
+			console.warn(
+				`Cannot normalize document URI for formatting: ${originalUri}`,
+			);
+			return false;
+		}
+
 		const servers = serverRegistry.getServersForLanguage(effectiveLang);
 		if (!servers.length) return false;
 
 		for (const server of servers) {
 			try {
 				const context: RootUriContext = {
-					uri,
+					uri: normalizedUri,
 					languageId: effectiveLang,
 					view,
 					file,
@@ -229,7 +255,7 @@ export class LspClientManager {
 				const state = await this.#ensureClient(server, context);
 				const capabilities = state.client.serverCapabilities;
 				if (!capabilities?.documentFormattingProvider) continue;
-				state.attach(uri, view);
+				state.attach(normalizedUri, view);
 				const plugin = LSPPlugin.get(view);
 				if (!plugin) continue;
 				plugin.client.sync();
@@ -237,7 +263,7 @@ export class LspClientManager {
 					{ textDocument: { uri: string }; options: FormattingOptions },
 					TextEdit[] | null
 				>("textDocument/formatting", {
-					textDocument: { uri },
+					textDocument: { uri: normalizedUri },
 					options: buildFormattingOptions(view, options),
 				});
 				if (!edits || !edits.length) {
@@ -900,6 +926,30 @@ function normalizeRootUriForServer(
 	return { normalizedRootUri: rootUri, originalRootUri: rootUri };
 }
 
+function normalizeDocumentUri(uri: string | null | undefined): string | null {
+	if (!uri || typeof uri !== "string") return null;
+
+	const schemeMatch = /^([a-zA-Z][\w+\-.]*):/.exec(uri);
+	const scheme = schemeMatch ? schemeMatch[1].toLowerCase() : null;
+
+	// Already a file:// URI or untitled use as-is
+	if (scheme === "file" || scheme === "untitled") {
+		return uri;
+	}
+
+	// Convert content:// URIs to file:// URIs
+	if (scheme === "content") {
+		const fileUri = contentUriToFileUri(uri);
+		if (fileUri) {
+			return fileUri;
+		}
+		return null;
+	}
+
+	// Unknown scheme
+	return uri;
+}
+
 function contentUriToFileUri(uri: string): string | null {
 	try {
 		const parsed = Uri.parse(uri) as ParsedUri | null;
@@ -912,7 +962,7 @@ function contentUriToFileUri(uri: string): string | null {
 		}
 
 		const providerMatch =
-			/^content:\/\/com\.((?![:<>"/\\|?*]).*)\\.documents\//.exec(
+			/^content:\/\/com\.((?![:<>"/\\|?*]).*?)\.documents\//.exec(
 				rootUri ?? "",
 			);
 		const providerId = providerMatch ? providerMatch[1] : null;
