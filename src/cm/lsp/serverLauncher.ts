@@ -7,6 +7,8 @@ import type {
 	InstallStatus,
 	LauncherConfig,
 	LspServerDefinition,
+	LspServerStats,
+	LspServerStatsFormatted,
 	ManagedServerEntry,
 	PortInfo,
 	WaitOptions,
@@ -476,9 +478,9 @@ async function startInteractiveServer(
 	const callback: ExecutorCallback = (type, data) => {
 		if (type === "stderr") {
 			if (/proot warning/i.test(data)) return;
-			console.warn(`[${serverId}] ${data}`);
+			console.warn(`[LSP:${serverId}] ${data}`);
 		} else if (type === "stdout" && data && data.trim()) {
-			console.info(`[${serverId}] ${data}`);
+			console.info(`[LSP:${serverId}] ${data}`);
 			// Detect when the axs proxy signals it's listening
 			if (/listening on/i.test(data)) {
 				signalServerReady(serverId);
@@ -634,6 +636,11 @@ export async function ensureServerRunning(
 				console.info(
 					`[LSP:${server.id}] Auto-discovered port ${discoveredPort}`,
 				);
+				// Update managed server entry with the port
+				const entry = managedServers.get(key);
+				if (entry) {
+					entry.port = discoveredPort;
+				}
 			}
 		} else if (
 			server.transport?.url &&
@@ -704,4 +711,97 @@ export function resetManagedServers(): void {
 	getExecutor()
 		.stopService()
 		.catch(() => {});
+}
+
+/**
+ * Get managed server info by server ID
+ */
+export function getManagedServerInfo(
+	serverId: string,
+): ManagedServerEntry | null {
+	return managedServers.get(serverId) ?? null;
+}
+
+/**
+ * Get all managed servers
+ */
+export function getAllManagedServers(): Map<string, ManagedServerEntry> {
+	return new Map(managedServers);
+}
+
+function formatMemory(bytes: number): string {
+	if (!bytes || bytes <= 0) return "—";
+	const mb = bytes / (1024 * 1024);
+	if (mb >= 1) return `${mb.toFixed(1)} MB`;
+	const kb = bytes / 1024;
+	return `${kb.toFixed(0)} KB`;
+}
+
+function formatUptime(seconds: number): string {
+	if (!seconds || seconds <= 0) return "—";
+	if (seconds < 60) return `${seconds}s`;
+	const mins = Math.floor(seconds / 60);
+	const secs = seconds % 60;
+	if (mins < 60) return `${mins}m ${secs}s`;
+	const hours = Math.floor(mins / 60);
+	const remainingMins = mins % 60;
+	return `${hours}h ${remainingMins}m`;
+}
+
+/**
+ * Fetch server stats from the axs proxy /status endpoint
+ * @param serverId - The server ID to fetch stats for
+ * @param timeout - Timeout in milliseconds (default: 2000)
+ */
+export async function getServerStats(
+	serverId: string,
+	timeout = 2000,
+): Promise<LspServerStatsFormatted | null> {
+	const entry = managedServers.get(serverId);
+	if (!entry?.port) {
+		return null;
+	}
+
+	try {
+		const controller = new AbortController();
+		const timeoutId = setTimeout(() => controller.abort(), timeout);
+
+		const response = await fetch(`http://127.0.0.1:${entry.port}/status`, {
+			signal: controller.signal,
+		});
+
+		clearTimeout(timeoutId);
+
+		if (!response.ok) {
+			return null;
+		}
+
+		const data = (await response.json()) as LspServerStats;
+
+		// Aggregate stats from all processes
+		let totalMemory = 0;
+		let maxUptime = 0;
+		let firstPid: number | null = null;
+
+		for (const proc of data.processes || []) {
+			totalMemory += proc.memory_bytes || 0;
+			if (proc.uptime_secs > maxUptime) {
+				maxUptime = proc.uptime_secs;
+			}
+			if (firstPid === null && proc.pid) {
+				firstPid = proc.pid;
+			}
+		}
+
+		return {
+			memoryBytes: totalMemory,
+			memoryFormatted: formatMemory(totalMemory),
+			uptimeSeconds: maxUptime,
+			uptimeFormatted: formatUptime(maxUptime),
+			pid: firstPid,
+			processCount: data.processes?.length ?? 0,
+		};
+	} catch {
+		return null;
+	}
 }

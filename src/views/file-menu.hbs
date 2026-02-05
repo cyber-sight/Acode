@@ -42,6 +42,12 @@
     <span>{{format}}</span>
   </div>
 </li>
+{{#has_lsp_servers}}
+<li action="lsp-info">
+  <span class="text">LSP Info</span>
+  <span class="licons zap"></span>
+</li>
+{{/has_lsp_servers}}
 {{/is_editor}}
 <hr>
 {{#file_on_disk}}

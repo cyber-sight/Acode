@@ -234,6 +234,8 @@ export interface ManagedServerEntry {
 	uuid: string;
 	command: string;
 	startedAt: number;
+	/** Port number for the axs proxy (for stats endpoint) */
+	port?: number;
 }
 
 export type InstallStatus = "present" | "declined" | "failed";
@@ -263,6 +265,30 @@ export interface EnsureServerResult {
 	uuid: string | null;
 	/** Port discovered from port file (for auto-port discovery) */
 	discoveredPort?: number;
+}
+
+/**
+ * Stats returned from the axs proxy /status endpoint
+ */
+export interface LspServerStats {
+	program: string;
+	processes: Array<{
+		pid: number;
+		uptime_secs: number;
+		memory_bytes: number;
+	}>;
+}
+
+/**
+ * Formatted stats for UI display
+ */
+export interface LspServerStatsFormatted {
+	memoryBytes: number;
+	memoryFormatted: string;
+	uptimeSeconds: number;
+	uptimeFormatted: string;
+	pid: number | null;
+	processCount: number;
 }
 
 // ============================================================================

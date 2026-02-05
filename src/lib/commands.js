@@ -506,4 +506,8 @@ Additional Info:
 		const devTools = (await import("lib/devTools")).default;
 		devTools.show();
 	},
+	async "lsp-info"() {
+		const { showLspInfoDialog } = await import("components/lspInfoDialog");
+		showLspInfoDialog();
+	},
 };

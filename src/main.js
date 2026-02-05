@@ -17,6 +17,7 @@ import ajax from "@deadlyjack/ajax";
 import { setKeyBindings } from "cm/commandRegistry";
 import { initModes } from "cm/modelist";
 import Contextmenu from "components/contextmenu";
+import { hasConnectedServers } from "components/lspInfoDialog";
 import Sidebar from "components/sidebar";
 import { TerminalManager } from "components/terminal";
 import tile from "components/tile";
@@ -676,6 +677,7 @@ function createFileMenu({ top, bottom, toggler }) {
 				file_eol: isEditorFile ? file.eol : "",
 				copy_text: isEditorFile ? hasSelection : false,
 				is_editor: isEditorFile,
+				has_lsp_servers: isEditorFile && hasConnectedServers(),
 			});
 		},
 	});
