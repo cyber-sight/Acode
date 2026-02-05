@@ -323,7 +323,7 @@ function showLspInfoDialog() {
 	const $dialog = (
 		<div className="prompt lsp-info-dialog">
 			<div className="title">
-				<span className="icon code" style={{ marginRight: "8px" }} />
+				<span className="licons zap" style={{ marginRight: "8px" }} />
 				Language Servers
 			</div>
 			<div className="lsp-dialog-body" />
