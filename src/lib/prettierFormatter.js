@@ -2,6 +2,7 @@ import fsOperation from "fileSystem";
 import toast from "components/toast";
 import appSettings from "lib/settings";
 import prettierPluginBabel from "prettier/plugins/babel";
+import prettierPluginEstree from "prettier/plugins/estree";
 import prettierPluginGraphql from "prettier/plugins/graphql";
 import prettierPluginHtml from "prettier/plugins/html";
 import prettierPluginMarkdown from "prettier/plugins/markdown";
@@ -32,6 +33,7 @@ const CONFIG_FILENAMES = [
 	"prettier.config.mjs",
 ];
 const PRETTIER_PLUGINS = [
+	prettierPluginEstree,
 	prettierPluginBabel,
 	prettierPluginHtml,
 	prettierPluginMarkdown,
