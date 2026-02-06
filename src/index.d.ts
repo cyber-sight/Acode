@@ -89,6 +89,7 @@ interface AcodeFile {
 	uri?: string;
 	name?: string;
 	session?: unknown;
+	cacheFile?: string;
 	[key: string]: unknown;
 }
 

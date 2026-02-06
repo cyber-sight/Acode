@@ -160,10 +160,23 @@ export class LspClientManager {
 		if (!servers.length) return [];
 
 		// Normalize the document URI for LSP (convert content:// to file://)
-		const normalizedUri = normalizeDocumentUri(originalUri);
+		let normalizedUri = normalizeDocumentUri(originalUri);
 		if (!normalizedUri) {
-			console.warn(`Cannot normalize document URI for LSP: ${originalUri}`);
-			return [];
+			// Fall back to cache file path for unrecognized URIs
+			// This allows LSP to work with any file system provider using the local cache
+			const cacheFile = file?.cacheFile;
+			if (cacheFile && typeof cacheFile === "string") {
+				normalizedUri = buildFileUri(cacheFile.replace(/^file:\/\//, ""));
+				if (normalizedUri) {
+					console.info(
+						`LSP using cache path for unrecognized URI: ${originalUri} -> ${normalizedUri}`,
+					);
+				}
+			}
+			if (!normalizedUri) {
+				console.warn(`Cannot normalize document URI for LSP: ${originalUri}`);
+				return [];
+			}
 		}
 
 		const lspExtensions: Extension[] = [];
@@ -232,12 +245,18 @@ export class LspClientManager {
 		const effectiveLang = safeString(languageId ?? languageName).toLowerCase();
 		if (!effectiveLang || !view) return false;
 
-		const normalizedUri = normalizeDocumentUri(originalUri);
+		let normalizedUri = normalizeDocumentUri(originalUri);
 		if (!normalizedUri) {
-			console.warn(
-				`Cannot normalize document URI for formatting: ${originalUri}`,
-			);
-			return false;
+			const cacheFile = file?.cacheFile;
+			if (cacheFile && typeof cacheFile === "string") {
+				normalizedUri = buildFileUri(cacheFile.replace(/^file:\/\//, ""));
+			}
+			if (!normalizedUri) {
+				console.warn(
+					`Cannot normalize document URI for formatting: ${originalUri}`,
+				);
+				return false;
+			}
 		}
 
 		const servers = serverRegistry.getServersForLanguage(effectiveLang);
