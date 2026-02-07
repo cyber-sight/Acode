@@ -23,6 +23,7 @@ export default {
 		});
 
 		system.setInputType(appSettings.value.keyboardMode);
+		system.setNativeContextMenuDisabled(true);
 	},
 	afterRender() {
 		const { value: settings } = appSettings;

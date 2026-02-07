@@ -23,6 +23,7 @@ import {
 	highlightWhitespace,
 	keymap,
 	lineNumbers,
+	scrollPastEnd,
 } from "@codemirror/view";
 import {
 	abbreviationTracker,
@@ -49,6 +50,7 @@ import {
 	getModesByName,
 	initModes,
 } from "cm/modelist";
+import createTouchSelectionMenu from "cm/touchSelectionMenu";
 import "cm/supportedModes";
 import { autocompletion } from "@codemirror/autocomplete";
 import colorView from "cm/colorView";
@@ -100,6 +102,8 @@ async function EditorManager($header, $body) {
 	// Debounce timers for CodeMirror change handling
 	let checkTimeout = null;
 	let autosaveTimeout = null;
+	let touchSelectionController = null;
+	let touchSelectionSyncRaf = 0;
 
 	const { scrollbarSize } = appSettings.value;
 	const events = {
@@ -147,15 +151,44 @@ async function EditorManager($header, $body) {
 			const pointerTriggered = update.transactions.some(
 				(tr) =>
 					tr.isUserEvent("pointer") ||
+					tr.isUserEvent("select") ||
 					tr.isUserEvent("select.pointer") ||
 					tr.isUserEvent("touch") ||
 					tr.isUserEvent("select.touch"),
 			);
 			if (!pointerTriggered) return;
-			if (isCursorVisible()) return;
 			requestAnimationFrame(() => {
 				if (!isCursorVisible()) scrollCursorIntoView({ behavior: "instant" });
 			});
+		},
+	);
+
+	const touchSelectionUpdateExtension = EditorView.updateListener.of(
+		(update) => {
+			if (!touchSelectionController) return;
+			const pointerTriggered = update.transactions.some(
+				(tr) =>
+					tr.isUserEvent("pointer") ||
+					tr.isUserEvent("select") ||
+					tr.isUserEvent("select.pointer") ||
+					tr.isUserEvent("touch") ||
+					tr.isUserEvent("select.touch"),
+			);
+			if (
+				update.selectionSet ||
+				update.docChanged ||
+				update.geometryChanged ||
+				update.viewportChanged ||
+				pointerTriggered
+			) {
+				cancelAnimationFrame(touchSelectionSyncRaf);
+				touchSelectionSyncRaf = requestAnimationFrame(() => {
+					touchSelectionController?.onStateChanged({
+						pointerTriggered,
+						selectionChanged: update.selectionSet,
+					});
+				});
+			}
 		},
 	);
 
@@ -644,7 +677,9 @@ async function EditorManager($header, $body) {
 			// Default theme
 			themeCompartment.of(oneDark),
 			fixedHeightTheme,
+			scrollPastEnd(),
 			pointerCursorVisibilityExtension,
+			touchSelectionUpdateExtension,
 			search(),
 			// Ensure read-only can be toggled later via compartment
 			readOnlyCompartment.of(EditorState.readOnly.of(false)),
@@ -694,6 +729,11 @@ async function EditorManager($header, $body) {
 		get() {
 			return manager.activeFile?.session ?? null;
 		},
+	});
+
+	touchSelectionController = createTouchSelectionMenu(editor, {
+		container: $container,
+		getActiveFile: () => manager?.activeFile || null,
 	});
 
 	// Provide minimal Ace-like API compatibility used by plugins
@@ -925,6 +965,14 @@ async function EditorManager($header, $body) {
 		}
 	};
 
+	editor.setSelection = function (value) {
+		touchSelectionController?.setSelection(!!value);
+	};
+
+	editor.setMenu = function (value) {
+		touchSelectionController?.setMenu(!!value);
+	};
+
 	// Helper: apply a file's content and language to the editor view
 	function applyFileToEditor(file) {
 		if (!file || file.type !== "editor") return;
@@ -937,7 +985,9 @@ async function EditorManager($header, $body) {
 			// keep compartment in the state to allow dynamic theme changes later
 			themeCompartment.of(oneDark),
 			fixedHeightTheme,
+			scrollPastEnd(),
 			pointerCursorVisibilityExtension,
+			touchSelectionUpdateExtension,
 			search(),
 			// Keep dynamic compartments across state swaps
 			...getBaseExtensionsFromOptions(),
@@ -1002,6 +1052,7 @@ async function EditorManager($header, $body) {
 		const state = EditorState.create({ doc, extensions: exts });
 		file.session = state;
 		editor.setState(state);
+		touchSelectionController?.onSessionChanged();
 		// Re-apply selected theme after state replacement
 		const desiredTheme = appSettings?.value?.editorTheme;
 		if (desiredTheme) editor.setTheme(desiredTheme);
@@ -1464,6 +1515,7 @@ async function EditorManager($header, $body) {
 			editor.dispatch({
 				effects: readOnlyCompartment.reconfigure(EditorState.readOnly.of(ro)),
 			});
+			touchSelectionController?.onStateChanged();
 		} catch (_) {
 			// Fallback: full re-apply
 			applyFileToEditor(file);
@@ -1527,6 +1579,7 @@ async function EditorManager($header, $body) {
 			if (!scroller) return;
 			onscrolltop();
 			onscrollleft();
+			touchSelectionController?.onScroll();
 			clearTimeout(scrollTimeout);
 			isScrolling = true;
 			scrollTimeout = setTimeout(() => {
@@ -1552,9 +1605,11 @@ async function EditorManager($header, $body) {
 			if (activeFile) {
 				activeFile.focused = true;
 			}
+			touchSelectionController?.onStateChanged();
 		});
 
 		contentDOM.addEventListener("blur", async (_event) => {
+			touchSelectionController?.setMenu(false);
 			const { hardKeyboardHidden, keyboardHeight } =
 				await getSystemConfiguration();
 			const blur = () => {
@@ -1601,7 +1656,7 @@ async function EditorManager($header, $body) {
 
 		const { behavior = "smooth" } = options;
 		const { head } = view.state.selection.main;
-		const caret = view.coordsAtPos(head);
+		const caret = safeCoordsAtPos(view, head);
 		if (!caret) return;
 
 		const scrollerRect = scroller.getBoundingClientRect();
@@ -1633,11 +1688,19 @@ async function EditorManager($header, $body) {
 		if (!view || !scroller) return true;
 
 		const { head } = view.state.selection.main;
-		const caret = view.coordsAtPos(head);
+		const caret = safeCoordsAtPos(view, head);
 		if (!caret) return true;
 
 		const scrollerRect = scroller.getBoundingClientRect();
 		return caret.top >= scrollerRect.top && caret.bottom <= scrollerRect.bottom;
+	}
+
+	function safeCoordsAtPos(view, pos) {
+		try {
+			return view.coordsAtPos(pos);
+		} catch (_) {
+			return null;
+		}
 	}
 
 	/**
@@ -1937,6 +2000,7 @@ async function EditorManager($header, $body) {
 		manager.activeFile = file;
 
 		if (file.type === "editor") {
+			touchSelectionController?.setEnabled(true);
 			// Apply active file content and language to CodeMirror
 			applyFileToEditor(file);
 			$container.style.display = "block";
@@ -1949,6 +2013,7 @@ async function EditorManager($header, $body) {
 				setHScrollValue();
 			}
 		} else {
+			touchSelectionController?.setEnabled(false);
 			$container.style.display = "none";
 			if (file.content) {
 				file.content.style.display = "block";

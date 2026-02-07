@@ -1,3 +1,22 @@
+.editor-container {
+  position: relative;
+}
+
+.cm-editor,
+.cm-editor * {
+  -webkit-touch-callout: none;
+}
+
+.editor-container > .cursor {
+  pointer-events: auto;
+  touch-action: none;
+  z-index: 8;
+}
+
+.editor-container > .cursor-menu {
+  z-index: 8;
+}
+
 .cm-tooltip {
   box-sizing: border-box;
   max-width: min(32rem, calc(100vw - 1.25rem));

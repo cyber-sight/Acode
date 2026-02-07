@@ -114,6 +114,14 @@ public class System extends CordovaPlugin {
         this.context = cordova.getContext();
         this.activity = cordova.getActivity();
         this.webView = webView;
+        this.activity.runOnUiThread(
+            new Runnable() {
+                @Override
+                public void run() {
+                    setNativeContextMenuDisabled(true);
+                }
+            }
+        );
 
         // Set up global exception handler
         Thread.setDefaultUncaughtExceptionHandler(
@@ -181,6 +189,18 @@ public class System extends CordovaPlugin {
             case "set-input-type":
                 setInputType(arg1);
                 callbackContext.success();
+                return true;
+            case "set-native-context-menu-disabled":
+                this.cordova.getActivity()
+                    .runOnUiThread(
+                        new Runnable() {
+                            @Override
+                            public void run() {
+                                setNativeContextMenuDisabled(Boolean.parseBoolean(arg1));
+                                callbackContext.success();
+                            }
+                        }
+                    );
                 return true;
             case "get-cordova-intent":
                 getCordovaIntent(callbackContext);
@@ -1694,5 +1714,31 @@ public class System extends CordovaPlugin {
             mode = 1;
         }
         webView.setInputType(mode);
+    }
+
+    private void setNativeContextMenuDisabled(boolean disabled) {
+        View webViewView = webView == null ? null : webView.getView();
+        if (webViewView == null) {
+            return;
+        }
+
+        webViewView.setLongClickable(!disabled);
+        webViewView.setHapticFeedbackEnabled(!disabled);
+        if (disabled) {
+            webViewView.setOnLongClickListener(v -> true);
+        } else {
+            webViewView.setOnLongClickListener(null);
+        }
+
+        try {
+            Method method = webViewView
+                .getClass()
+                .getMethod("setNativeContextMenuDisabled", boolean.class);
+            method.invoke(webViewView, disabled);
+        } catch (NoSuchMethodException ignored) {
+            // Fallback above keeps long-press context disabled even without CordovaLib patch.
+        } catch (IllegalAccessException | InvocationTargetException e) {
+            Log.w("System", "Failed to toggle native context menu state", e);
+        }
     }
 }
