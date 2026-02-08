@@ -64,6 +64,13 @@ export default function keyboardHandler(e) {
 	if (!ctrlKey && !shiftKey && !altKey && !metaKey) return;
 	if (["Control", "Alt", "Meta", "Shift"].includes(key)) return;
 
+	const target = editorManager?.editor?.contentDOM;
+	if (!target) return;
+
+	// Physical keyboard events already reaching CodeMirror should not be
+	// re-dispatched from the document listener.
+	if ($target === target || (target.contains?.($target) ?? false)) return;
+
 	const event = KeyboardEvent("keydown", {
 		key,
 		ctrlKey,
@@ -71,7 +78,6 @@ export default function keyboardHandler(e) {
 		altKey,
 		metaKey,
 	});
-	const target = editorManager?.editor?.contentDOM;
 	target?.dispatchEvent?.(event);
 }
 
