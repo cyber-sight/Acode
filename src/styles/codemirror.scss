@@ -10,11 +10,11 @@
 .editor-container > .cursor {
   pointer-events: auto;
   touch-action: none;
-  z-index: 8;
+  z-index: 600;
 }
 
 .editor-container > .cursor-menu {
-  z-index: 8;
+  z-index: 600;
 }
 
 .cm-tooltip {
