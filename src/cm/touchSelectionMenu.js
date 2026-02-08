@@ -115,8 +115,10 @@ class TouchSelectionMenuController {
 	#dragState = null;
 	#longPressTimer = null;
 	#cursorHideTimer = null;
+	#scrollTimeout = null;
 	#autoScrollRaf = 0;
 	#stateSyncRaf = 0;
+	#isScrolling = false;
 	#selectionActive = false;
 	#menuActive = false;
 	#enabled = true;
@@ -199,6 +201,7 @@ class TouchSelectionMenuController {
 		document.removeEventListener("touchstart", this.#onGlobalPointerDown, true);
 		this.#removeTouchListeners();
 		this.#stopAutoScroll();
+		this.#clearScrollTimeout();
 		cancelAnimationFrame(this.#stateSyncRaf);
 		this.#stateSyncRaf = 0;
 		this.#pendingPointerTriggered = false;
@@ -231,6 +234,7 @@ class TouchSelectionMenuController {
 			this.#dragState = null;
 			this.#removeTouchListeners();
 			this.#stopAutoScroll();
+			this.#clearScrollTimeout();
 			cancelAnimationFrame(this.#stateSyncRaf);
 			this.#stateSyncRaf = 0;
 			this.#pendingPointerTriggered = false;
@@ -271,6 +275,23 @@ class TouchSelectionMenuController {
 	onScroll() {
 		if (!this.#enabled) return;
 		if (this.#dragState) return;
+		this.#clearScrollTimeout();
+		this.#isScrolling = true;
+		cancelAnimationFrame(this.#stateSyncRaf);
+		this.#stateSyncRaf = 0;
+		this.#clearSelectionUi();
+		this.#hideMenu(false, false);
+		this.#scrollTimeout = setTimeout(() => {
+			this.#onScrollEnd();
+		}, 100);
+	}
+
+	#onScrollEnd() {
+		this.#scrollTimeout = null;
+		if (!this.#enabled) return;
+		if (!this.#isScrolling) return;
+		this.#isScrolling = false;
+		if (this.#dragState) return;
 
 		if (this.#selectionActive && this.#hasSelection()) {
 			this.#showSelectionHandles();
@@ -279,7 +300,13 @@ class TouchSelectionMenuController {
 		}
 
 		if (this.#menuActive) {
-			this.#hideMenu();
+			const triggerType =
+				this.#selectionActive && this.#hasSelection() ? "end" : "cursor";
+			this.#showMenuDeferred(triggerType);
+		}
+
+		if (this.#pendingPointerTriggered || this.#pendingSelectionChanged) {
+			this.onStateChanged();
 		}
 	}
 
@@ -288,6 +315,7 @@ class TouchSelectionMenuController {
 		if (this.#handlingMenuAction) return;
 		if (meta.pointerTriggered) this.#pendingPointerTriggered = true;
 		if (meta.selectionChanged) this.#pendingSelectionChanged = true;
+		if (this.#isScrolling) return;
 		cancelAnimationFrame(this.#stateSyncRaf);
 		this.#stateSyncRaf = requestAnimationFrame(() => {
 			this.#stateSyncRaf = 0;
@@ -330,6 +358,14 @@ class TouchSelectionMenuController {
 			this.$end.contains(target) ||
 			this.$cursor.contains(target)
 		) {
+			return;
+		}
+		if (
+			event.type === "touchstart" &&
+			target instanceof Node &&
+			this.#view.dom.contains(target)
+		) {
+			this.#hideMenu(false, false);
 			return;
 		}
 		this.#hideMenu();
@@ -741,6 +777,12 @@ class TouchSelectionMenuController {
 		this.#cursorHideTimer = null;
 	}
 
+	#clearScrollTimeout() {
+		clearTimeout(this.#scrollTimeout);
+		this.#scrollTimeout = null;
+		this.#isScrolling = false;
+	}
+
 	#showMenu($trigger) {
 		const hasSelection = this.#hasSelection();
 		const items = filterSelectionMenuItems(selectionMenu(), {
@@ -858,10 +900,12 @@ class TouchSelectionMenuController {
 		});
 	}
 
-	#hideMenu(force = false) {
+	#hideMenu(force = false, clearActive = true) {
 		if (!force && !this.#menuActive) return;
 		this.$menu.remove();
-		this.#menuActive = false;
+		if (clearActive) {
+			this.#menuActive = false;
+		}
 	}
 
 	#moveCursorToCoords(x, y) {
