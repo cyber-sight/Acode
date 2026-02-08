@@ -803,7 +803,10 @@ class TouchSelectionMenuController {
 			} else if (text instanceof Node) {
 				$item.append(text.cloneNode(true));
 			}
-			$item.addEventListener("click", (event) => {
+			let handled = false;
+			const runAction = (event) => {
+				if (handled) return;
+				handled = true;
 				event.preventDefault();
 				event.stopPropagation();
 				this.#handlingMenuAction = true;
@@ -814,7 +817,9 @@ class TouchSelectionMenuController {
 					this.#hideMenu();
 					this.#view.focus();
 				}
-			});
+			};
+			$item.addEventListener("pointerdown", runAction);
+			$item.addEventListener("click", runAction);
 			this.$menu.append($item);
 		});
 
@@ -901,8 +906,10 @@ class TouchSelectionMenuController {
 	}
 
 	#hideMenu(force = false, clearActive = true) {
-		if (!force && !this.#menuActive) return;
-		this.$menu.remove();
+		if (!force && !this.#menuActive && !this.$menu.isConnected) return;
+		if (this.$menu.isConnected) {
+			this.$menu.remove();
+		}
 		if (clearActive) {
 			this.#menuActive = false;
 		}
