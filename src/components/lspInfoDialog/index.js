@@ -11,8 +11,23 @@ let dialogInstance = null;
 const lspLogs = new Map();
 const MAX_LOGS = 200;
 const logListeners = new Set();
+const IGNORED_LOG_PATTERNS = [
+	/\$\/progress\b/i,
+	/\bProgress:/i,
+	/\bwindow\/workDoneProgress\/create\b/i,
+	/\bAuto-responded to window\/workDoneProgress\/create\b/i,
+];
+
+function shouldIgnoreLog(message) {
+	if (typeof message !== "string") return false;
+	return IGNORED_LOG_PATTERNS.some((pattern) => pattern.test(message));
+}
 
 function addLspLog(serverId, level, message, details = null) {
+	if (shouldIgnoreLog(message)) {
+		return;
+	}
+
 	if (!lspLogs.has(serverId)) {
 		lspLogs.set(serverId, []);
 	}
