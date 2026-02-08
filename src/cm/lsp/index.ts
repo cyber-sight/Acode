@@ -1,4 +1,15 @@
 export { default as clientManager, LspClientManager } from "./clientManager";
+export type { CodeActionItem } from "./codeActions";
+export {
+	CODE_ACTION_KINDS,
+	executeCodeAction,
+	fetchCodeActions,
+	formatCodeActionKind,
+	getCodeActionIcon,
+	performQuickFix,
+	showCodeActionsMenu,
+	supportsCodeActions,
+} from "./codeActions";
 export {
 	clearDiagnosticsEffect,
 	getLspDiagnostics,
