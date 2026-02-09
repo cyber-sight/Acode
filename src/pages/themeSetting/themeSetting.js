@@ -3,7 +3,7 @@ import { javascript } from "@codemirror/lang-javascript";
 // For CodeMirror preview
 import { EditorState } from "@codemirror/state";
 import { oneDark } from "@codemirror/theme-one-dark";
-import { getThemeById, getThemes } from "cm/themes";
+import { getThemeExtensions, getThemes } from "cm/themes";
 import { basicSetup, EditorView } from "codemirror";
 import Page from "components/page";
 import searchBar from "components/searchbar";
@@ -35,7 +35,7 @@ export default function () {
 			cmPreview.destroy();
 			cmPreview = null;
 		}
-		const theme = getThemeById(themeId)?.getExtension?.() || [oneDark];
+		const theme = getThemeExtensions(themeId, [oneDark]);
 		const fixedHeightTheme = EditorView.theme({
 			"&": { height: "100%", flex: "1 1 auto" },
 			".cm-scroller": { height: "100%", overflow: "auto" },
@@ -213,7 +213,14 @@ export default function () {
 			);
 			return;
 		}
-		editorManager.editor.setTheme(theme);
+		const ok = editorManager.editor.setTheme(theme);
+		if (!ok) {
+			alert(
+				"Invalid theme",
+				"This editor theme is not compatible with Acode's CodeMirror runtime.",
+			);
+			return;
+		}
 		if (cmPreview) createPreview(theme);
 		appSettings.update(
 			{

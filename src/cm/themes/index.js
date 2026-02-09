@@ -1,3 +1,4 @@
+import { EditorState } from "@codemirror/state";
 import { oneDark } from "@codemirror/theme-one-dark";
 import aura, { config as auraConfig } from "./aura";
 import dracula, { config as draculaConfig } from "./dracula";
@@ -32,17 +33,93 @@ const oneDarkConfig = {
 };
 
 const themes = new Map();
+const warnedInvalidThemes = new Set();
+
+function normalizeExtensions(value, target = []) {
+	if (Array.isArray(value)) {
+		value.forEach((item) => normalizeExtensions(item, target));
+		return target;
+	}
+
+	if (value !== null && value !== undefined) {
+		target.push(value);
+	}
+
+	return target;
+}
+
+function toExtensionGetter(getExtension) {
+	if (typeof getExtension === "function") {
+		return () => normalizeExtensions(getExtension());
+	}
+
+	return () => normalizeExtensions(getExtension);
+}
+
+function logInvalidThemeOnce(themeId, error, reason = "") {
+	if (warnedInvalidThemes.has(themeId)) return;
+	warnedInvalidThemes.add(themeId);
+	const message = reason
+		? `[editorThemes] Theme '${themeId}' is invalid: ${reason}`
+		: `[editorThemes] Theme '${themeId}' is invalid.`;
+	console.error(message, error);
+}
+
+function validateThemeExtensions(themeId, extensions) {
+	if (!extensions.length) {
+		logInvalidThemeOnce(themeId, null, "no extensions were returned");
+		return false;
+	}
+
+	try {
+		// Validate against Acode's own CodeMirror instance.
+		EditorState.create({ doc: "", extensions });
+		return true;
+	} catch (error) {
+		logInvalidThemeOnce(themeId, error);
+		return false;
+	}
+}
+
+function resolveThemeEntryExtensions(theme, fallbackExtensions) {
+	const fallback = fallbackExtensions.length
+		? [...fallbackExtensions]
+		: [oneDark];
+
+	if (!theme) return fallback;
+
+	try {
+		const resolved = normalizeExtensions(theme.getExtension?.());
+		if (!validateThemeExtensions(theme.id, resolved)) {
+			return fallback;
+		}
+		return resolved;
+	} catch (error) {
+		logInvalidThemeOnce(theme.id, error);
+		return fallback;
+	}
+}
 
 export function addTheme(id, caption, isDark, getExtension, config = null) {
-	const key = String(id).toLowerCase();
-	if (themes.has(key)) return;
-	themes.set(key, {
+	const key = String(id || "")
+		.trim()
+		.toLowerCase();
+	if (!key || themes.has(key)) return false;
+
+	const theme = {
 		id: key,
 		caption: caption || id,
 		isDark: !!isDark,
-		getExtension,
+		getExtension: toExtensionGetter(getExtension),
 		config: config || null,
-	});
+	};
+
+	if (!validateThemeExtensions(key, theme.getExtension())) {
+		return false;
+	}
+
+	themes.set(key, theme);
+	return true;
 }
 
 export function getThemes() {
@@ -58,6 +135,13 @@ export function getThemeConfig(id) {
 	if (!id) return oneDarkConfig;
 	const theme = themes.get(String(id).toLowerCase());
 	return theme?.config || oneDarkConfig;
+}
+
+export function getThemeExtensions(id, fallback = [oneDark]) {
+	const fallbackExtensions = normalizeExtensions(fallback);
+	const theme =
+		getThemeById(id) || getThemeById(String(id || "").replace(/-/g, "_"));
+	return resolveThemeEntryExtensions(theme, fallbackExtensions);
 }
 
 export function removeTheme(id) {
@@ -142,6 +226,7 @@ export default {
 	getThemes,
 	getThemeById,
 	getThemeConfig,
+	getThemeExtensions,
 	addTheme,
 	removeTheme,
 };

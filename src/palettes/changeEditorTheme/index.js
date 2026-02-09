@@ -22,6 +22,7 @@ function generateHints() {
 
 function onselect(themeId) {
 	if (!themeId) return;
-	editorManager.editor.setTheme(themeId);
+	const ok = editorManager.editor.setTheme(themeId);
+	if (!ok) return;
 	appSettings.update({ editorTheme: themeId }, false);
 }

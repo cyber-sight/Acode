@@ -62,7 +62,7 @@ import {
 } from "cm/editorUtils";
 import indentGuides from "cm/indentGuides";
 import rainbowBrackets from "cm/rainbowBrackets";
-import themeRegistry, { getThemeById, getThemes } from "cm/themes";
+import { getThemeExtensions } from "cm/themes";
 import list from "components/collapsableList";
 import quickTools from "components/quickTools";
 import ScrollBar from "components/scrollbar";
@@ -778,8 +778,7 @@ async function EditorManager($header, $body) {
 	editor.setTheme = function (themeId) {
 		try {
 			const id = String(themeId || "");
-			const theme = getThemeById(id) || getThemeById(id.replace(/-/g, "_"));
-			const ext = theme?.getExtension?.() || [oneDark];
+			const ext = getThemeExtensions(id, [oneDark]);
 			editor.dispatch({ effects: themeCompartment.reconfigure(ext) });
 			return true;
 		} catch (_) {

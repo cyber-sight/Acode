@@ -1,6 +1,9 @@
 import fsOperation from "fileSystem";
 import sidebarApps from "sidebarApps";
+import { HighlightStyle, syntaxHighlighting } from "@codemirror/language";
+import { EditorView } from "@codemirror/view";
 import ajax from "@deadlyjack/ajax";
+import { tags } from "@lezer/highlight";
 import {
 	getRegisteredCommands as listRegisteredCommands,
 	refreshCommandKeymap,
@@ -103,14 +106,111 @@ export default class Acode {
 		};
 
 		// CodeMirror editor theme API for plugins
+		const normalizeThemeSpec = (spec) => {
+			if (!spec || typeof spec !== "object" || Array.isArray(spec)) {
+				console.warn(
+					"[editorThemes] register(spec) expects an object: { id, caption?, dark?, getExtension|extensions|extension|theme, config? }",
+				);
+				return null;
+			}
+
+			const id = spec.id || spec.name;
+			if (!id) {
+				console.warn("[editorThemes] register(spec) requires a valid `id`.");
+				return null;
+			}
+
+			const extensionSource =
+				spec.getExtension || spec.extensions || spec.extension || spec.theme;
+			if (extensionSource === undefined || extensionSource === null) {
+				console.warn(
+					`[editorThemes] register('${id}') requires extensions via getExtension/extensions/extension/theme.`,
+				);
+				return null;
+			}
+
+			return {
+				id,
+				caption: spec.caption || spec.label || id,
+				isDark: spec.isDark ?? spec.dark ?? false,
+				getExtension:
+					typeof extensionSource === "function"
+						? extensionSource
+						: () => extensionSource,
+				config: spec.config ?? null,
+			};
+		};
+
+		const createHighlightStyle = (spec) => {
+			if (!spec) return null;
+			if (Array.isArray(spec)) return HighlightStyle.define(spec);
+			return spec;
+		};
+
+		const createTheme = ({
+			styles,
+			dark = false,
+			highlightStyle,
+			extensions = [],
+		} = {}) => {
+			const ext = [];
+
+			if (styles && typeof styles === "object") {
+				ext.push(EditorView.theme(styles, { dark: !!dark }));
+			}
+
+			const resolvedHighlight = createHighlightStyle(highlightStyle);
+			if (resolvedHighlight) {
+				ext.push(syntaxHighlighting(resolvedHighlight));
+			}
+
+			if (Array.isArray(extensions)) {
+				ext.push(...extensions);
+			} else if (extensions) {
+				ext.push(extensions);
+			}
+
+			return ext;
+		};
+
 		const editorThemesModule = {
-			register: (id, caption, isDark, getExtension, config = null) =>
-				cmThemeRegistry.addTheme(id, caption, isDark, getExtension, config),
+			/**
+			 * Register a CodeMirror theme from plugin code.
+			 * @param {{
+			 *   id: string,
+			 *   caption?: string,
+			 *   dark?: boolean,
+			 *   getExtension?: Function,
+			 *   extensions?: unknown,
+			 *   config?: object
+			 * }} spec
+			 * `isDark`, `extension`, and `theme` are accepted aliases for compatibility.
+			 * @returns {boolean}
+			 */
+			register: (spec) => {
+				const resolved = normalizeThemeSpec(spec);
+				if (!resolved) return false;
+				return cmThemeRegistry.addTheme(
+					resolved.id,
+					resolved.caption,
+					resolved.isDark,
+					resolved.getExtension,
+					resolved.config,
+				);
+			},
 			unregister: (id) => cmThemeRegistry.removeTheme(id),
 			list: () => cmThemeRegistry.getThemes(),
 			apply: (id) => editorManager?.editor?.setTheme?.(id),
 			get: (id) => cmThemeRegistry.getThemeById(id),
 			getConfig: (id) => cmThemeRegistry.getThemeConfig(id),
+			createTheme,
+			createHighlightStyle,
+			cm: {
+				EditorView,
+				HighlightStyle,
+				syntaxHighlighting,
+				tags,
+			},
 		};
 
 		const sidebarAppsModule = {
