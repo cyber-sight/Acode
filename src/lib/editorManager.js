@@ -104,6 +104,20 @@ async function EditorManager($header, $body) {
 	let autosaveTimeout = null;
 	let touchSelectionController = null;
 	let touchSelectionSyncRaf = 0;
+	let nativeContextMenuDisabled = null;
+
+	const setNativeContextMenuDisabled = (disabled) => {
+		const value = !!disabled;
+		if (nativeContextMenuDisabled === value) return;
+		nativeContextMenuDisabled = value;
+		const api = globalThis.system?.setNativeContextMenuDisabled;
+		if (typeof api !== "function") return;
+		try {
+			api.call(globalThis.system, value);
+		} catch (error) {
+			console.warn("Failed to update native context menu state", error);
+		}
+	};
 
 	const { scrollbarSize } = appSettings.value;
 	const events = {
@@ -1599,8 +1613,13 @@ async function EditorManager($header, $body) {
 
 		// Attach native DOM event listeners directly to the editor's contentDOM
 		const contentDOM = editor.contentDOM;
+		const isFocused =
+			contentDOM === document.activeElement ||
+			contentDOM.contains(document.activeElement);
+		setNativeContextMenuDisabled(isFocused);
 
 		contentDOM.addEventListener("focus", (_event) => {
+			setNativeContextMenuDisabled(true);
 			const { activeFile } = manager;
 			if (activeFile) {
 				activeFile.focused = true;
@@ -1609,6 +1628,7 @@ async function EditorManager($header, $body) {
 		});
 
 		contentDOM.addEventListener("blur", async (_event) => {
+			setNativeContextMenuDisabled(false);
 			touchSelectionController?.setMenu(false);
 			const { hardKeyboardHidden, keyboardHeight } =
 				await getSystemConfiguration();
