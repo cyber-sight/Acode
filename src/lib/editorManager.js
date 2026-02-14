@@ -630,6 +630,13 @@ async function EditorManager($header, $body) {
 							...config.initializationOptions,
 						};
 					}
+					if (
+						typeof config.startupTimeout === "number" &&
+						Number.isFinite(config.startupTimeout) &&
+						config.startupTimeout > 0
+					) {
+						next.startupTimeout = Math.floor(config.startupTimeout);
+					}
 					if (config.launcher && typeof config.launcher === "object") {
 						next.launcher = { ...current.launcher, ...config.launcher };
 					}
@@ -655,6 +662,7 @@ async function EditorManager($header, $body) {
 						transport: config.transport,
 						clientConfig: config.clientConfig,
 						initializationOptions: config.initializationOptions,
+						startupTimeout: config.startupTimeout,
 						launcher: config.launcher,
 						enabled: config.enabled !== false,
 					});

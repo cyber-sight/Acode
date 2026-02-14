@@ -24,6 +24,7 @@ function getMergedConfig(server) {
 	return {
 		...server,
 		enabled: override.enabled ?? server.enabled,
+		startupTimeout: override.startupTimeout ?? server.startupTimeout,
 		initializationOptions: {
 			...(server.initializationOptions || {}),
 			...(override.initializationOptions || {}),
@@ -47,10 +48,23 @@ function getMergedConfig(server) {
 async function updateServerConfig(serverId, partial) {
 	const current = JSON.parse(JSON.stringify(appSettings.value.lsp || {}));
 	current.servers = current.servers || {};
-	current.servers[serverId] = {
+	const nextServer = {
 		...(current.servers[serverId] || {}),
-		...partial,
 	};
+
+	Object.entries(partial || {}).forEach(([key, value]) => {
+		if (value === undefined) {
+			delete nextServer[key];
+			return;
+		}
+		nextServer[key] = value;
+	});
+
+	if (Object.keys(nextServer).length) {
+		current.servers[serverId] = nextServer;
+	} else {
+		delete current.servers[serverId];
+	}
 
 	await appSettings.update({ lsp: current }, false);
 }
@@ -147,6 +161,15 @@ export default function lspServerDetail(serverId) {
 	});
 
 	items.push({
+		key: "edit_startup_timeout",
+		text: "Startup Timeout",
+		info:
+			typeof merged.startupTimeout === "number"
+				? `${merged.startupTimeout} ms`
+				: "Default (5000 ms)",
+	});
+
+	items.push({
 		key: "edit_init_options",
 		text: "Edit Initialization Options",
 		info: "Edit custom initialization options (JSON)",
@@ -207,6 +230,40 @@ export default function lspServerDetail(serverId) {
 					"Initialization Options",
 					`<pre style="overflow: auto; max-height: 60vh; font-size: 12px;">${escapeHtml(json)}</pre>`,
 				);
+				break;
+			}
+
+			case "edit_startup_timeout": {
+				const currentTimeout =
+					override.startupTimeout ?? server.startupTimeout ?? 5000;
+				const result = await prompt(
+					"Startup Timeout (milliseconds)",
+					String(currentTimeout),
+					"number",
+					{
+						test: (val) => {
+							const timeout = Number.parseInt(String(val), 10);
+							return Number.isFinite(timeout) && timeout >= 1000;
+						},
+					},
+				);
+
+				if (result !== null) {
+					const timeout = Number.parseInt(String(result), 10);
+					if (!Number.isFinite(timeout) || timeout < 1000) {
+						toast("Invalid timeout value");
+						break;
+					}
+
+					await updateServerConfig(serverId, {
+						startupTimeout: timeout,
+					});
+					serverRegistry.updateServer(serverId, (current) => ({
+						...current,
+						startupTimeout: timeout,
+					}));
+					toast(`Startup timeout set to ${timeout} ms`);
+				}
 				break;
 			}
 
