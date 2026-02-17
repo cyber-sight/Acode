@@ -1154,7 +1154,7 @@ class TouchSelectionMenuController {
 		if (element.closest(".cm-tooltip, .cm-panel")) return true;
 		if (
 			element.closest(
-				"input, textarea, select, button, a, [contenteditable], [role=\"button\"]",
+				'input, textarea, select, button, a, [contenteditable], [role="button"]',
 			)
 		) {
 			return true;
