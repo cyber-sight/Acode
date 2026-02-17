@@ -81,13 +81,6 @@ export default function init() {
 		$footer.removeAttribute("data-unsaved");
 	});
 
-	// TODO Codemirro
-	// editorManager.editor.on("focus", () => {
-	// 	if (key.shift || key.ctrl || key.alt || key.meta) {
-	// 		quickTools.$input.focus();
-	// 	}
-	// });
-
 	root.append($footer, $toggler);
 	document.body.append($input);
 	if (

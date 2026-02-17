@@ -1,5 +1,6 @@
 import { EditorView } from "@codemirror/view";
 import Sidebar from "components/sidebar";
+import DOMPurify from "dompurify";
 import openFile from "lib/openFile";
 import {
 	clearHighlightCache,
@@ -101,7 +102,7 @@ export function createReferenceItem(item, options = {}) {
 		</div>
 	);
 
-	$el.get(".ref-preview").innerHTML = item.highlightedText;
+	$el.get(".ref-preview").innerHTML = DOMPurify.sanitize(item.highlightedText);
 
 	return $el;
 }

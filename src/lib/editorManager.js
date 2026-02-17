@@ -1,17 +1,4 @@
 import sidebarApps from "sidebarApps";
-
-import {
-	setKeyBindings as applyKeyBindings,
-	executeCommand,
-	getCommandKeymapExtension,
-	getRegisteredCommands,
-	refreshCommandKeymap,
-	registerExternalCommand,
-	removeExternalCommand,
-} from "cm/commandRegistry";
-// TODO: Migrate touch handlers to CodeMirror
-// import touchListeners, { scrollAnimationFrame } from "ace/touchHandler";
-
 import { indentUnit } from "@codemirror/language";
 import { search } from "@codemirror/search";
 import { Compartment, EditorState, Prec, StateEffect } from "@codemirror/state";
@@ -34,6 +21,15 @@ import {
 	wrapWithAbbreviation,
 } from "@emmetio/codemirror6-plugin";
 import createBaseExtensions from "cm/baseExtensions";
+import {
+	setKeyBindings as applyKeyBindings,
+	executeCommand,
+	getCommandKeymapExtension,
+	getRegisteredCommands,
+	refreshCommandKeymap,
+	registerExternalCommand,
+	removeExternalCommand,
+} from "cm/commandRegistry";
 import lspClientManager from "cm/lsp/clientManager";
 import {
 	getLspDiagnostics,
@@ -68,7 +64,6 @@ import quickTools from "components/quickTools";
 import ScrollBar from "components/scrollbar";
 import SideButton, { sideButtonContainer } from "components/sideButton";
 import keyboardHandler, { keydownState } from "handlers/keyboard";
-// TODO: Update EditorFile for CodeMirror compatibility
 import EditorFile from "./editorFile";
 import openFile from "./openFile";
 import { addedFolder } from "./openFolder";
