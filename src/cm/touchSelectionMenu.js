@@ -360,6 +360,9 @@ class TouchSelectionMenuController {
 		) {
 			return;
 		}
+		if (this.#isIgnoredPointerTarget(target)) {
+			return;
+		}
 		if (
 			event.type === "touchstart" &&
 			target instanceof Node &&
@@ -373,6 +376,7 @@ class TouchSelectionMenuController {
 
 	#onContextMenu = (event) => {
 		if (!this.#enabled) return;
+		if (this.#isIgnoredPointerTarget(event.target)) return;
 		event.preventDefault();
 		event.stopPropagation();
 
@@ -397,6 +401,7 @@ class TouchSelectionMenuController {
 	#onMouseDown = (event) => {
 		if (!this.#enabled) return;
 		if (event.button !== 0) return;
+		if (this.#isIgnoredPointerTarget(event.target)) return;
 		this.#mouseSelecting = true;
 	};
 
@@ -417,6 +422,11 @@ class TouchSelectionMenuController {
 
 	#onTouchStart = (event) => {
 		if (!this.#enabled || event.touches.length !== 1) return;
+		if (this.#isIgnoredPointerTarget(event.target)) {
+			this.#touchSession = null;
+			this.#clearLongPress();
+			return;
+		}
 		const touch = event.touches[0];
 		const { clientX, clientY } = touch;
 		const now = performance.now();
@@ -1131,6 +1141,25 @@ class TouchSelectionMenuController {
 			return !activeFile.editable || !!activeFile.loading;
 		}
 		return !!this.#view.state?.readOnly;
+	}
+
+	#isIgnoredPointerTarget(target) {
+		let element = null;
+		if (target instanceof Element) {
+			element = target;
+		} else if (target instanceof Node) {
+			element = target.parentElement;
+		}
+		if (!element) return false;
+		if (element.closest(".cm-tooltip, .cm-panel")) return true;
+		if (
+			element.closest(
+				"input, textarea, select, button, a, [contenteditable], [role=\"button\"]",
+			)
+		) {
+			return true;
+		}
+		return false;
 	}
 
 	#hasSelection() {
