@@ -868,6 +868,8 @@ async function uninstall(id) {
 			fsOperation(pluginDir).delete(),
 			state.delete(state.storeUrl),
 		]);
+		const pluginMainScript = document.getElementById(`${id}-mainScript`);
+		if (pluginMainScript) document.head.removeChild(pluginMainScript);
 		acode.unmountPlugin(id);
 
 		const searchInput = container.querySelector('input[name="search-ext"]');
