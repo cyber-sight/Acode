@@ -296,6 +296,31 @@ async function EditorManager($header, $body) {
 		};
 	}
 
+	function makeWhitespaceTheme() {
+		return EditorView.theme({
+			".cm-highlightSpace": {
+				backgroundImage:
+					"radial-gradient(circle at 50% 54%, var(--cm-space-marker-color) 0.08em, transparent 0.1em)",
+				backgroundPosition: "center",
+				backgroundRepeat: "no-repeat",
+				opacity: "0.5",
+			},
+			".cm-highlightTab": {
+				backgroundSize: "auto 70%",
+				backgroundPosition: "right 60%",
+				opacity: "0.65",
+			},
+			".cm-trailingSpace": {
+				backgroundColor: "var(--cm-trailing-space-color)",
+				borderRadius: "2px",
+			},
+			"&": {
+				"--cm-space-marker-color": "rgba(127, 127, 127, 0.6)",
+				"--cm-trailing-space-color": "rgba(255, 77, 77, 0.2)",
+			},
+		});
+	}
+
 	// Centralised CodeMirror options registry for organized configuration
 	// Each spec declares related settings keys, its compartment(s), and a builder returning extension(s)
 	const cmOptionSpecs = [
@@ -365,7 +390,11 @@ async function EditorManager($header, $body) {
 			build() {
 				const show = !!appSettings?.value?.showSpaces;
 				return show
-					? [highlightWhitespace(), highlightTrailingWhitespace()]
+					? [
+							highlightWhitespace(),
+							highlightTrailingWhitespace(),
+							makeWhitespaceTheme(),
+						]
 					: [];
 			},
 		},
