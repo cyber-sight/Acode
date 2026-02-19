@@ -12,7 +12,7 @@ const fs = require("node:fs");
 const path = require("node:path");
 const PLATFORM_FILES = [".DS_Store"];
 
-execSync("npm install", { stdio: "inherit" });
+execSync("bun install", { stdio: "inherit" });
 try {
 	execSync("cordova platform add android", { stdio: "inherit" });
 } catch (error) {

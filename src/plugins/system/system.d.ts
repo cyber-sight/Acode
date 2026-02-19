@@ -235,6 +235,18 @@ interface System {
    * @param onFail
    */
   getCordovaIntent(onSuccess: (intent: Intent) => void, onFail: OnFail): void;
+  /**
+   * Enable/disable native WebView long-press context behavior.
+   * Use this when rendering a custom editor context menu.
+   * @param disabled
+   * @param onSuccess
+   * @param onFail
+   */
+  setNativeContextMenuDisabled(
+    disabled: boolean,
+    onSuccess?: () => void,
+    onFail?: OnFail,
+  ): void;
 }
 
 interface Window{
