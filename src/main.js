@@ -195,10 +195,13 @@ async function onDeviceReady() {
 	}
 
 	localStorage.versionCode = versionCode;
-	document.body.setAttribute(
-		"data-version",
-		`v${BuildInfo.version} (${versionCode})`,
-	);
+
+	try {
+		await setDebugInfo();
+	} catch (e) {
+		console.error(e);
+	}
+
 	acode.setLoadingMessage("Loading settings...");
 
 	window.resolveLocalFileSystemURL = function (url, ...args) {
@@ -337,6 +340,30 @@ async function onDeviceReady() {
 			);
 		})
 		.catch(console.error);
+}
+
+async function setDebugInfo() {
+	const { version, versionCode } = BuildInfo;
+
+	const userAgent = navigator.userAgent;
+	const language = navigator.language;
+
+	// Extract Android version
+	const androidMatch = userAgent.match(/Android\s([0-9.]+)/);
+	const androidVersion = androidMatch ? androidMatch[1] : "Unknown";
+
+	// Extract Chrome/WebView version
+	const chromeMatch = userAgent.match(/Chrome\/([0-9.]+)/);
+	const webviewVersion = chromeMatch ? chromeMatch[1] : "Unknown";
+
+	const info = [
+		`App: v${version} (${versionCode})`,
+		`Android: ${androidVersion}`,
+		`WebView: ${webviewVersion}`,
+		`Language: ${language}`,
+	].join("\n");
+
+	document.body.setAttribute("data-version", info);
 }
 
 async function promptUpdateCheckConsent() {
