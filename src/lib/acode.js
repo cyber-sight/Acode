@@ -1,6 +1,7 @@
 import fsOperation from "fileSystem";
 import sidebarApps from "sidebarApps";
 import { HighlightStyle, syntaxHighlighting } from "@codemirror/language";
+import { Compartment, EditorState, Prec, StateEffect } from "@codemirror/state";
 import { EditorView } from "@codemirror/view";
 import ajax from "@deadlyjack/ajax";
 import { tags } from "@lezer/highlight";
@@ -14,7 +15,13 @@ import {
 import lspClientManager from "cm/lsp/clientManager";
 import { registerLspFormatter } from "cm/lsp/formatter";
 import serverRegistry from "cm/lsp/serverRegistry";
-import { addMode, getModeForPath, removeMode } from "cm/modelist";
+import {
+	addMode,
+	getModeForPath,
+	getModes,
+	getModesByName,
+	removeMode,
+} from "cm/modelist";
 import cmThemeRegistry from "cm/themes";
 import Contextmenu from "components/contextmenu";
 import inputhints from "components/inputhints";
@@ -234,9 +241,24 @@ export default class Acode {
 			},
 		};
 
+		const getModeByName = (name) => {
+			const normalized = String(name || "")
+				.trim()
+				.toLowerCase();
+			if (!normalized) return null;
+			return getModesByName()[normalized] || null;
+		};
+
+		const listModes = () => [...getModes()];
+		const listModesByName = () => ({ ...getModesByName() });
+
 		const aceModes = {
 			addMode,
 			removeMode,
+			getModeForPath: (path) => getModeForPath(String(path || "")),
+			getModes: () => listModes(),
+			getModesByName: () => listModesByName(),
+			getMode: (name) => getModeByName(name),
 		};
 
 		// Preferred CodeMirror language registration API for plugins
@@ -246,6 +268,13 @@ export default class Acode {
 			register: (name, extensions, caption, loader) =>
 				addMode(name, extensions, caption, loader),
 			unregister: (name) => removeMode(name),
+			add: (name, extensions, caption, loader) =>
+				addMode(name, extensions, caption, loader),
+			remove: (name) => removeMode(name),
+			list: () => listModes(),
+			listByName: () => listModesByName(),
+			get: (name) => getModeByName(name),
+			getForPath: (path) => getModeForPath(String(path || "")),
 		};
 
 		const intent = {
