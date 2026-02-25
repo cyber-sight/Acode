@@ -1,5 +1,6 @@
 import lspStatusBar from "components/lspStatusBar";
 import toast from "components/toast";
+import alert from "dialogs/alert";
 import confirm from "dialogs/confirm";
 import loader from "dialogs/loader";
 import type {
@@ -24,6 +25,17 @@ const STATUS_DECLINED: InstallStatus = "declined";
 const STATUS_FAILED: InstallStatus = "failed";
 
 const AXS_BINARY = "$PREFIX/axs";
+
+function getTerminalRequiredMessage(): string {
+	return (
+		strings?.terminal_required_message_for_lsp ??
+		"Terminal not installed. Please install Terminal first to use LSP servers."
+	);
+}
+
+interface LspError extends Error {
+	code?: string;
+}
 
 function getExecutor(): Executor {
 	const executor = (globalThis as unknown as { Executor?: Executor }).Executor;
@@ -564,10 +576,6 @@ async function waitForWebSocket(
 	);
 }
 
-interface LspError extends Error {
-	code?: string;
-}
-
 export interface EnsureServerResult {
 	uuid: string | null;
 	/** Port discovered from port file (for auto-port discovery) */
@@ -596,6 +604,23 @@ export async function ensureServerRunning(
 		}
 	} catch {
 		// Failed to check, proceed with normal startup
+	}
+
+	const terminal = (
+		globalThis as unknown as {
+			Terminal?: { isInstalled?: () => Promise<boolean> | boolean };
+		}
+	).Terminal;
+	let isTerminalInstalled = false;
+	try {
+		isTerminalInstalled = Boolean(await terminal?.isInstalled?.());
+	} catch {}
+	if (!isTerminalInstalled) {
+		const message = getTerminalRequiredMessage();
+		alert(strings?.error, message);
+		const unavailable: LspError = new Error(message);
+		unavailable.code = "LSP_SERVER_UNAVAILABLE";
+		throw unavailable;
 	}
 
 	const installed = await ensureInstalled(server);
