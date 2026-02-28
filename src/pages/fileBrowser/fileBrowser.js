@@ -62,7 +62,8 @@ function FileBrowserInclude(mode, info, doesOpenLast = true) {
 	const state = [];
 	/**@type {Array<Storage>} */
 	const allStorages = [];
-	let storageList = JSON.parse(localStorage.storageList || "[]");
+	let storageList = helpers.parseJSON(localStorage.storageList);
+	if (!Array.isArray(storageList)) storageList = [];
 
 	let isSelectionMode = false;
 	let selectedItems = new Set();
@@ -1088,7 +1089,9 @@ function FileBrowserInclude(mode, info, doesOpenLast = true) {
 						storageType: "sd",
 					});
 				});
-			} catch (err) {}
+			} catch (err) {
+				console.warn("Unable to list external storages.", err);
+			}
 
 			storageList.forEach((storage) => {
 				let url = storage.url || /**@deprecated */ storage["uri"];
