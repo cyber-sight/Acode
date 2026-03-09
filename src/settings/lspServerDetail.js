@@ -14,50 +14,59 @@ import confirm from "dialogs/confirm";
 import prompt from "dialogs/prompt";
 import { getServerOverride, updateServerConfig } from "./lspConfigUtils";
 
-const FEATURE_ITEMS = [
-	[
-		"ext_hover",
-		"hover",
-		"Hover Information",
-		"Show type information and documentation on hover",
-	],
-	[
-		"ext_completion",
-		"completion",
-		"Code Completion",
-		"Enable autocomplete suggestions from the server",
-	],
-	[
-		"ext_signature",
-		"signature",
-		"Signature Help",
-		"Show function parameter hints while typing",
-	],
-	[
-		"ext_diagnostics",
-		"diagnostics",
-		"Diagnostics",
-		"Show errors and warnings from the language server",
-	],
-	[
-		"ext_inlayHints",
-		"inlayHints",
-		"Inlay Hints",
-		"Show inline type hints in the editor",
-	],
-	[
-		"ext_documentHighlights",
-		"documentHighlights",
-		"Document Highlights",
-		"Highlight all occurrences of the word under cursor",
-	],
-	[
-		"ext_formatting",
-		"formatting",
-		"Formatting",
-		"Enable code formatting from the language server",
-	],
-];
+function getFeatureItems() {
+	return [
+		[
+			"ext_hover",
+			"hover",
+			strings["lsp-feature-hover"],
+			strings["lsp-feature-hover-info"],
+		],
+		[
+			"ext_completion",
+			"completion",
+			strings["lsp-feature-completion"],
+			strings["lsp-feature-completion-info"],
+		],
+		[
+			"ext_signature",
+			"signature",
+			strings["lsp-feature-signature"],
+			strings["lsp-feature-signature-info"],
+		],
+		[
+			"ext_diagnostics",
+			"diagnostics",
+			strings["lsp-feature-diagnostics"],
+			strings["lsp-feature-diagnostics-info"],
+		],
+		[
+			"ext_inlayHints",
+			"inlayHints",
+			strings["lsp-feature-inlay-hints"],
+			strings["lsp-feature-inlay-hints-info"],
+		],
+		[
+			"ext_documentHighlights",
+			"documentHighlights",
+			strings["lsp-feature-document-highlights"],
+			strings["lsp-feature-document-highlights-info"],
+		],
+		[
+			"ext_formatting",
+			"formatting",
+			strings["lsp-feature-formatting"],
+			strings["lsp-feature-formatting-info"],
+		],
+	];
+}
+
+function fillTemplate(template, replacements) {
+	return Object.entries(replacements).reduce(
+		(result, [key, value]) => result.replaceAll(`{${key}}`, String(value)),
+		String(template || ""),
+	);
+}
 
 function clone(value) {
 	if (!value || typeof value !== "object") return value;
@@ -105,13 +114,58 @@ function getMergedConfig(server) {
 function formatInstallStatus(result) {
 	switch (result?.status) {
 		case "present":
-			return result.version ? `Installed (${result.version})` : "Installed";
+			return result.version
+				? fillTemplate(strings["lsp-status-installed-version"], {
+						version: result.version,
+					})
+				: strings["lsp-status-installed"];
 		case "missing":
-			return "Not installed";
+			return strings["lsp-status-not-installed"];
 		case "failed":
-			return "Check failed";
+			return strings["lsp-status-check-failed"];
 		default:
-			return "Unknown";
+			return strings["lsp-status-unknown"];
+	}
+}
+
+function formatStartupTimeoutValue(timeout) {
+	return typeof timeout === "number"
+		? fillTemplate(strings["lsp-timeout-ms"], { timeout })
+		: strings["lsp-default"];
+}
+
+function sanitizeInstallMessage(message) {
+	const lines = String(message || "")
+		.split("\n")
+		.map((line) => line.trim())
+		.filter(Boolean)
+		.filter(
+			(line) =>
+				!/^proot warning:/i.test(line) &&
+				!line.includes(`"/proc/self/fd/0"`) &&
+				!line.includes(`"/proc/self/fd/1"`) &&
+				!line.includes(`"/proc/self/fd/2"`),
+		);
+
+	return lines.join(" ");
+}
+
+function formatInstallInfo(result) {
+	const cleanedMessage = sanitizeInstallMessage(result?.message);
+
+	switch (result?.status) {
+		case "present":
+			return result.version
+				? fillTemplate(strings["lsp-install-info-version-available"], {
+						version: result.version,
+					})
+				: strings["lsp-install-info-ready"];
+		case "missing":
+			return strings["lsp-install-info-missing"];
+		case "failed":
+			return cleanedMessage || strings["lsp-install-info-check-failed"];
+		default:
+			return cleanedMessage || strings["lsp-install-info-unknown"];
 	}
 }
 
@@ -154,9 +208,16 @@ function updateItemDisplay($list, itemsByKey, key, value, extras = {}) {
 	const $item = $list?.querySelector?.(`[data-key="${key}"]`);
 	if (!$item) return;
 
-	const $value = $item.querySelector(".value");
-	if ($value) {
-		$value.textContent = formatValue(item.value);
+	const $subtitle = $item.querySelector(".value");
+	if ($subtitle) {
+		$subtitle.textContent = $subtitle.classList.contains("setting-info")
+			? String(item.info || "")
+			: formatValue(item.value);
+	}
+
+	const $trailingValue = $item.querySelector(".setting-trailing-value");
+	if ($trailingValue) {
+		$trailingValue.textContent = formatValue(item.value);
 	}
 
 	const $checkbox = $item.querySelector(".input-checkbox");
@@ -194,66 +255,84 @@ async function buildSnapshot(serverId) {
 }
 
 function createItems(snapshot) {
+	const featureItems = getFeatureItems();
+	const categories = {
+		general: strings["settings-category-general"],
+		installation: strings["settings-category-installation"],
+		advanced: strings["settings-category-advanced"],
+		features: strings["settings-category-features"],
+	};
 	const items = [
 		{
 			key: "enabled",
-			text: "Enabled",
+			text: strings["lsp-enabled"],
 			checkbox: snapshot.merged.enabled !== false,
-			info: "Enable or disable this language server",
+			info: strings["settings-info-lsp-server-enabled"],
+			category: categories.general,
 		},
 		{
 			key: "install_status",
-			text: "Installed",
+			text: strings["lsp-installed"],
 			value: formatInstallStatus(snapshot.installResult),
-			info:
-				snapshot.installResult.message ||
-				"Current installation state for this language server",
+			info: formatInstallInfo(snapshot.installResult),
+			category: categories.installation,
+			chevron: true,
 		},
 		{
 			key: "install_server",
-			text: "Install / Repair",
-			info: "Install or repair this language server",
+			text: strings["lsp-install-repair"],
+			info: strings["settings-info-lsp-install-server"],
+			category: categories.installation,
+			chevron: true,
 		},
 		{
 			key: "update_server",
-			text: "Update Server",
-			info: "Update this language server if an update flow exists",
+			text: strings["lsp-update-server"],
+			info: strings["settings-info-lsp-update-server"],
+			category: categories.installation,
+			chevron: true,
 		},
 		{
 			key: "uninstall_server",
-			text: "Uninstall Server",
-			info: "Remove installed packages or binaries for this server",
+			text: strings["lsp-uninstall-server"],
+			info: strings["settings-info-lsp-uninstall-server"],
+			category: categories.installation,
+			chevron: true,
 		},
 		{
 			key: "startup_timeout",
-			text: "Startup Timeout",
-			value:
-				typeof snapshot.merged.startupTimeout === "number"
-					? `${snapshot.merged.startupTimeout} ms`
-					: "Default (5000 ms)",
-			info: "Configure how long Acode waits for the server to start",
+			text: strings["lsp-startup-timeout"],
+			value: formatStartupTimeoutValue(snapshot.merged.startupTimeout),
+			info: strings["settings-info-lsp-startup-timeout"],
+			category: categories.advanced,
+			chevron: true,
 		},
 		{
 			key: "edit_init_options",
-			text: "Edit Initialization Options",
+			text: strings["lsp-edit-initialization-options"],
 			value: Object.keys(snapshot.override.initializationOptions || {}).length
-				? "Configured"
-				: "Empty",
-			info: "Edit initialization options as JSON",
+				? strings["lsp-configured"]
+				: strings["lsp-empty"],
+			info: strings["settings-info-lsp-edit-init-options"],
+			category: categories.advanced,
+			chevron: true,
 		},
 		{
 			key: "view_init_options",
-			text: "View Initialization Options",
-			info: "View the effective initialization options as JSON",
+			text: strings["lsp-view-initialization-options"],
+			info: strings["settings-info-lsp-view-init-options"],
+			category: categories.advanced,
+			chevron: true,
 		},
 	];
 
-	FEATURE_ITEMS.forEach(([key, extKey, text, info]) => {
+	featureItems.forEach(([key, extKey, text, info]) => {
 		items.push({
 			key,
 			text,
 			checkbox: snapshot.builtinExts[extKey] !== false,
 			info,
+			category: categories.features,
 		});
 	});
 
@@ -275,9 +354,7 @@ async function refreshVisibleState($list, itemsByKey, serverId) {
 		"install_status",
 		formatInstallStatus(snapshot.installResult),
 		{
-			info:
-				snapshot.installResult.message ||
-				"Current installation state for this language server",
+			info: formatInstallInfo(snapshot.installResult),
 		},
 	);
 	updateItemDisplay($list, itemsByKey, "install_server", "");
@@ -287,20 +364,18 @@ async function refreshVisibleState($list, itemsByKey, serverId) {
 		$list,
 		itemsByKey,
 		"startup_timeout",
-		typeof snapshot.merged.startupTimeout === "number"
-			? `${snapshot.merged.startupTimeout} ms`
-			: "Default (5000 ms)",
+		formatStartupTimeoutValue(snapshot.merged.startupTimeout),
 	);
 	updateItemDisplay(
 		$list,
 		itemsByKey,
 		"edit_init_options",
 		Object.keys(snapshot.override.initializationOptions || {}).length
-			? "Configured"
-			: "Empty",
+			? strings["lsp-configured"]
+			: strings["lsp-empty"],
 	);
 
-	FEATURE_ITEMS.forEach(([key, extKey]) => {
+	getFeatureItems().forEach(([key, extKey]) => {
 		updateItemDisplay($list, itemsByKey, key, undefined, {
 			checkbox: snapshot.builtinExts[extKey] !== false,
 		});
@@ -345,7 +420,7 @@ async function persistInitOptions(serverId, value) {
 export default function lspServerDetail(serverId) {
 	const initialServer = lspApi.servers.get(serverId);
 	if (!initialServer) {
-		toast("Server not found");
+		toast(strings["lsp-server-not-found"]);
 		return null;
 	}
 
@@ -358,7 +433,7 @@ export default function lspServerDetail(serverId) {
 			version: null,
 			canInstall: true,
 			canUpdate: true,
-			message: "Checking installation status...",
+			message: strings["lsp-checking-installation-status"],
 		},
 		builtinExts:
 			getMergedConfig(initialServer).clientConfig?.builtinExtensions || {},
@@ -379,6 +454,9 @@ export default function lspServerDetail(serverId) {
 		undefined,
 		{
 			preserveOrder: true,
+			pageClassName: "detail-settings-page",
+			listClassName: "detail-settings-list",
+			valueInTail: true,
 		},
 	);
 
@@ -397,7 +475,7 @@ export default function lspServerDetail(serverId) {
 		const $list = this?.parentElement;
 		const snapshot = await buildSnapshot(serverId);
 		if (!snapshot) {
-			toast("Server not found");
+			toast(strings["lsp-server-not-found"]);
 			return;
 		}
 
@@ -407,22 +485,35 @@ export default function lspServerDetail(serverId) {
 				if (!value) {
 					stopManagedServer(serverId);
 				}
-				toast(value ? "Server enabled" : "Server disabled");
+				toast(
+					value
+						? strings["lsp-server-enabled-toast"]
+						: strings["lsp-server-disabled-toast"],
+				);
 				break;
 
 			case "install_status": {
 				const result = await checkServerInstallation(snapshot.merged);
 				const lines = [
-					`Status: ${formatInstallStatus(result)}`,
-					result.message ? `Details: ${result.message}` : null,
+					fillTemplate(strings["lsp-status-line"], {
+						status: formatInstallStatus(result),
+					}),
+					result.version
+						? fillTemplate(strings["lsp-version-line"], {
+								version: result.version,
+							})
+						: null,
+					fillTemplate(strings["lsp-details-line"], {
+						details: formatInstallInfo(result),
+					}),
 				].filter(Boolean);
-				alert("Installation Status", lines.join("<br>"));
+				alert(strings["lsp-installation-status"], lines.join("<br>"));
 				break;
 			}
 
 			case "install_server":
 				if (!snapshot.installCommand) {
-					toast("Install command not available");
+					toast(strings["lsp-install-command-unavailable"]);
 					break;
 				}
 				await installServer(snapshot.merged, "install");
@@ -430,7 +521,7 @@ export default function lspServerDetail(serverId) {
 
 			case "update_server":
 				if (!snapshot.updateCommand) {
-					toast("Update command not available");
+					toast(strings["lsp-update-command-unavailable"]);
 					break;
 				}
 				await installServer(snapshot.merged, "update");
@@ -438,19 +529,21 @@ export default function lspServerDetail(serverId) {
 
 			case "uninstall_server":
 				if (!snapshot.uninstallCommand) {
-					toast("Uninstall command not available");
+					toast(strings["lsp-uninstall-command-unavailable"]);
 					break;
 				}
 				if (
 					!(await confirm(
-						"Uninstall Server",
-						`Remove installed files for ${snapshot.liveServer.label || serverId}?`,
+						strings["lsp-uninstall-server"],
+						fillTemplate(strings["lsp-remove-installed-files"], {
+							server: snapshot.liveServer.label || serverId,
+						}),
 					))
 				) {
 					break;
 				}
 				await uninstallServer(snapshot.merged, { promptConfirm: false });
-				toast("Server uninstalled");
+				toast(strings["lsp-server-uninstalled"]);
 				break;
 
 			case "startup_timeout": {
@@ -459,7 +552,7 @@ export default function lspServerDetail(serverId) {
 					snapshot.liveServer.startupTimeout ??
 					5000;
 				const result = await prompt(
-					"Startup Timeout (milliseconds)",
+					strings["lsp-startup-timeout-ms"],
 					String(currentTimeout),
 					"number",
 					{
@@ -476,12 +569,16 @@ export default function lspServerDetail(serverId) {
 
 				const timeout = Number.parseInt(String(result), 10);
 				if (!Number.isFinite(timeout) || timeout < 1000) {
-					toast("Invalid timeout value");
+					toast(strings["lsp-invalid-timeout"]);
 					break;
 				}
 
 				await persistStartupTimeout(serverId, timeout);
-				toast(`Startup timeout set to ${timeout} ms`);
+				toast(
+					fillTemplate(strings["lsp-startup-timeout-set"], {
+						timeout,
+					}),
+				);
 				break;
 			}
 
@@ -492,7 +589,7 @@ export default function lspServerDetail(serverId) {
 					2,
 				);
 				const result = await prompt(
-					"Initialization Options (JSON)",
+					strings["lsp-initialization-options-json"],
 					currentJson || "{}",
 					"textarea",
 					{
@@ -512,7 +609,7 @@ export default function lspServerDetail(serverId) {
 				}
 
 				await persistInitOptions(serverId, JSON.parse(result));
-				toast("Initialization options updated");
+				toast(strings["lsp-initialization-options-updated"]);
 				break;
 			}
 
@@ -523,7 +620,7 @@ export default function lspServerDetail(serverId) {
 					2,
 				);
 				alert(
-					"Initialization Options",
+					strings["lsp-initialization-options"],
 					`<pre style="overflow: auto; max-height: 60vh; font-size: 12px;">${escapeHtml(json)}</pre>`,
 				);
 				break;
@@ -537,6 +634,9 @@ export default function lspServerDetail(serverId) {
 			case "ext_documentHighlights":
 			case "ext_formatting": {
 				const extKey = key.replace("ext_", "");
+				const feature = getFeatureItems().find(
+					([featureKey]) => featureKey === key,
+				);
 				const currentClientConfig = clone(snapshot.override.clientConfig || {});
 				const currentBuiltins = currentClientConfig.builtinExtensions || {};
 
@@ -547,7 +647,14 @@ export default function lspServerDetail(serverId) {
 						[extKey]: value,
 					},
 				});
-				toast(`${extKey} ${value ? "enabled" : "disabled"}`);
+				toast(
+					fillTemplate(strings["lsp-feature-state-toast"], {
+						feature: feature?.[2] || extKey,
+						state: value
+							? strings["lsp-state-enabled"]
+							: strings["lsp-state-disabled"],
+					}),
+				);
 				break;
 			}
 
