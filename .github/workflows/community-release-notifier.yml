@@ -57,7 +57,7 @@ jobs:
           TAG_SAFE=$(printf '%s' "$TAG" | sed 's/[_*[\]()~`>#+=|{}.!\\-]/\\&/g')
 
           if [[ "$TAG" == *"-nightly"* ]]; then
-            SUFFIX=" \\(Nightly Release\\)"
+            SUFFIX=" \(Nightly Release\)"
             SUFFIXPLAIN=" (Nightly Release)"
           else
             SUFFIX=""
@@ -75,7 +75,7 @@ jobs:
           } >> $GITHUB_OUTPUT
 
           # Plain (MD) Announcement for Discord
-          ANNOUNCE_PLAIN="📢 Acode [$TAG]($URL) was just Released 🎉${SUFFIXPLAIN}!"
+          ANNOUNCE_PLAIN="📢 Acode [$TAG](<$URL>) was just Released 🎉${SUFFIXPLAIN}!"
           echo "announce_plain=$ANNOUNCE_PLAIN" >> $GITHUB_OUTPUT
           {
             echo "body_plain<<$DELIMITER"
@@ -104,6 +104,7 @@ jobs:
         with:
           webhook-url: ${{ secrets.DISCORD_WEBHOOK_RELEASE_NOTES }}
           content: ${{ steps.truncate-discord.outputs.string }}
+          flags: 4 # 1 << 2 - SUPPRESS_EMBEDS!
 
       # ────────────────────────────────────────────────
       # Telegram notification — MarkdownV2 + no link preview
