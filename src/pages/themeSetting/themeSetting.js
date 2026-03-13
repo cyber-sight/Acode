@@ -13,6 +13,7 @@ import Ref from "html-tag-js/ref";
 import actionStack from "lib/actionStack";
 import removeAds from "lib/removeAds";
 import appSettings from "lib/settings";
+import { hideAd } from "lib/startAd";
 import CustomTheme from "pages/customTheme";
 import ThemeBuilder from "theme/builder";
 import themes from "theme/list";
@@ -67,7 +68,7 @@ export default function () {
 	});
 
 	$page.onhide = () => {
-		helpers.hideAd();
+		hideAd();
 		actionStack.remove("appTheme");
 	};
 

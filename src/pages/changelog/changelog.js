@@ -6,6 +6,7 @@ import toast from "components/toast";
 import DOMPurify from "dompurify";
 import Ref from "html-tag-js/ref";
 import actionStack from "lib/actionStack";
+import { hideAd } from "lib/startAd";
 import markdownIt from "markdown-it";
 import markdownItFootnote from "markdown-it-footnote";
 import markdownItTaskLists from "markdown-it-task-lists";
@@ -73,7 +74,7 @@ export default async function Changelog() {
 
 	$page.onhide = function () {
 		actionStack.remove("changelog");
-		helpers.hideAd();
+		hideAd();
 	};
 
 	actionStack.push({

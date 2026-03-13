@@ -3,6 +3,7 @@ import { getLspDiagnostics } from "cm/lsp/diagnostics";
 import Page from "components/page";
 import actionStack from "lib/actionStack";
 import EditorFile from "lib/editorFile";
+import { hideAd } from "lib/startAd";
 import helpers from "utils/helpers";
 
 export default function Problems() {
@@ -53,7 +54,7 @@ export default function Problems() {
 	helpers.showAd();
 
 	$page.onhide = function () {
-		helpers.hideAd();
+		hideAd();
 		actionStack.remove("problems");
 	};
 

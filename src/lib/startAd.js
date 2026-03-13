@@ -1,3 +1,5 @@
+import tag from "html-tag-js";
+
 let adUnitIdBanner = "ca-app-pub-5911839694379275/9157899592"; // Production
 let adUnitIdInterstitial = "ca-app-pub-5911839694379275/9570937608"; // Production
 let adUnitIdRewarded = "ca-app-pub-5911839694379275/1633667633"; // Production
@@ -56,4 +58,21 @@ export default async function startAd() {
 	window.ad = banner;
 	window.iad = interstitial;
 	window.adRewardedUnitId = adUnitIdRewarded;
+}
+
+/**
+ * Hides the ad
+ * @param {Boolean} [force=false]
+ */
+export function hideAd(force = false) {
+	const { ad } = window;
+	if (ad?.active) {
+		const $pages = tag.getAll(".page-replacement");
+		const hide = $pages.length === 1;
+
+		if (force || hide) {
+			ad.active = false;
+			ad.hide();
+		}
+	}
 }

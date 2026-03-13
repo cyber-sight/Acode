@@ -5,6 +5,7 @@ import select from "dialogs/select";
 import Ref from "html-tag-js/ref";
 import actionStack from "lib/actionStack";
 import appSettings from "lib/settings";
+import { hideAd } from "lib/startAd";
 import FileBrowser from "pages/fileBrowser";
 import { isValidColor } from "utils/color/regex";
 import helpers from "utils/helpers";
@@ -70,7 +71,7 @@ export default function settingsPage(
 	/** DISCLAIMER: do not assign hideSearchBar directly because it can change  */
 	$page.ondisconnect = () => hideSearchBar();
 	$page.onhide = () => {
-		helpers.hideAd();
+		hideAd();
 		actionStack.remove(title);
 	};
 

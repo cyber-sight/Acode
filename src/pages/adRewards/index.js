@@ -5,6 +5,7 @@ import loader from "dialogs/loader";
 import actionStack from "lib/actionStack";
 import adRewards from "lib/adRewards";
 import removeAds from "lib/removeAds";
+import { hideAd } from "lib/startAd";
 import helpers from "utils/helpers";
 
 let $rewardPage = null;
@@ -179,7 +180,7 @@ export default function openAdRewardsPage() {
 		action: $page.hide,
 	});
 
-	helpers.hideAd(true);
+	hideAd(true);
 	render();
 	app.append($page);
 	$rewardPage = $page;
