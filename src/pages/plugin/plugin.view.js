@@ -22,10 +22,10 @@ dayjs.updateLocale("en", {
 	relativeTime: {
 		future: "in %s",
 		past: (value, withoutSuffix) => {
-		     	if(value === "now") {
-					return value;
-		     	}
-		     	return withoutSuffix ? value : `${value} ago`;
+			if (value === "now") {
+				return value;
+			}
+			return withoutSuffix ? value : `${value} ago`;
 		},
 		s: "now",
 		ss: "now",
