@@ -13,7 +13,6 @@
     "lint": "biome lint --write",
     "format": "biome format --write",
     "check": "biome check --write",
-    "list:modes": "node ./utils/listSupportedModes.mjs",
     "typecheck": "tsc --noEmit",
     "updateAce": "node ./utils/updateAce.js"
   },
