@@ -546,7 +546,7 @@ public class System extends CordovaPlugin {
                                 openInBrowser(arg1, callbackContext);
                                 break;
                             case "launch-app":
-                                launchApp(arg1, arg2, arg3, callbackContext);
+                                launchApp(arg1, arg2, args.optJSONObject(2), callbackContext);
                                 break;
                             case "get-global-setting":
                                 getGlobalSetting(arg1, callbackContext);
@@ -1564,7 +1564,7 @@ public class System extends CordovaPlugin {
     private void launchApp(
         String appId,
         String className,
-        String data,
+        JSONObject extras,
         CallbackContext callback
     ) {
         if (appId == null || appId.equals("")) {
@@ -1582,20 +1582,37 @@ public class System extends CordovaPlugin {
             intent.addCategory(Intent.CATEGORY_LAUNCHER);
             intent.setPackage(appId);
             intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
+            intent.setClassName(appId, className);
 
-            if (data != null && !data.equals("")) {
-                intent.putExtra("acode_data", data);
+            if (extras != null) {
+                Iterator<String> keys = extras.keys();
+
+                while (keys.hasNext()) {
+                    String key = keys.next();
+                    Object value = extras.get(key);
+
+                    if (value instanceof Integer) {
+                        intent.putExtra(key, (Integer) value);
+                    } else if (value instanceof Boolean) {
+                        intent.putExtra(key, (Boolean) value);
+                    } else if (value instanceof Double) {
+                        intent.putExtra(key, (Double) value);
+                    } else if (value instanceof Long) {
+                        intent.putExtra(key, (Long) value);
+                    } else if (value instanceof String) {
+                        intent.putExtra(key, (String) value);
+                    } else {
+                        intent.putExtra(key, value.toString());
+                    }
+                }
             }
 
-            intent.setClassName(appId, className);
             activity.startActivity(intent);
             callback.success("Launched " + appId);
+
         } catch (Exception e) {
             callback.error(e.toString());
-            return;
         }
-
-
 
     }
 
