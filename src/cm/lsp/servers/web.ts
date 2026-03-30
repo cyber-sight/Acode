@@ -13,6 +13,12 @@ export const webServers: LspServerManifest[] = [
 			executable: "vscode-html-language-server",
 			packages: ["vscode-langservers-extracted"],
 		}),
+		clientConfig: {
+			builtinExtensions: {
+				documentHighlights: false,
+				keymaps: false,
+			},
+		},
 		enabled: true,
 	}),
 	defineServer({
@@ -26,6 +32,12 @@ export const webServers: LspServerManifest[] = [
 			executable: "vscode-css-language-server",
 			packages: ["vscode-langservers-extracted"],
 		}),
+		clientConfig: {
+			builtinExtensions: {
+				documentHighlights: false,
+				keymaps: false,
+			},
+		},
 		enabled: true,
 	}),
 	defineServer({
@@ -39,6 +51,12 @@ export const webServers: LspServerManifest[] = [
 			executable: "vscode-json-language-server",
 			packages: ["vscode-langservers-extracted"],
 		}),
+		clientConfig: {
+			builtinExtensions: {
+				documentHighlights: false,
+				keymaps: false,
+			},
+		},
 		enabled: true,
 	}),
 ];
