@@ -251,8 +251,8 @@
             name: ${{ env.UPDATED_VERSION }}
             tag_name: ${{ env.UPDATED_VERSION }} 
             files: |
-              /tmp/app-debug-normal.apk
-              /tmp/app-debug-fdroid.apk
+              /tmp/acode-debug-normal-$UPDATED_VERSION.apk
+              /tmp/acode-debug-fdroid-$UPDATED_VERSION.apk
             body: |
               Automated Nightly (pre-release) Releases for Today
               
