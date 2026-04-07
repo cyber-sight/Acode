@@ -172,7 +172,7 @@
           run: |
              node utils/storage_manager.mjs y
              npm run build paid dev apk
-             mv platforms/android/app/build/outputs/apk/debug/app-debug.apk /tmp/app-debug-normal.apk
+             mv platforms/android/app/build/outputs/apk/debug/app-debug.apk /tmp/acode-debug-normal-$UPDATED_VERSION.apk
              echo "VERSION: $UPDATED_VERSION" >> $GITHUB_STEP_SUMMARY
              
         - name: Upload APK Artifact
@@ -186,7 +186,7 @@
           run: |
             node utils/storage_manager.mjs y
             npm run build paid dev apk fdroid
-            mv platforms/android/app/build/outputs/apk/debug/app-debug.apk /tmp/app-debug-fdroid.apk
+            mv platforms/android/app/build/outputs/apk/debug/app-debug.apk /tmp/acode-debug-fdroid-$UPDATED_VERSION.apk
         
         - name: Upload APK Artifact
           uses: actions/upload-artifact@v7
