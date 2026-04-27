@@ -509,6 +509,14 @@ const APP_BINDING_CONFIG = [
 		readOnly: true,
 		editorOnly: true,
 	},
+	{
+		name: "formatCode",
+		description: "Format Code",
+		key: "Ctrl-Alt-F",
+		readOnly: false,
+		editorOnly: true,
+		action: "format",
+	},
 ];
 
 const APP_KEY_BINDINGS = buildAppBindings(APP_BINDING_CONFIG);
