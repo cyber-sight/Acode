@@ -1,6 +1,6 @@
 # Change Log
 
-## v1.12.0 (968)
+## v1.12.0 (970)
 
 ### Important
 * important(editor): Acode has migrated from Ace to CodeMirror. This is a major editor engine change and some plugins that depend on Ace internals may need updates for full compatibility.
