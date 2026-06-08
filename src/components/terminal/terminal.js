@@ -107,8 +107,13 @@ export default class TerminalComponent {
 			this.loadImageAddon();
 		}
 
-		// Load font if specified
-		this.loadTerminalFont();
+		// Load font in background - apply when ready without blocking render
+		this._fontReady = this.loadTerminalFont().then(() => {
+			if (this.terminal) {
+				this.terminal.options.fontFamily = this.options.fontFamily;
+				this.terminal.refresh(0, this.terminal.rows - 1);
+			}
+		});
 
 		// Set up terminal event handlers
 		this.setupEventHandlers();
@@ -565,16 +570,36 @@ export default class TerminalComponent {
 			// First render pass: schedule a fit + focus once the frame is ready
 			if (typeof requestAnimationFrame === "function") {
 				requestAnimationFrame(() => {
+					if (!this.terminal) return;
 					this.fitAddon.fit();
 					this.terminal.focus();
 					this.setupTouchSelection();
 				});
 			} else {
 				setTimeout(() => {
+					if (!this.terminal) return;
 					this.fitAddon.fit();
 					this.terminal.focus();
 					this.setupTouchSelection();
 				}, 0);
+			}
+
+			// Safety: re-apply fontFamily on next frame to ensure xterm
+			// uses correct metrics even if font wasn't ready for first paint
+			if (typeof requestAnimationFrame === "function") {
+				requestAnimationFrame(() => {
+					if (this.terminal) {
+						this.terminal.options.fontFamily = this.options.fontFamily;
+						this.terminal.refresh(0, this.terminal.rows - 1);
+					}
+				});
+			} else {
+				setTimeout(() => {
+					if (this.terminal) {
+						this.terminal.options.fontFamily = this.options.fontFamily;
+						this.terminal.refresh(0, this.terminal.rows - 1);
+					}
+				}, 16);
 			}
 		} catch (error) {
 			console.error("Failed to mount terminal:", error);
@@ -1038,6 +1063,7 @@ export default class TerminalComponent {
 		const fontFamily = this.options.fontFamily;
 		if (fontFamily && fonts.get(fontFamily)) {
 			try {
+				fonts.injectFontFace(fontFamily);
 				await fonts.loadFont(fontFamily);
 			} catch (error) {
 				console.warn(`Failed to load terminal font ${fontFamily}:`, error);
