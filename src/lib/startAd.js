@@ -1,4 +1,3 @@
-import { BannerAd, InterstitialAd } from "plugins/admob/esm";
 import config from "./config";
 
 export let adUnitIdBanner = "ca-app-pub-5911839694379275/9157899592"; // Production
@@ -6,9 +5,9 @@ export let adUnitIdInterstitial = "ca-app-pub-5911839694379275/9570937608"; // P
 export let adUnitIdRewarded = "ca-app-pub-5911839694379275/1633667633"; // Production
 export let initialized = false;
 
-/** @type {BannerAd} */
+/** @type {import("plugins/admob/esm").BannerAd} */
 export let bannerAd = null;
-/** @type {InterstitialAd} */
+/** @type {import("plugins/admob/esm").InterstitialAd} */
 export let interstitialAd = null;
 
 export default async function startAd() {
