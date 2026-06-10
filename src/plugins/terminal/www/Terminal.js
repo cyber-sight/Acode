@@ -33,7 +33,6 @@ const Terminal = {
                 let lastError = "";
 
                 Executor.start("sh", (type, data) => {
-                    console.log(`[AXS] ${type}: ${data}`);
                     logger(`${type} ${data}`);
 
                     if (type === "stderr" && data) {
@@ -61,7 +60,6 @@ const Terminal = {
             });
         } else {
             Executor.start("sh", (type, data) => {
-                console.log(`[AXS] ${type}: ${data}`);
                 logger(`${type} ${data}`);
             }).then(async (uuid) => {
                 await Executor.write(uuid, `source ${filesDir}/init-sandbox.sh ${installing ? "--installing" : ""} ${failsafeArg}; exit`);
