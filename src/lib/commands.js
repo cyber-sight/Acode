@@ -1,4 +1,5 @@
 import fsOperation from "fileSystem";
+import { selectAll } from "@codemirror/commands";
 import Sidebar from "components/sidebar";
 import { TerminalManager } from "components/terminal";
 import color from "dialogs/color";
@@ -7,9 +8,11 @@ import prompt from "dialogs/prompt";
 import select from "dialogs/select";
 import actions from "handlers/quickTools";
 import recents from "lib/recents";
+import About from "pages/about";
 import FileBrowser from "pages/fileBrowser";
 import plugins from "pages/plugins";
 import Problems from "pages/problems/problems";
+import openWelcomeTab from "pages/welcome/welcome";
 import changeEncoding from "palettes/changeEncoding";
 import changeMode from "palettes/changeMode";
 import changeTheme from "palettes/changeTheme";
@@ -18,11 +21,12 @@ import findFile from "palettes/findFile";
 import browser from "plugins/browser";
 import help from "settings/helpSettings";
 import mainSettings from "settings/mainSettings";
+import { runAllTests } from "test/tester";
 import { getColorRange } from "utils/color/regex";
 import helpers from "utils/helpers";
 import Url from "utils/Url";
 import checkFiles from "./checkFiles";
-import constants from "./constants";
+import config from "./config";
 import EditorFile from "./editorFile";
 import openFile from "./openFile";
 import openFolder from "./openFolder";
@@ -31,50 +35,125 @@ import saveState from "./saveState";
 import appSettings from "./settings";
 import showFileInfo from "./showFileInfo";
 
-export default {
-	async "close-all-tabs"() {
-		let save = false;
-		const unsavedFiles = editorManager.files.filter(
-			(file) => file.isUnsaved,
-		).length;
-		if (unsavedFiles) {
-			const confirmation = await confirm(
-				strings["warning"],
-				strings["unsaved files warning"],
-			);
-			if (!confirmation) return;
-			const option = await select(strings["select"], [
-				["save", strings["save all"]],
-				["close", strings["close all"]],
-				["cancel", strings["cancel"]],
-			]);
-			if (option === "cancel") return;
+function getTabCloseSelectionOptions() {
+	return {
+		unsavedWarning:
+			strings["unsaved selected tabs warning"] ||
+			"Some selected tabs are not saved. Choose what to do.",
+		saveLabel: strings["save selected tabs"] || "Save selected tabs",
+		closeLabel: strings["close selected tabs"] || "Close selected tabs",
+		saveWarning:
+			strings["save selected tabs warning"] ||
+			"Are you sure you want to save and close the selected tabs?",
+		closeWarning:
+			strings["close selected tabs warning"] ||
+			"Are you sure you want to close the selected tabs? You will lose the unsaved changes and this action cannot be reversed.",
+	};
+}
 
-			if (option === "save") {
-				const doSave = await confirm(
-					strings["warning"],
-					strings["save all warning"],
-				);
-				if (!doSave) return;
-				save = true;
-			} else {
-				const doClose = await confirm(
-					strings["warning"],
-					strings["close all warning"],
-				);
-				if (!doClose) return;
-			}
+function resolveReferenceFile(referenceFile) {
+	const { activeFile, getFile } = editorManager;
+
+	if (!referenceFile) return activeFile;
+	if (typeof referenceFile === "string") {
+		return getFile(referenceFile, "id") || activeFile;
+	}
+	if (referenceFile?.id) {
+		return getFile(referenceFile.id, "id") || referenceFile;
+	}
+
+	return referenceFile;
+}
+
+function getTabsRelativeToFile(side, referenceFile) {
+	const { files } = editorManager;
+	const file = resolveReferenceFile(referenceFile);
+	const activeIndex = files.indexOf(file);
+
+	if (activeIndex === -1) return [];
+
+	switch (side) {
+		case "left":
+			return files.slice(0, activeIndex);
+		case "right":
+			return files.slice(activeIndex + 1);
+		case "others":
+			return files.filter((_, index) => index !== activeIndex);
+		default:
+			return [];
+	}
+}
+
+async function closeTabs(files, options = {}) {
+	const closableFiles = files.filter((file) => file && !file.pinned);
+	if (!closableFiles.length) return false;
+
+	const {
+		unsavedWarning = strings["unsaved files warning"],
+		saveLabel = strings["save all"],
+		closeLabel = strings["close all"],
+		saveWarning = strings["save all warning"],
+		closeWarning = strings["close all warning"],
+	} = options;
+
+	let save = false;
+	const unsavedFiles = closableFiles.filter((file) => file.isUnsaved).length;
+	if (unsavedFiles) {
+		const confirmation = await confirm(strings["warning"], unsavedWarning);
+		if (!confirmation) return false;
+
+		const option = await select(strings["select"], [
+			["save", saveLabel],
+			["close", closeLabel],
+			["cancel", strings["cancel"]],
+		]);
+		if (option === "cancel") return false;
+
+		if (option === "save") {
+			const doSave = await confirm(strings["warning"], saveWarning);
+			if (!doSave) return false;
+			save = true;
+		} else {
+			const doClose = await confirm(strings["warning"], closeWarning);
+			if (!doClose) return false;
+		}
+	}
+
+	for (const file of [...closableFiles]) {
+		if (save) {
+			await file.save();
 		}
 
-		editorManager.files.forEach(async (file) => {
-			if (save) {
-				await file.save();
-				file.remove();
-				return;
-			}
+		await file.remove(true, { silentPinned: true });
+	}
 
-			file.remove(true);
-		});
+	return true;
+}
+
+export default {
+	async "run-tests"() {
+		await runAllTests();
+	},
+	async "close-all-tabs"() {
+		await closeTabs(editorManager.files);
+	},
+	async "close-tabs-to-left"(referenceFile) {
+		await closeTabs(
+			getTabsRelativeToFile("left", referenceFile),
+			getTabCloseSelectionOptions(),
+		);
+	},
+	async "close-tabs-to-right"(referenceFile) {
+		await closeTabs(
+			getTabsRelativeToFile("right", referenceFile),
+			getTabCloseSelectionOptions(),
+		);
+	},
+	async "close-other-tabs"(referenceFile) {
+		await closeTabs(
+			getTabsRelativeToFile("others", referenceFile),
+			getTabCloseSelectionOptions(),
+		);
 	},
 	async "save-all-changes"() {
 		const doSave = await confirm(
@@ -89,6 +168,9 @@ export default {
 	},
 	"close-current-tab"() {
 		editorManager.activeFile.remove();
+	},
+	"toggle-pin-tab"(referenceFile) {
+		resolveReferenceFile(referenceFile)?.togglePinned?.();
 	},
 	console() {
 		run(true, "inapp");
@@ -132,21 +214,21 @@ export default {
 		showFileInfo(url);
 	},
 	async goto() {
-		const res = await prompt(strings["enter line number"], "", "number", {
+		const lastLine = editorManager.editor?.state?.doc?.lines;
+		const message = lastLine
+			? `${strings["enter line number"]} (1..${lastLine})`
+			: strings["enter line number"];
+		const res = await prompt(message, "", "number", {
 			placeholder: "line.column",
 		});
 
 		if (!res) return;
-
-		const [line, col] = `${res}`.split(".");
-		const editor = editorManager.editor;
-
-		editor.focus();
-		editor.gotoLine(line, col, true);
+		const [lineStr, colStr] = String(res).split(".");
+		editorManager.editor.gotoLine(lineStr, colStr);
 	},
 	async "new-file"() {
 		let filename = await prompt(strings["enter file name"], "", "filename", {
-			match: constants.FILE_NAME_REGEX,
+			match: config.FILE_NAME_REGEX,
 			required: true,
 		});
 
@@ -188,22 +270,26 @@ export default {
 				FileBrowser();
 				break;
 
+			case "about":
+				About();
+				break;
+
 			default:
 				return;
 		}
-		editorManager.editor.blur();
+		editorManager.editor.contentDOM.blur();
 	},
 	"open-with"() {
 		editorManager.activeFile.openWith();
 	},
 	"open-file"() {
-		editorManager.editor.blur();
+		editorManager.editor.contentDOM.blur();
 		FileBrowser("file")
 			.then(FileBrowser.openFile)
 			.catch(FileBrowser.openFileError);
 	},
 	"open-folder"() {
-		editorManager.editor.blur();
+		editorManager.editor.contentDOM.blur();
 		FileBrowser("folder")
 			.then(FileBrowser.openFolder)
 			.catch(FileBrowser.openFolderError);
@@ -241,7 +327,8 @@ export default {
 		this.find();
 	},
 	"resize-editor"() {
-		editorManager.editor.resize(true);
+		// TODO : Codemirror
+		//editorManager.editor.resize(true);
 	},
 	"open-inapp-browser"(url) {
 		browser.open(url);
@@ -280,6 +367,60 @@ export default {
 	share() {
 		editorManager.activeFile.share();
 	},
+	async "pin-file-shortcut"() {
+		const file = editorManager.activeFile;
+		if (!file?.uri) {
+			toast(strings["save file before home shortcut"]);
+			return;
+		}
+
+		if (typeof system?.pinFileShortcut !== "function") {
+			toast(strings["pin shortcuts not supported"]);
+			return;
+		}
+
+		const { uri, filename } = file;
+		const label = filename;
+		const description = filename;
+
+		let id = uri.replace(/[^a-zA-Z0-9]/g, "").toLowerCase();
+		if (!id) {
+			id = helpers.uuid();
+		}
+		if (id.length > 40) {
+			id = id.slice(-40);
+		}
+		id = `file-${id}`;
+
+		const shortcut = {
+			id,
+			label,
+			description,
+			uri,
+		};
+
+		const requestShortcut = new Promise((resolve, reject) => {
+			system.pinFileShortcut(
+				shortcut,
+				() => resolve(true),
+				(err) => reject(err),
+			);
+		});
+
+		try {
+			await requestShortcut;
+			toast(strings["shortcut request sent"]);
+		} catch (error) {
+			if (
+				typeof error === "string" &&
+				error.toLowerCase().includes("not supported")
+			) {
+				toast(strings["pin shortcuts not supported"]);
+				return;
+			}
+			helpers.error(error);
+		}
+	},
 	syntax() {
 		changeMode();
 	},
@@ -305,9 +446,17 @@ export default {
 	async "insert-color"() {
 		const { editor } = editorManager;
 		const range = getColorRange();
-		let defaultColor = range ? editor.session.getTextRange(range) : "";
+		let defaultColor = "";
 
-		editor.blur();
+		if (range) {
+			try {
+				defaultColor = editor.state.doc.sliceString(range.from, range.to);
+			} catch (_) {
+				defaultColor = "";
+			}
+		}
+
+		editor.contentDOM.blur();
 		const wasFocused = editorManager.activeFile.focused;
 		const res = await color(defaultColor, () => {
 			if (wasFocused) {
@@ -316,7 +465,9 @@ export default {
 		});
 
 		if (range) {
-			editor.session.replace(range, res);
+			editor.dispatch({
+				changes: { from: range.from, to: range.to, insert: res },
+			});
 			return;
 		}
 		editor.insert(res);
@@ -332,19 +483,18 @@ export default {
 	},
 	"select-all"() {
 		const { editor } = editorManager;
-		editor.execCommand("selectall");
-		editor.scrollToRow(Number.POSITIVE_INFINITY);
+		selectAll(editor);
 	},
 	async rename(file) {
 		file = file || editorManager.activeFile;
 
-		if (file.mode === "single") {
+		if (file.SAFMode === "single") {
 			alert(strings.info.toUpperCase(), strings["unable to rename"]);
 			return;
 		}
 
 		let newname = await prompt(strings.rename, file.filename, "filename", {
-			match: constants.FILE_NAME_REGEX,
+			match: config.FILE_NAME_REGEX,
 			capitalize: false,
 		});
 
@@ -385,8 +535,11 @@ export default {
 		const { editor } = editorManager;
 		const pos = editor.getCursorPosition();
 
-		await acode.format(selectIfNull);
-		editor.selection.moveCursorToPosition(pos);
+		const didFormat = await acode.format(selectIfNull);
+		if (didFormat) {
+			// Restore cursor position after formatting (pos.row is now 1-based)
+			editor.gotoLine(pos.row, pos.column);
+		}
 	},
 	async eol() {
 		const eol = await select(strings["new line mode"], ["unix", "windows"], {
@@ -395,7 +548,7 @@ export default {
 		editorManager.activeFile.eol = eol;
 	},
 	"open-log-file"() {
-		openFile(Url.join(DATA_STORAGE, constants.LOG_FILE_NAME));
+		openFile(Url.join(DATA_STORAGE, config.LOG_FILE_NAME));
 	},
 	"copy-device-info"() {
 		let webviewInfo = {};
@@ -473,5 +626,20 @@ Additional Info:
 			console.error("Failed to create terminal:", error);
 			window.toast("Failed to create terminal");
 		}
+	},
+	welcome() {
+		openWelcomeTab();
+	},
+	async "toggle-inspector"() {
+		const devTools = (await import("lib/devTools")).default;
+		devTools.toggle();
+	},
+	async "open-inspector"() {
+		const devTools = (await import("lib/devTools")).default;
+		devTools.show();
+	},
+	async "lsp-info"() {
+		const { showLspInfoDialog } = await import("components/lspInfoDialog");
+		showLspInfoDialog();
 	},
 };

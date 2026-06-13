@@ -6,6 +6,7 @@ import multiPrompt from "dialogs/multiPrompt";
 import URLParse from "url-parse";
 import helpers from "utils/helpers";
 import Url from "utils/Url";
+import { interstitialAd } from "./startAd";
 
 export default {
 	/**
@@ -65,9 +66,7 @@ export default {
 				res.home = home;
 			}
 			loader.destroy();
-			if (IS_FREE_VERSION && (await window.iad?.isLoaded())) {
-				window.iad.show();
-			}
+			await helpers.showInterstitialIfReady();
 			return res;
 		} catch (err) {
 			if (stopConnection) {
@@ -232,9 +231,7 @@ export default {
 				},
 			});
 			loader.destroy();
-			if (IS_FREE_VERSION && (await window.iad?.isLoaded())) {
-				window.iad.show();
-			}
+			await helpers.showInterstitialIfReady();
 			return {
 				alias,
 				name: alias,
@@ -428,11 +425,13 @@ export default {
 };
 
 async function loadAd() {
-	if (!IS_FREE_VERSION) return;
+	if (!helpers.canShowAds()) return;
 	try {
-		if (!(await window.iad?.isLoaded())) {
+		if (!(await interstitialAd?.isLoaded())) {
 			toast(strings.loading);
-			await window.iad.load();
+			await interstitialAd?.load();
 		}
-	} catch (error) {}
+	} catch (error) {
+		console.warn("Failed to load interstitial ad.", error);
+	}
 }

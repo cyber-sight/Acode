@@ -1,17 +1,17 @@
 import "./style.scss";
-
 import fsOperation from "fileSystem";
-import ajax from "@deadlyjack/ajax";
 import collapsableList from "components/collapsableList";
 import Sidebar from "components/sidebar";
 import alert from "dialogs/alert";
 import prompt from "dialogs/prompt";
 import select from "dialogs/select";
 import purchaseListener from "handlers/purchase";
-import constants from "lib/constants";
+import auth from "lib/auth";
+import config from "lib/config";
 import InstallState from "lib/installState";
 import loadPlugin from "lib/loadPlugin";
 import settings from "lib/settings";
+import { interstitialAd } from "lib/startAd";
 import FileBrowser from "pages/fileBrowser";
 import plugin from "pages/plugin";
 import helpers from "utils/helpers";
@@ -34,6 +34,11 @@ let currentFilter = null;
 let filterHasMore = true;
 let isFilterLoading = false;
 
+function withSupportedEditor(url) {
+	const separator = url.includes("?") ? "&" : "?";
+	return `${url}${separator}supported_editor=${config.SUPPORTED_EDITOR}`;
+}
+
 const $header = (
 	<div className="header">
 		<div className="title">
@@ -42,7 +47,11 @@ const $header = (
 				<button type="button" className="icon-button" onclick={filterPlugins}>
 					<span className="icon tune" />
 				</button>
-				<button type="button" className="icon-button" onclick={addSource}>
+				<button
+					type="button"
+					className="icon-button"
+					onclick={() => addSource()}
+				>
 					<span className="icon add" />
 				</button>
 			</div>
@@ -140,7 +149,9 @@ async function loadMorePlugins() {
 		startLoading($explore);
 
 		const response = await fetch(
-			`${constants.API_BASE}/plugins?page=${currentPage}&limit=${LIMIT}`,
+			withSupportedEditor(
+				`${config.API_BASE}/plugins?page=${currentPage}&limit=${LIMIT}`,
+			),
 		);
 		const newPlugins = await response.json();
 
@@ -210,7 +221,7 @@ async function searchPlugin() {
 		$searchResult.onscroll = null;
 
 		$searchResult.content = "";
-		const status = helpers.checkAPIStatus();
+		const status = await helpers.checkAPIStatus();
 		if (!status) {
 			$searchResult.content = (
 				<span className="error">{strings.api_error}</span>
@@ -224,7 +235,7 @@ async function searchPlugin() {
 		try {
 			$searchResult.classList.add("loading");
 			const plugins = await fsOperation(
-				Url.join(constants.API_BASE, `plugins?name=${query}`),
+				withSupportedEditor(Url.join(config.API_BASE, `plugins?name=${query}`)),
 			).readFile("json");
 
 			installedPlugins = await listInstalledPlugins();
@@ -352,17 +363,19 @@ async function filterPlugins() {
 	}
 }
 
-async function addSource() {
-	const sourceOption = [
-		["remote", strings.remote],
-		["local", strings.local],
-	];
-	const sourceType = await select("Select Source", sourceOption);
+async function addSource(sourceType, value = "https://") {
+	if (!sourceType) {
+		const sourceOption = [
+			["remote", strings.remote],
+			["local", strings.local],
+		];
+		sourceType = await select("Select Source", sourceOption);
+	}
 
 	if (!sourceType) return;
 	let source;
 	if (sourceType === "remote") {
-		source = await prompt("Enter plugin source", "https://", "url");
+		source = await prompt("Enter plugin source", value, "url");
 	} else {
 		source = (await FileBrowser("file", "Select plugin source")).url;
 	}
@@ -399,7 +412,7 @@ async function loadInstalled() {
 async function loadExplore() {
 	if (this.collapsed) return;
 
-	const status = helpers.checkAPIStatus();
+	const status = await helpers.checkAPIStatus();
 	if (!status) {
 		$explore.$ul.content = <span className="error">{strings.api_error}</span>;
 		return;
@@ -411,7 +424,9 @@ async function loadExplore() {
 		hasMore = true;
 
 		const response = await fetch(
-			`${constants.API_BASE}/plugins?page=${currentPage}&limit=${LIMIT}`,
+			withSupportedEditor(
+				`${config.API_BASE}/plugins?page=${currentPage}&limit=${LIMIT}`,
+			),
 		);
 		const plugins = await response.json();
 
@@ -424,6 +439,7 @@ async function loadExplore() {
 		currentPage++;
 		updateHeight($explore);
 	} catch (error) {
+		console.error("Failed to load plugins in sidebar explore:", error);
 		$explore.$ul.content = <span className="error">{strings.error}</span>;
 	} finally {
 		stopLoading($explore);
@@ -434,15 +450,36 @@ async function listInstalledPlugins() {
 	const plugins = await Promise.all(
 		(await fsOperation(PLUGIN_DIR).lsDir()).map(async (item) => {
 			const id = Url.basename(item.url);
-			const url = Url.join(item.url, "plugin.json");
-			const plugin = await fsOperation(url).readFile("json");
-			const iconUrl = getLocalRes(id, plugin.icon);
-			plugin.icon = await helpers.toInternalUri(iconUrl);
-			plugin.installed = true;
-			return plugin;
+
+			try {
+				const url = Url.join(item.url, "plugin.json");
+				const plugin = await fsOperation(url).readFile("json");
+
+				if (plugin.icon) {
+					const iconUrl = getLocalRes(id, plugin.icon);
+					try {
+						plugin.icon = await helpers.toInternalUri(iconUrl);
+					} catch (error) {
+						console.warn(
+							`Failed to resolve plugin icon for "${id}" in sidebar.`,
+							error,
+						);
+					}
+				}
+
+				plugin.installed = true;
+				return plugin;
+			} catch (error) {
+				console.warn(
+					`Skipping unreadable installed plugin "${id}" in sidebar.`,
+					error,
+				);
+				return null;
+			}
 		}),
 	);
-	return plugins;
+
+	return plugins.filter(Boolean);
 }
 
 async function getFilteredPlugins(filterState) {
@@ -454,11 +491,15 @@ async function getFilteredPlugins(filterState) {
 			let response;
 			if (filterState.value === "top_rated") {
 				response = await fetch(
-					`${constants.API_BASE}/plugins?explore=random&page=${page}&limit=${LIMIT}`,
+					withSupportedEditor(
+						`${config.API_BASE}/plugins?explore=random&page=${page}&limit=${LIMIT}`,
+					),
 				);
 			} else {
 				response = await fetch(
-					`${constants.API_BASE}/plugin?orderBy=${filterState.value}&page=${page}&limit=${LIMIT}`,
+					withSupportedEditor(
+						`${config.API_BASE}/plugin?orderBy=${filterState.value}&page=${page}&limit=${LIMIT}`,
+					),
 				);
 			}
 			const items = await response.json();
@@ -497,7 +538,9 @@ async function getFilteredPlugins(filterState) {
 		try {
 			const page = filterState.nextPage;
 			const response = await fetch(
-				`${constants.API_BASE}/plugins?page=${page}&limit=${LIMIT}`,
+				withSupportedEditor(
+					`${config.API_BASE}/plugins?page=${page}&limit=${LIMIT}`,
+				),
 			);
 			const data = await response.json();
 			filterState.nextPage = page + 1;
@@ -666,7 +709,16 @@ function getLocalRes(id, name) {
 	return Url.join(PLUGIN_DIR, id, name);
 }
 
-function ListItem({ icon, name, id, version, downloads, installed, source }) {
+function ListItem({
+	icon,
+	name,
+	id,
+	version,
+	downloads,
+	installed,
+	source,
+	price,
+}) {
 	if (installed === undefined) {
 		installed = !!installedPlugins.find(({ id: _id }) => _id === id);
 	}
@@ -686,20 +738,24 @@ function ListItem({ icon, name, id, version, downloads, installed, source }) {
 			>
 				{name}
 			</span>
-			{installed
-				? <>
-						{source
-							? <span className="icon replay" data-action="rebuild-plugin" />
-							: null}
-						<span className="icon more_vert" data-action="more-plugin-action" />
-					</>
-				: <button
+			{installed ? (
+				<>
+					{source && (
+						<span className="icon replay" data-action="rebuild-plugin" />
+					)}
+					<span className="icon more_vert" data-action="more-plugin-action" />
+				</>
+			) : (
+				!price && (
+					<button
 						type="button"
 						className="install-btn"
 						data-action="install-plugin"
 					>
 						<span className="icon file_downloadget_app" />
-					</button>}
+					</button>
+				)
+			)}
 		</div>
 	);
 
@@ -721,54 +777,12 @@ function ListItem({ icon, name, id, version, downloads, installed, source }) {
 			try {
 				let purchaseToken;
 				let product;
-				const pluginUrl = Url.join(constants.API_BASE, `plugin/${id}`);
+				const pluginUrl = Url.join(config.API_BASE, `plugin/${id}`);
 				const remotePlugin = await fsOperation(pluginUrl)
 					.readFile("json")
 					.catch(() => {
 						throw new Error("Failed to fetch plugin details");
 					});
-
-				const isPaid = remotePlugin.price > 0;
-				if (isPaid) {
-					[product] = await helpers.promisify(iap.getProducts, [
-						remotePlugin.sku,
-					]);
-					if (product) {
-						const purchase = await getPurchase(product.productId);
-						purchaseToken = purchase?.purchaseToken;
-					}
-				}
-
-				if (isPaid && !purchaseToken) {
-					if (!product) throw new Error("Product not found");
-					const apiStatus = await helpers.checkAPIStatus();
-
-					if (!apiStatus) {
-						alert(strings.error, strings.api_error);
-						return;
-					}
-
-					iap.setPurchaseUpdatedListener(
-						...purchaseListener(onpurchase, onerror),
-					);
-					await helpers.promisify(iap.purchase, product.productId);
-
-					async function onpurchase(e) {
-						const purchase = await getPurchase(product.productId);
-						await ajax.post(Url.join(constants.API_BASE, "plugin/order"), {
-							data: {
-								id: remotePlugin.id,
-								token: purchase?.purchaseToken,
-								package: BuildInfo.packageName,
-							},
-						});
-						purchaseToken = purchase?.purchaseToken;
-					}
-
-					async function onerror(error) {
-						throw error;
-					}
-				}
 
 				const { default: installPlugin } = await import("lib/installPlugin");
 				await installPlugin(
@@ -822,7 +836,7 @@ function ListItem({ icon, name, id, version, downloads, installed, source }) {
 		}
 
 		plugin(
-			{ id, installed },
+			{ id },
 			() => {
 				if (!$explore.collapsed) {
 					$explore.ontoggle();
@@ -846,12 +860,12 @@ function ListItem({ icon, name, id, version, downloads, installed, source }) {
 }
 
 async function loadAd(el) {
-	if (!IS_FREE_VERSION) return;
+	if (!helpers.canShowAds()) return;
 	try {
-		if (!(await window.iad?.isLoaded())) {
+		if (!(await interstitialAd?.isLoaded())) {
 			const oldText = el.textContent;
 			el.textContent = strings["loading..."];
-			await window.iad.load();
+			await interstitialAd?.load();
 			el.textContent = oldText;
 		}
 	} catch (error) {
@@ -868,6 +882,8 @@ async function uninstall(id) {
 			fsOperation(pluginDir).delete(),
 			state.delete(state.storeUrl),
 		]);
+		const pluginMainScript = document.getElementById(`${id}-mainScript`);
+		if (pluginMainScript) document.head.removeChild(pluginMainScript);
 		acode.unmountPlugin(id);
 
 		const searchInput = container.querySelector('input[name="search-ext"]');
@@ -886,9 +902,7 @@ async function uninstall(id) {
 		}
 
 		// Show Ad If Its Free Version, interstitial Ad(iad) is loaded.
-		if (IS_FREE_VERSION && (await window.iad?.isLoaded())) {
-			window.iad.show();
-		}
+		await helpers.showInterstitialIfReady();
 	} catch (err) {
 		helpers.error(err);
 	}

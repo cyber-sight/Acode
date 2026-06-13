@@ -4,7 +4,7 @@ import toast from "components/toast";
 import alert from "dialogs/alert";
 import confirm from "dialogs/confirm";
 import loader from "dialogs/loader";
-import constants from "lib/constants";
+import config from "lib/config";
 import appSettings from "lib/settings";
 import FileBrowser from "pages/fileBrowser";
 import helpers from "utils/helpers";
@@ -142,18 +142,25 @@ function backupRestore() {
 			key: "backup",
 			text: strings.backup.capitalize(),
 			icon: "file_downloadget_app",
+			chevron: true,
 		},
 		{
 			key: "restore",
 			text: strings.restore.capitalize(),
 			icon: "historyrestore",
+			chevron: true,
 		},
 		{
 			note: strings["backup/restore note"],
 		},
 	];
 
-	return settingsPage(title, items, callback);
+	return settingsPage(title, items, callback, undefined, {
+		preserveOrder: true,
+		pageClassName: "detail-settings-page",
+		listClassName: "detail-settings-list",
+		groupByDefault: true,
+	});
 
 	function callback(key) {
 		switch (key) {
@@ -512,7 +519,7 @@ backupRestore.restore = async function (url) {
 						}
 					} else {
 						// Remote plugin case - fetch from API
-						const pluginUrl = Url.join(constants.API_BASE, `plugin/${id}`);
+						const pluginUrl = Url.join(config.API_BASE, `plugin/${id}`);
 						let remotePlugin = null;
 
 						try {

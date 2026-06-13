@@ -1,7 +1,7 @@
 import actions from "../handlers/quickTools";
 import appSettings from "../lib/settings";
 import themes from "../theme/list";
-import constants from "./constants";
+import config from "./config";
 import fonts from "./fonts";
 
 export default {
@@ -18,11 +18,14 @@ export default {
 		app.addEventListener("click", function (e) {
 			const $target = e.target;
 			if ($target.hasAttribute("vibrate") && appSettings.value.vibrateOnTap) {
-				navigator.vibrate(constants.VIBRATION_TIME);
+				navigator.vibrate(config.VIBRATION_TIME);
 			}
 		});
 
 		system.setInputType(appSettings.value.keyboardMode);
+		appSettings.applyUiZoomSetting();
+		// Keep native context menu enabled globally; editor manager scopes disabling to CodeMirror focus.
+		system.setNativeContextMenuDisabled(false);
 	},
 	afterRender() {
 		const { value: settings } = appSettings;
@@ -31,7 +34,8 @@ export default {
 		}
 
 		actions("set-height", settings.quickTools);
-		fonts.setFont(settings.editorFont);
+		fonts.setAppFont(settings.appFont);
+		fonts.setEditorFont(settings.editorFont);
 		if (!themes.applied) {
 			themes.apply("dark");
 		}

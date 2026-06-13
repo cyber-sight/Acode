@@ -1,5 +1,5 @@
 import settingsPage from "components/settingsPage";
-import constants from "lib/constants";
+import config from "lib/config";
 import appSettings from "lib/settings";
 
 export default function scrollSettings() {
@@ -7,7 +7,7 @@ export default function scrollSettings() {
 	const title = strings["scroll settings"];
 
 	const items = [
-		{
+		/*{
 			key: "scrollSpeed",
 			text: strings["scroll speed"],
 			value: values.scrollSpeed,
@@ -18,17 +18,17 @@ export default function scrollSettings() {
 				[constants.SCROLL_SPEED_NORMAL, strings.normal],
 				[constants.SCROLL_SPEED_SLOW, strings.slow],
 			],
-		},
-		{
+		},*/
+		/*{
 			key: "reverseScrolling",
 			text: strings["reverse scrolling"],
 			checkbox: values.reverseScrolling,
-		},
-		{
+		},*/
+		/*{
 			key: "diagonalScrolling",
 			text: strings["diagonal scrolling"],
 			checkbox: values.diagonalScrolling,
-		},
+		},*/
 		{
 			key: "scrollbarSize",
 			text: strings["scrollbar size"],
@@ -38,7 +38,14 @@ export default function scrollSettings() {
 		},
 	];
 
-	return settingsPage(title, items, callback);
+	return settingsPage(title, items, callback, undefined, {
+		preserveOrder: true,
+		pageClassName: "detail-settings-page",
+		listClassName: "detail-settings-list",
+		infoAsDescription: true,
+		valueInTail: true,
+		groupByDefault: true,
+	});
 
 	function callback(key, value) {
 		appSettings.update({
@@ -49,13 +56,13 @@ export default function scrollSettings() {
 
 function getScrollSpeedString(speed) {
 	switch (speed) {
-		case constants.SCROLL_SPEED_FAST:
+		case config.SCROLL_SPEED_FAST:
 			return strings.fast;
-		case constants.SCROLL_SPEED_SLOW:
+		case config.SCROLL_SPEED_SLOW:
 			return strings.slow;
-		case constants.SCROLL_SPEED_FAST_X2:
+		case config.SCROLL_SPEED_FAST_X2:
 			return `${strings.fast} x2`;
-		case constants.SCROLL_SPEED_NORMAL:
+		case config.SCROLL_SPEED_NORMAL:
 			return strings.normal;
 		default:
 			return strings.normal;

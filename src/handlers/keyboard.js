@@ -1,3 +1,4 @@
+import { bannerAd } from "lib/startAd";
 import {
 	getSystemConfiguration,
 	HARDKEYBOARDHIDDEN_NO,
@@ -56,13 +57,20 @@ export default function keyboardHandler(e) {
 	const $target = e.target;
 	const { key, ctrlKey, shiftKey, altKey, metaKey } = e;
 
-	if ($target instanceof HTMLTextAreaElement) {
+	if (shouldIgnoreEditorShortcutTarget($target)) {
 		keydownState.esc = key === "Escape";
 		return;
 	}
 
 	if (!ctrlKey && !shiftKey && !altKey && !metaKey) return;
 	if (["Control", "Alt", "Meta", "Shift"].includes(key)) return;
+
+	const target = editorManager?.editor?.contentDOM;
+	if (!target) return;
+
+	// Physical keyboard events already reaching CodeMirror should not be
+	// re-dispatched from the document listener.
+	if ($target === target || (target.contains?.($target) ?? false)) return;
 
 	const event = KeyboardEvent("keydown", {
 		key,
@@ -71,58 +79,79 @@ export default function keyboardHandler(e) {
 		altKey,
 		metaKey,
 	});
-	const editor = editorManager.editor.textInput.getElement();
-	editor.dispatchEvent(event);
+	target?.dispatchEvent?.(event);
 }
 
-document.addEventListener("admob.banner.size", async (event) => {
-	const { height } = event.size;
-	MIN_KEYBOARD_HEIGHT = height + 10;
-});
+/**
+ * Returns true when a keyboard event target should keep the shortcut local
+ * instead of forwarding it into the editor.
+ * @param {EventTarget | null} target
+ * @returns {boolean}
+ */
+function shouldIgnoreEditorShortcutTarget(target) {
+	if (!(target instanceof Element)) return false;
 
-windowResize.on("resizeStart", async () => {
-	const { keyboardHeight, hardKeyboardHidden } = await getSystemConfiguration();
-	const externalKeyboard = hardKeyboardHidden === HARDKEYBOARDHIDDEN_NO;
+	return (
+		target instanceof HTMLInputElement ||
+		target instanceof HTMLTextAreaElement ||
+		target instanceof HTMLSelectElement ||
+		target.isContentEditable ||
+		!!target.closest(".prompt, #palette")
+	);
+}
 
-	if (currentWindowHeight > window.innerHeight) {
-		// height decreasing
-		softKeyboardHeight =
-			keyboardHeight > MIN_KEYBOARD_HEIGHT ? keyboardHeight : 0;
-		if (!externalKeyboard && softKeyboardHeight) {
-			emit("keyboardShowStart");
+document.addEventListener("deviceready", () => {
+	document.addEventListener("admob.banner.size", async (event) => {
+		const { height } = event.size;
+		MIN_KEYBOARD_HEIGHT = height + 10;
+	});
+
+	windowResize.on("resizeStart", async () => {
+		const { keyboardHeight, hardKeyboardHidden } =
+			await getSystemConfiguration();
+		const externalKeyboard = hardKeyboardHidden === HARDKEYBOARDHIDDEN_NO;
+
+		if (currentWindowHeight > window.innerHeight) {
+			// height decreasing
+			softKeyboardHeight =
+				keyboardHeight > MIN_KEYBOARD_HEIGHT ? keyboardHeight : 0;
+			if (!externalKeyboard && softKeyboardHeight) {
+				toggleBannerAd(false);
+				emit("keyboardShowStart");
+			}
+		} else if (currentWindowHeight < window.innerHeight) {
+			// height increasing
+			if (!externalKeyboard && softKeyboardHeight) {
+				toggleBannerAd(true);
+				emit("keyboardHideStart");
+			}
 		}
-	} else if (currentWindowHeight < window.innerHeight) {
-		// height increasing
-		if (!externalKeyboard && softKeyboardHeight) {
-			emit("keyboardHideStart");
+
+		currentWindowHeight = window.innerHeight;
+	});
+
+	windowResize.on("resize", async () => {
+		currentWindowHeight = window.innerHeight;
+
+		if (currentWindowHeight > windowHeight) {
+			windowHeight = currentWindowHeight;
 		}
-	}
 
-	currentWindowHeight = window.innerHeight;
-});
+		const { hardKeyboardHidden } = await getSystemConfiguration();
+		const externalKeyboard = hardKeyboardHidden === HARDKEYBOARDHIDDEN_NO;
 
-windowResize.on("resize", async () => {
-	currentWindowHeight = window.innerHeight;
+		if (externalKeyboard || !softKeyboardHeight) return;
 
-	if (currentWindowHeight > windowHeight) {
-		windowHeight = currentWindowHeight;
-	}
+		const keyboardHiddenYes = windowHeight <= window.innerHeight;
 
-	const { hardKeyboardHidden } = await getSystemConfiguration();
-	const externalKeyboard = hardKeyboardHidden === HARDKEYBOARDHIDDEN_NO;
+		if (keyboardHiddenYes) {
+			emit("keyboardHide");
+		} else {
+			emit("keyboardShow");
+		}
 
-	if (externalKeyboard || !softKeyboardHeight) return;
-
-	const keyboardHiddenYes = windowHeight <= window.innerHeight;
-
-	if (keyboardHiddenYes) {
-		emit("keyboardHide");
-	} else {
-		emit("keyboardShow");
-	}
-
-	focusBlurEditor(keyboardHiddenYes);
-	showHideAd(keyboardHiddenYes);
+		focusBlurEditor(keyboardHiddenYes);
+	});
 });
 
 /**
@@ -172,12 +201,16 @@ function focusBlurEditor(keyboardHidden) {
  * Show ad if keyboard is hidden and ad is active, hide ad otherwise.
  * @param {boolean} keyboardHidden
  */
-function showHideAd(keyboardHidden) {
-	const bannerIsActive = !!window.ad?.active;
+function toggleBannerAd(keyboardHidden) {
+	const bannerIsActive = !!bannerAd?.active;
 
-	if (!keyboardHidden && bannerIsActive) {
-		window.ad?.hide();
-	} else if (bannerIsActive) {
-		window.ad?.show();
+	if (
+		!keyboardHidden &&
+		bannerIsActive &&
+		typeof bannerAd?.hide === "function"
+	) {
+		bannerAd.hide();
+	} else if (bannerIsActive && typeof bannerAd?.show === "function") {
+		bannerAd.show();
 	}
 }

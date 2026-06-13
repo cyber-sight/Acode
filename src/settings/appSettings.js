@@ -1,11 +1,12 @@
 import fsOperation from "fileSystem";
-import ajax from "@deadlyjack/ajax";
-import { resetKeyBindings } from "ace/commands";
+import { resetKeyBindings } from "cm/commandRegistry";
 import settingsPage from "components/settingsPage";
 import loader from "dialogs/loader";
+import select from "dialogs/select";
 import actions from "handlers/quickTools";
 import actionStack from "lib/actionStack";
-import constants from "lib/constants";
+import config from "lib/config";
+import fonts from "lib/fonts";
 import lang from "lib/lang";
 import openFile from "lib/openFile";
 import appSettings from "lib/settings";
@@ -18,11 +19,26 @@ import Url from "utils/Url";
 export default function otherSettings() {
 	const values = appSettings.value;
 	const title = strings["app settings"].capitalize();
+	const appFontText = strings["app font"] || "App font";
+	const appFontInfo =
+		strings["settings-info-app-font-family"] ||
+		"Choose the font used across the app interface.";
+	const defaultFontLabel = strings.default || "Default";
+	const categories = {
+		interface: strings["settings-category-interface"],
+		fonts: strings["settings-category-fonts"],
+		filesSessions: strings["settings-category-files-sessions"],
+		advanced: strings["settings-category-advanced"],
+	};
 	const items = [
 		{
-			key: "retryRemoteFsAfterFail",
-			text: strings["retry ftp/sftp when fail"],
-			checkbox: values.retryRemoteFsAfterFail,
+			key: "lang",
+			text: strings["change language"],
+			value: values.lang,
+			select: lang.list,
+			valueText: (value) => lang.getName(value),
+			info: strings["settings-info-app-language"],
+			category: categories.interface,
 		},
 		{
 			key: "animation",
@@ -34,52 +50,34 @@ export default function otherSettings() {
 				["yes", strings.yes],
 				["system", strings.system],
 			],
+			info: strings["settings-info-app-animation"],
+			category: categories.interface,
 		},
 		{
 			key: "fullscreen",
 			text: strings.fullscreen.capitalize(),
 			checkbox: values.fullscreen,
+			info: strings["settings-info-app-fullscreen"],
+			category: categories.interface,
 		},
 		{
-			key: "lang",
-			text: strings["change language"],
-			value: values.lang,
-			select: lang.list,
-			valueText: (value) => lang.getName(value),
-		},
-		{
-			key: "keybindings",
-			text: strings["key bindings"],
-			select: [
-				["edit", strings.edit],
-				["reset", strings.reset],
-			],
-		},
-		{
-			key: "confirmOnExit",
-			text: strings["confirm on exit"],
-			checkbox: values.confirmOnExit,
-		},
-		{
-			key: "checkFiles",
-			text: strings["check file changes"],
-			checkbox: values.checkFiles,
-		},
-		{
-			key: "checkForAppUpdates",
-			text: strings["check for app updates"],
-			checkbox: values.checkForAppUpdates,
-			info: strings["info-checkForAppUpdates"],
-		},
-		{
-			key: "console",
-			text: strings.console,
-			value: values.console,
-			select: [appSettings.CONSOLE_LEGACY, appSettings.CONSOLE_ERUDA],
-		},
-		{
-			key: "cleanInstallState",
-			text: strings["clean install state"],
+			key: "uiZoom",
+			text: strings["ui zoom"] || "UI zoom",
+			value: values.uiZoom,
+			valueText: (value) => `${value}%`,
+			prompt: strings["ui zoom"] || "UI zoom",
+			promptType: "number",
+			promptOptions: {
+				test(value) {
+					if (!/^\d+$/.test(String(value).trim())) return false;
+					const zoom = Number(value);
+					return zoom >= 70 && zoom <= 160;
+				},
+			},
+			info:
+				strings["settings-info-app-ui-zoom"] ||
+				"Scale text across the Acode interface.",
+			category: categories.interface,
 		},
 		{
 			key: "keyboardMode",
@@ -96,26 +94,36 @@ export default function otherSettings() {
 					strings["no suggestions aggressive"],
 				],
 			],
+			info: strings["settings-info-app-keyboard-mode"],
+			category: categories.interface,
 		},
 		{
 			key: "vibrateOnTap",
 			text: strings["vibrate on tap"],
 			checkbox: values.vibrateOnTap,
-		},
-		{
-			key: "rememberFiles",
-			text: strings["remember opened files"],
-			checkbox: values.rememberFiles,
-		},
-		{
-			key: "rememberFolders",
-			text: strings["remember opened folders"],
-			checkbox: values.rememberFolders,
+			info: strings["settings-info-app-vibrate-on-tap"],
+			category: categories.interface,
 		},
 		{
 			key: "floatingButton",
 			text: strings["floating button"],
 			checkbox: values.floatingButton,
+			info: strings["settings-info-app-floating-button"],
+			category: categories.interface,
+		},
+		{
+			key: "showSideButtons",
+			text: strings["show side buttons"],
+			checkbox: values.showSideButtons,
+			info: strings["settings-info-app-side-buttons"],
+			category: categories.interface,
+		},
+		{
+			key: "showSponsorSidebarApp",
+			text: `${strings.sponsor} (${strings.sidebar})`,
+			checkbox: values.showSponsorSidebarApp,
+			info: strings["settings-info-app-sponsor-sidebar"],
+			category: categories.interface,
 		},
 		{
 			key: "openFileListPos",
@@ -127,12 +135,15 @@ export default function otherSettings() {
 				[appSettings.OPEN_FILE_LIST_POS_HEADER, strings.header],
 				[appSettings.OPEN_FILE_LIST_POS_BOTTOM, strings.bottom],
 			],
+			info: strings["settings-info-app-open-file-list-position"],
+			category: categories.interface,
 		},
 		{
 			key: "quickTools",
 			text: strings["quick tools"],
 			checkbox: !!values.quickTools,
 			info: strings["info-quickTools"],
+			category: categories.interface,
 		},
 		{
 			key: "quickToolsTriggerMode",
@@ -142,6 +153,15 @@ export default function otherSettings() {
 				[appSettings.QUICKTOOLS_TRIGGER_MODE_CLICK, "click"],
 				[appSettings.QUICKTOOLS_TRIGGER_MODE_TOUCH, "touch"],
 			],
+			info: strings["settings-info-app-quick-tools-trigger-mode"],
+			category: categories.interface,
+		},
+		{
+			key: "quickToolsSettings",
+			text: strings["shortcut buttons"],
+			info: strings["settings-info-app-quick-tools-settings"],
+			category: categories.interface,
+			chevron: true,
 		},
 		{
 			key: "touchMoveThreshold",
@@ -154,21 +174,47 @@ export default function otherSettings() {
 					return value >= 0;
 				},
 			},
+			info: strings["settings-info-app-touch-move-threshold"],
+			category: categories.interface,
 		},
 		{
-			key: "quickToolsSettings",
-			text: strings["shortcut buttons"],
-			index: 0,
+			key: "appFont",
+			text: appFontText,
+			value: values.appFont || "",
+			valueText: (value) => value || defaultFontLabel,
+			get select() {
+				return [["", defaultFontLabel], ...fonts.getNames()];
+			},
+			info: appFontInfo,
+			category: categories.fonts,
 		},
 		{
 			key: "fontManager",
 			text: strings["fonts"],
-			index: 1,
+			info: strings["settings-info-app-font-manager"],
+			category: categories.fonts,
+			chevron: true,
 		},
 		{
-			key: "showSideButtons",
-			text: strings["show side buttons"],
-			checkbox: values.showSideButtons,
+			key: "rememberFiles",
+			text: strings["remember opened files"],
+			checkbox: values.rememberFiles,
+			info: strings["settings-info-app-remember-files"],
+			category: categories.filesSessions,
+		},
+		{
+			key: "rememberFolders",
+			text: strings["remember opened folders"],
+			checkbox: values.rememberFolders,
+			info: strings["settings-info-app-remember-folders"],
+			category: categories.filesSessions,
+		},
+		{
+			key: "retryRemoteFsAfterFail",
+			text: strings["retry ftp/sftp when fail"],
+			checkbox: values.retryRemoteFsAfterFail,
+			info: strings["settings-info-app-retry-remote-fs"],
+			category: categories.filesSessions,
 		},
 		{
 			key: "excludeFolders",
@@ -183,6 +229,8 @@ export default function otherSettings() {
 					});
 				},
 			},
+			info: strings["settings-info-app-exclude-folders"],
+			category: categories.filesSessions,
 		},
 		{
 			key: "defaultFileEncoding",
@@ -197,14 +245,78 @@ export default function otherSettings() {
 					return [id, encoding.label];
 				}),
 			],
+			info: strings["settings-info-app-default-file-encoding"],
+			category: categories.filesSessions,
+		},
+		{
+			key: "keybindings",
+			text: strings["key bindings"],
+			info: strings["settings-info-app-keybindings"],
+			category: categories.advanced,
+			chevron: true,
+		},
+		{
+			key: "confirmOnExit",
+			text: strings["confirm on exit"],
+			checkbox: values.confirmOnExit,
+			info: strings["settings-info-app-confirm-on-exit"],
+			category: categories.advanced,
+		},
+		{
+			key: "checkFiles",
+			text: strings["check file changes"],
+			checkbox: values.checkFiles,
+			info: strings["settings-info-app-check-files"],
+			category: categories.advanced,
+		},
+		{
+			key: "checkForAppUpdates",
+			text: strings["check for app updates"],
+			checkbox: values.checkForAppUpdates,
+			info: strings["info-checkForAppUpdates"],
+			category: categories.advanced,
+		},
+		{
+			key: "console",
+			text: strings.console,
+			value: values.console,
+			select: [appSettings.CONSOLE_LEGACY, appSettings.CONSOLE_ERUDA],
+			info: strings["settings-info-app-console"],
+			category: categories.advanced,
+		},
+		{
+			key: "developerMode",
+			text: strings["developer mode"],
+			checkbox: values.developerMode,
+			info: strings["info-developermode"],
+			category: categories.advanced,
+		},
+		{
+			key: "cleanInstallState",
+			text: strings["clean install state"],
+			info: strings["settings-info-app-clean-install-state"],
+			category: categories.advanced,
+			chevron: true,
 		},
 	];
 
-	return settingsPage(title, items, callback);
+	return settingsPage(title, items, callback, undefined, {
+		preserveOrder: true,
+		pageClassName: "detail-settings-page",
+		listClassName: "detail-settings-list",
+		infoAsDescription: true,
+		valueInTail: true,
+	});
 
 	async function callback(key, value) {
 		switch (key) {
 			case "keybindings": {
+				value = await select(strings["key bindings"], [
+					["edit", strings.edit],
+					["reset", strings.reset],
+				]);
+				if (!value) return;
+
 				if (value === "edit") {
 					actionStack.pop(2);
 					openFile(KEYBINDING_FILE);
@@ -222,6 +334,10 @@ export default function otherSettings() {
 				FontManager();
 				return;
 
+			case "appFont":
+				await fonts.setAppFont(value);
+				break;
+
 			case "console": {
 				if (value !== "eruda") {
 					break;
@@ -237,16 +353,38 @@ export default function otherSettings() {
 					strings["downloading..."],
 				);
 				try {
-					const erudaScript = await ajax({
-						url: constants.ERUDA_CDN,
-						responseType: "text",
-						contentType: "application/x-www-form-urlencoded",
-					});
+					const erudaScript = await fsOperation(config.ERUDA_CDN).readFile(
+						"utf-8",
+					);
 					await fsOperation(DATA_STORAGE).createFile("eruda.js", erudaScript);
 					loader.destroy();
 				} catch (error) {
 					helpers.error(error);
 				}
+				break;
+			}
+
+			case "developerMode": {
+				if (value) {
+					const devTools = (await import("lib/devTools")).default;
+					try {
+						await devTools.init(true);
+						toast(
+							strings["developer mode enabled"] ||
+								"Developer mode enabled. Use command palette to toggle inspector.",
+						);
+					} catch (error) {
+						helpers.error(error);
+						value = false;
+					}
+				} else {
+					const devTools = (await import("lib/devTools")).default;
+					devTools.destroy();
+					toast(
+						strings["developer mode disabled"] || "Developer mode disabled",
+					);
+				}
+				break;
 			}
 
 			case "cleanInstallState": {
@@ -289,6 +427,12 @@ export default function otherSettings() {
 
 			case "keyboardMode":
 				system.setInputType(value);
+				break;
+
+			case "uiZoom":
+				value = Number(value);
+				if (!Number.isInteger(value)) return;
+				value = Math.min(160, Math.max(70, value));
 				break;
 
 			case "fullscreen":

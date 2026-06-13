@@ -1,22 +1,230 @@
 import fsOperation from "fileSystem";
+// CodeMirror imports for document state management
+import { EditorState } from "@codemirror/state";
+import {
+	clearSelection,
+	restoreFolds,
+	restoreSelection,
+	setScrollPosition,
+} from "cm/editorUtils";
+import { getMode, getModeForPath } from "cm/modelist";
 import Sidebar from "components/sidebar";
 import tile from "components/tile";
+import toast from "components/toast";
 import confirm from "dialogs/confirm";
 import DOMPurify from "dompurify";
 import startDrag from "handlers/editorFileTab";
+import actions from "handlers/quickTools";
 import tag from "html-tag-js";
 import mimeTypes from "mime-types";
 import helpers from "utils/helpers";
 import Path from "utils/Path";
 import Url from "utils/Url";
-import constants from "./constants";
+import config from "./config";
 import openFolder from "./openFolder";
 import run from "./run";
 import saveFile from "./saveFile";
 import appSettings from "./settings";
 
-const { Fold } = ace.require("ace/edit_session/fold");
-const { Range } = ace.require("ace/range");
+/**
+ * Creates a Proxy around an EditorState that provides Ace-compatible methods.
+ * @param {EditorState} state - The raw CodeMirror EditorState
+ * @param {EditorFile} file - The parent EditorFile instance
+ * @returns {Proxy} Proxied state with Ace-compatible methods
+ */
+function createSessionProxy(state, file) {
+	if (!state) return null;
+
+	/**
+	 * Convert Ace position {row, column} to CodeMirror offset
+	 */
+	function positionToOffset(pos, doc) {
+		if (!pos || !doc) return 0;
+		try {
+			const lineNum = Math.max(1, Math.min((pos.row ?? 0) + 1, doc.lines));
+			const line = doc.line(lineNum);
+			const col = Math.max(0, Math.min(pos.column ?? 0, line.length));
+			return line.from + col;
+		} catch (_) {
+			return 0;
+		}
+	}
+
+	/**
+	 * Convert CodeMirror offset to Ace position {row, column}
+	 */
+	function offsetToPosition(offset, doc) {
+		if (!doc) return { row: 0, column: 0 };
+		try {
+			const line = doc.lineAt(offset);
+			return { row: line.number - 1, column: offset - line.from };
+		} catch (_) {
+			return { row: 0, column: 0 };
+		}
+	}
+
+	function recordInactiveEdit() {
+		if (file.markChanged === false) return;
+		file.markEdited();
+		file.scheduleCacheWrite();
+		editorManager.emit("file-content-changed", file);
+		editorManager.onupdate("file-changed");
+		editorManager.emit("update", "file-changed");
+	}
+
+	return new Proxy(state, {
+		get(target, prop) {
+			if (prop === "__rawState") {
+				return target;
+			}
+
+			// Ace-compatible method: getValue()
+			if (prop === "getValue") {
+				return () => target.doc.toString();
+			}
+
+			// Ace-compatible method: setValue(text)
+			if (prop === "setValue") {
+				return (text) => {
+					const newText = String(text ?? "");
+					const { activeFile, editor } = editorManager;
+					if (activeFile?.id === file.id && editor) {
+						// Active file: dispatch to live EditorView
+						editor.dispatch({
+							changes: {
+								from: 0,
+								to: editor.state.doc.length,
+								insert: newText,
+							},
+						});
+					} else {
+						// Inactive file: update stored state
+						file._setRawSession(
+							target.update({
+								changes: { from: 0, to: target.doc.length, insert: newText },
+							}).state,
+						);
+						recordInactiveEdit();
+					}
+				};
+			}
+
+			// Ace-compatible method: getLine(row)
+			if (prop === "getLine") {
+				return (row) => {
+					try {
+						return target.doc.line(row + 1).text;
+					} catch (_) {
+						return "";
+					}
+				};
+			}
+
+			// Ace-compatible method: getLength()
+			if (prop === "getLength") {
+				return () => target.doc.lines;
+			}
+
+			// Ace-compatible method: getTextRange(range)
+			if (prop === "getTextRange") {
+				return (range) => {
+					if (!range) return "";
+					try {
+						const from = positionToOffset(range.start, target.doc);
+						const to = positionToOffset(range.end, target.doc);
+						return target.doc.sliceString(from, to);
+					} catch (_) {
+						return "";
+					}
+				};
+			}
+
+			// Ace-compatible method: insert(position, text)
+			if (prop === "insert") {
+				return (position, text) => {
+					const { activeFile, editor } = editorManager;
+					const offset = positionToOffset(position, target.doc);
+					if (activeFile?.id === file.id && editor) {
+						editor.dispatch({
+							changes: { from: offset, insert: String(text ?? "") },
+						});
+					} else {
+						file._setRawSession(
+							target.update({
+								changes: { from: offset, insert: String(text ?? "") },
+							}).state,
+						);
+						recordInactiveEdit();
+					}
+				};
+			}
+
+			// Ace-compatible method: remove(range)
+			if (prop === "remove") {
+				return (range) => {
+					if (!range) return "";
+					const from = positionToOffset(range.start, target.doc);
+					const to = positionToOffset(range.end, target.doc);
+					const removed = target.doc.sliceString(from, to);
+					const { activeFile, editor } = editorManager;
+					if (activeFile?.id === file.id && editor) {
+						editor.dispatch({ changes: { from, to, insert: "" } });
+					} else {
+						file._setRawSession(
+							target.update({ changes: { from, to, insert: "" } }).state,
+						);
+						recordInactiveEdit();
+					}
+					return removed;
+				};
+			}
+
+			// Ace-compatible method: replace(range, text)
+			if (prop === "replace") {
+				return (range, text) => {
+					if (!range) return;
+					const from = positionToOffset(range.start, target.doc);
+					const to = positionToOffset(range.end, target.doc);
+					const { activeFile, editor } = editorManager;
+					if (activeFile?.id === file.id && editor) {
+						editor.dispatch({
+							changes: { from, to, insert: String(text ?? "") },
+						});
+					} else {
+						file._setRawSession(
+							target.update({
+								changes: { from, to, insert: String(text ?? "") },
+							}).state,
+						);
+						recordInactiveEdit();
+					}
+				};
+			}
+
+			// Ace-compatible method: getWordRange(row, column)
+			if (prop === "getWordRange") {
+				return (row, column) => {
+					const offset = positionToOffset({ row, column }, target.doc);
+					const word = target.wordAt(offset);
+					if (word) {
+						return {
+							start: offsetToPosition(word.from, target.doc),
+							end: offsetToPosition(word.to, target.doc),
+						};
+					}
+					return { start: { row, column }, end: { row, column } };
+				};
+			}
+
+			// Pass through all other properties to the real EditorState
+			const value = target[prop];
+			if (typeof value === "function") {
+				return value.bind(target);
+			}
+			return value;
+		},
+	});
+}
 
 /**
  * @typedef {'run'|'save'|'change'|'focus'|'blur'|'close'|'rename'|'load'|'loadError'|'loadStart'|'loadEnd'|'changeMode'|'changeEncoding'|'changeReadOnly'} FileEvents
@@ -37,6 +245,13 @@ const { Range } = ace.require("ace/range");
  * @property {number} [scrollLeft] scroll left
  * @property {number} [scrollTop] scroll top
  * @property {Array<Fold>} [folds] folds
+ * @property {boolean} [pinned] pin the tab to prevent accidental closing
+ * @property {number} [docVersion] current document version for dirty tracking
+ * @property {number} [savedVersion] document version last saved or loaded from disk
+ * @property {number} [cacheVersion] document version last written to crash cache
+ * @property {number} [savedMtime] file mtime last saved or loaded from disk
+ * @property {number} [diskMtime] latest known file mtime on disk
+ * @property {boolean} [hasDiskConflict] whether editor and disk both changed
  */
 
 export default class EditorFile {
@@ -92,10 +307,10 @@ export default class EditorFile {
 	 */
 	deletedFile = false;
 	/**
-	 * EditSession of the file
-	 * @type {AceAjax.IEditSession}
+	 * Raw CodeMirror EditorState. Use session getter to access with Ace-compatible methods.
+	 * @type {EditorState}
 	 */
-	session = null;
+	#rawSession = null;
 	/**
 	 * Encoding of the text e.g. 'gbk'
 	 * @type {string}
@@ -120,7 +335,7 @@ export default class EditorFile {
 	 * Name of the file
 	 * @type {string}
 	 */
-	#name = constants.DEFAULT_FILE_NAME;
+	#name = config.DEFAULT_FILE_NAME;
 	/**
 	 * Location of the file
 	 * @type {string}
@@ -130,7 +345,7 @@ export default class EditorFile {
 	 * Unique ID of the file, changed when file is renamed or location/uri is changed.
 	 * @type {string}
 	 */
-	#id = constants.DEFAULT_FILE_SESSION;
+	#id = config.DEFAULT_FILE_SESSION;
 	/**
 	 * Associated tile for the file, that is append in the open file list,
 	 * when clicked make the file active.
@@ -143,6 +358,11 @@ export default class EditorFile {
 	 */
 	#editable = true;
 	/**
+	 * Prevents the tab from being closed until it is unpinned.
+	 * @type {boolean}
+	 */
+	#pinned = false;
+	/**
 	 * contains information about cursor position, scroll left, scroll top, folds.
 	 */
 	#loadOptions;
@@ -151,6 +371,10 @@ export default class EditorFile {
 	 * @type {boolean}
 	 */
 	#isUnsaved = false;
+	#hasVersionMetadata = false;
+	#cacheWriteTimer = null;
+	#cacheWritePromise = null;
+	#savedDoc = null;
 	/**
 	 * Whether to show run button or not
 	 */
@@ -188,6 +412,14 @@ export default class EditorFile {
 	onchangemode;
 	onrun;
 	oncanrun;
+	onpinstatechange;
+
+	docVersion = 0;
+	savedVersion = 0;
+	cacheVersion = 0;
+	savedMtime = null;
+	diskMtime = null;
+	hasDiskConflict = false;
 
 	/**
 	 *
@@ -209,7 +441,7 @@ export default class EditorFile {
 			} else this.#id = options.id;
 		} else if (!options) {
 			// if options aren't passed, that means default file is being created
-			this.#id = constants.DEFAULT_FILE_SESSION;
+			this.#id = config.DEFAULT_FILE_SESSION;
 		}
 
 		if (options?.type) {
@@ -293,7 +525,33 @@ export default class EditorFile {
 		const editable = options?.editable ?? true;
 
 		this.#SAFMode = options?.SAFMode;
-		this.isUnsaved = options?.isUnsaved ?? false;
+		this.docVersion = Number.isFinite(options?.docVersion)
+			? options.docVersion
+			: options?.isUnsaved
+				? 1
+				: 0;
+		this.savedVersion = Number.isFinite(options?.savedVersion)
+			? options.savedVersion
+			: options?.isUnsaved
+				? 0
+				: this.docVersion;
+		this.cacheVersion = Number.isFinite(options?.cacheVersion)
+			? options.cacheVersion
+			: options?.isUnsaved
+				? this.docVersion
+				: this.savedVersion;
+		this.savedMtime = helpers.normalizeMtime(options?.savedMtime);
+		this.diskMtime = helpers.normalizeMtime(
+			options?.diskMtime ?? options?.savedMtime,
+		);
+		this.hasDiskConflict = !!options?.hasDiskConflict;
+		this.#hasVersionMetadata =
+			options?.docVersion !== undefined ||
+			options?.savedVersion !== undefined ||
+			options?.text !== undefined ||
+			options?.isUnsaved !== undefined ||
+			this.#id === config.DEFAULT_FILE_SESSION;
+		this.isUnsaved = options?.isUnsaved ?? this.hasUnsavedChanges();
 
 		if (options?.encoding) {
 			this.encoding = options.encoding;
@@ -302,7 +560,7 @@ export default class EditorFile {
 		// if options contains text property then there is no need to load
 		// set loaded true
 
-		if (this.#id !== constants.DEFAULT_FILE_SESSION) {
+		if (this.#id !== config.DEFAULT_FILE_SESSION) {
 			this.loaded = options?.text !== undefined;
 		}
 
@@ -334,12 +592,18 @@ export default class EditorFile {
 		this.#onFilePosChange();
 		this.#tab.addEventListener("click", tabOnclick.bind(this));
 		appSettings.on("update:openFileListPos", this.#onFilePosChange);
+		this.pinned = !!options?.pinned;
 
 		addFile(this);
 		editorManager.emit("new-file", this);
 
 		if (this.#type === "editor") {
-			this.session = ace.createEditSession(options?.text || "");
+			this.#rawSession = EditorState.create({
+				doc: options?.text || "",
+			});
+			if (!this.#isUnsaved) {
+				this.#savedDoc = this.#rawSession.doc;
+			}
 			this.setMode();
 			this.#setupSession();
 		}
@@ -357,6 +621,32 @@ export default class EditorFile {
 
 	get content() {
 		return this.#content;
+	}
+
+	/**
+	 * Session with Ace-compatible methods
+	 * Returns a Proxy over the raw EditorState.
+	 * @returns {Proxy<EditorState>}
+	 */
+	get session() {
+		return createSessionProxy(this.#rawSession, this);
+	}
+
+	/**
+	 * Set the session
+	 * @param {EditorState} value
+	 */
+	set session(value) {
+		this.#rawSession = value;
+	}
+
+	/**
+	 * Internal method to update the raw session state.
+	 * Used by the Proxy for inactive file updates.
+	 * @param {EditorState} state
+	 */
+	_setRawSession(state) {
+		this.#rawSession = state;
 	}
 
 	/**
@@ -396,7 +686,7 @@ export default class EditorFile {
 		if (event.defaultPrevented) return;
 
 		(async () => {
-			if (this.id === constants.DEFAULT_FILE_SESSION) {
+			if (this.id === config.DEFAULT_FILE_SESSION) {
 				this.id = helpers.uuid();
 			}
 
@@ -412,10 +702,10 @@ export default class EditorFile {
 			this.#tab.text = value;
 			this.#name = value;
 
+			if (oldExt !== newExt) this.setMode();
+
 			editorManager.onupdate("rename-file");
 			editorManager.emit("rename-file", this);
-
-			if (oldExt !== newExt) this.setMode();
 		})();
 	}
 
@@ -489,7 +779,11 @@ export default class EditorFile {
 	 * End of line
 	 */
 	get eol() {
-		return /\r/.test(this.session.getValue()) ? "windows" : "unix";
+		const { doc } = this.session;
+		for (let lineNumber = 1; lineNumber <= doc.lines; lineNumber++) {
+			if (doc.line(lineNumber).text.includes("\r")) return "windows";
+		}
+		return "unix";
 	}
 
 	/**
@@ -499,7 +793,7 @@ export default class EditorFile {
 	set eol(value) {
 		if (this.type !== "editor") return;
 		if (this.eol === value) return;
-		let text = this.session.getValue();
+		let text = this.session.doc.toString();
 
 		if (value === "windows") {
 			text = text.replace(/(?<!\r)\n/g, "\r\n");
@@ -507,6 +801,7 @@ export default class EditorFile {
 			text = text.replace(/\r/g, "");
 		}
 
+		// Update the document in the session
 		this.session.setValue(text);
 	}
 
@@ -523,7 +818,7 @@ export default class EditorFile {
 	 */
 	set editable(value) {
 		if (this.#editable === value) return;
-		editorManager.editor.setReadOnly(!value);
+		this.setReadOnly(!value);
 		editorManager.onupdate("read-only");
 		editorManager.emit("update", "read-only");
 		this.#editable = value;
@@ -534,10 +829,49 @@ export default class EditorFile {
 	}
 
 	set isUnsaved(value) {
+		value = !!value;
 		if (this.#isUnsaved === value) return;
+		if (!value && this.#hasVersionMetadata) {
+			this.savedVersion = this.docVersion;
+			this.hasDiskConflict = false;
+			this.#savedDoc = this.#rawSession?.doc || this.#savedDoc;
+		}
 		this.#isUnsaved = value;
 
 		this.#updateTab();
+	}
+
+	get pinned() {
+		return this.#pinned;
+	}
+
+	set pinned(value) {
+		this.setPinnedState(value);
+	}
+
+	setPinnedState(value, options = {}) {
+		const { reorder = false, emit = true } = options;
+		value = !!value;
+		if (this.#pinned === value) return value;
+
+		this.#pinned = value;
+		this.#updateTab();
+		this.onpinstatechange?.(value);
+
+		if (editorManager.files.includes(this) && reorder) {
+			editorManager.moveFileByPinnedState?.(this);
+		}
+
+		if (emit) {
+			editorManager.onupdate("pin-tab");
+			editorManager.emit("update", "pin-tab", this);
+		}
+
+		return value;
+	}
+
+	togglePinned() {
+		return this.setPinnedState(!this.pinned);
 	}
 
 	/**
@@ -572,17 +906,141 @@ export default class EditorFile {
 		return this.#SAFMode;
 	}
 
+	get hasVersionMetadata() {
+		return this.#hasVersionMetadata;
+	}
+
+	hasUnsavedChanges() {
+		if (this.type !== "editor") return false;
+		const currentDoc = this.#rawSession?.doc;
+		if (currentDoc && this.#savedDoc) {
+			return (
+				this.hasDiskConflict ||
+				this.deletedFile ||
+				!currentDoc.eq(this.#savedDoc)
+			);
+		}
+		return (
+			this.hasDiskConflict ||
+			this.deletedFile ||
+			this.docVersion !== this.savedVersion
+		);
+	}
+
+	markLoaded({ mtime, isUnsaved = false, savedDoc = null } = {}) {
+		const normalizedMtime = helpers.normalizeMtime(mtime);
+		this.docVersion = isUnsaved ? 1 : 0;
+		this.savedVersion = isUnsaved ? 0 : this.docVersion;
+		this.cacheVersion = isUnsaved ? this.docVersion : this.savedVersion;
+		this.savedMtime = normalizedMtime;
+		this.diskMtime = normalizedMtime;
+		this.hasDiskConflict = false;
+		this.#hasVersionMetadata = true;
+		this.#savedDoc =
+			savedDoc ?? (isUnsaved ? null : this.#rawSession?.doc || null);
+		this.isUnsaved = isUnsaved || this.hasUnsavedChanges();
+	}
+
+	markEdited() {
+		if (this.type !== "editor") return;
+		if (this.id === config.DEFAULT_FILE_SESSION) {
+			this.id = helpers.uuid();
+		}
+		this.docVersion += 1;
+		this.#hasVersionMetadata = true;
+		this.isUnsaved = this.hasUnsavedChanges();
+	}
+
+	markSaved({ mtime, savedDoc, savedVersion } = {}) {
+		const normalizedMtime = helpers.normalizeMtime(mtime);
+		this.savedVersion = Number.isFinite(savedVersion)
+			? savedVersion
+			: this.docVersion;
+		this.savedMtime = normalizedMtime;
+		this.diskMtime = normalizedMtime;
+		this.hasDiskConflict = false;
+		this.#hasVersionMetadata = true;
+		this.#savedDoc = savedDoc || this.#rawSession?.doc || null;
+		this.isUnsaved = this.hasUnsavedChanges();
+	}
+
+	markDiskChanged({ mtime, deleted = false } = {}) {
+		this.diskMtime = helpers.normalizeMtime(mtime);
+		this.#hasVersionMetadata = true;
+		if (deleted) {
+			this.deletedFile = true;
+			this.isUnsaved = true;
+			return;
+		}
+		this.hasDiskConflict =
+			this.docVersion !== this.savedVersion &&
+			this.diskMtime !== this.savedMtime;
+		this.isUnsaved = this.hasUnsavedChanges();
+	}
+
+	scheduleCacheWrite(delay = 1500) {
+		if (this.type !== "editor") return Promise.resolve();
+		if (this.cacheVersion === this.docVersion && this.#hasVersionMetadata) {
+			return this.#cacheWritePromise || Promise.resolve();
+		}
+		if (this.#cacheWriteTimer) clearTimeout(this.#cacheWriteTimer);
+		if (delay <= 0) {
+			this.#cacheWriteTimer = null;
+			this.#cacheWritePromise = this.writeToCache().finally(() => {
+				this.#cacheWritePromise = null;
+			});
+			return this.#cacheWritePromise;
+		}
+		this.#cacheWriteTimer = setTimeout(() => {
+			this.#cacheWriteTimer = null;
+			this.#cacheWritePromise = this.writeToCache().finally(() => {
+				this.#cacheWritePromise = null;
+			});
+		}, delay);
+		return Promise.resolve();
+	}
+
+	async flushCacheWrite() {
+		if (this.#cacheWriteTimer) {
+			clearTimeout(this.#cacheWriteTimer);
+			this.#cacheWriteTimer = null;
+			if (!this.#cacheWritePromise) {
+				this.#cacheWritePromise = this.writeToCache().finally(() => {
+					this.#cacheWritePromise = null;
+				});
+			}
+		}
+		if (this.#cacheWritePromise) await this.#cacheWritePromise;
+		if (this.cacheVersion !== this.docVersion) {
+			if (this.#cacheWriteTimer) {
+				clearTimeout(this.#cacheWriteTimer);
+				this.#cacheWriteTimer = null;
+			}
+			this.#cacheWritePromise = this.writeToCache().finally(() => {
+				this.#cacheWritePromise = null;
+			});
+			await this.#cacheWritePromise;
+		}
+	}
+
 	async writeToCache() {
-		const text = this.session.getValue();
+		const writeVersion = this.docVersion;
+		const text = this.session.doc.toString();
 		const fs = fsOperation(this.cacheFile);
 
 		try {
 			if (!(await fs.exists())) {
 				await fsOperation(CACHE_STORAGE).createFile(this.id, text);
+				this.cacheVersion = writeVersion;
+				this.#hasVersionMetadata = true;
+				if (this.docVersion !== writeVersion) this.scheduleCacheWrite();
 				return;
 			}
 
 			await fs.writeFile(text);
+			this.cacheVersion = writeVersion;
+			this.#hasVersionMetadata = true;
+			if (this.docVersion !== writeVersion) this.scheduleCacheWrite();
 		} catch (error) {
 			window.log("error", "Writing to cache failed:");
 			window.log("error", error);
@@ -595,13 +1053,16 @@ export default class EditorFile {
 		if (!this.loaded || this.loading) {
 			return false;
 		}
+		if (this.#hasVersionMetadata) {
+			return this.hasUnsavedChanges();
+		}
 		// is changed is called when session text is changed
 		// if file has no uri or is readonly that means file is change
 		// and need to saved to a location.
 		// here readonly means file has uri but has no write permission.
 		if (!this.uri || this.readOnly) {
 			// if file is default file and text is changed
-			if (this.id === constants.DEFAULT_FILE_SESSION) {
+			if (this.id === config.DEFAULT_FILE_SESSION) {
 				// change id when text is changed
 				this.id = helpers.uuid();
 			}
@@ -609,26 +1070,59 @@ export default class EditorFile {
 		}
 
 		const protocol = Url.getProtocol(this.#uri);
-		let fs;
+		const text = this.session.doc.toString();
+
+		// Helper for JS-based comparison (used as fallback)
+		const jsCompare = async (fileUri) => {
+			const fs = fsOperation(fileUri);
+			const oldText = await fs.readFile(this.encoding);
+			return await system.compareTexts(oldText, text);
+		};
+
 		if (/s?ftp:/.test(protocol)) {
-			// if file is a ftp or sftp file, get file content from cached file.
-			// remove ':' from protocol because cache file of remote files are
-			// stored as ftp102525465N i.e. protocol + id
+			// FTP/SFTP files use cached local file
 			const cacheFilename = protocol.slice(0, -1) + this.id;
-			const cacheFile = Url.join(CACHE_STORAGE, cacheFilename);
-			fs = fsOperation(cacheFile);
-		} else {
-			fs = fsOperation(this.uri);
+			const cacheFileUri = Url.join(CACHE_STORAGE, cacheFilename);
+
+			try {
+				return await system.compareFileText(cacheFileUri, this.encoding, text);
+			} catch (error) {
+				console.error(
+					"Native compareFileText failed, using JS fallback:",
+					error,
+				);
+				try {
+					return await jsCompare(cacheFileUri);
+				} catch (fallbackError) {
+					console.error(fallbackError);
+					return false;
+				}
+			}
 		}
 
-		try {
-			const oldText = await fs.readFile(this.encoding);
-			const text = this.session.getValue();
+		if (/^(file|content):/.test(protocol)) {
+			// file:// and content:// URIs - try native first, fallback to JS
+			try {
+				return await system.compareFileText(this.uri, this.encoding, text);
+			} catch (error) {
+				console.error(
+					"Native compareFileText failed, using JS fallback:",
+					error,
+				);
+				try {
+					return await jsCompare(this.uri);
+				} catch (fallbackError) {
+					console.error(fallbackError);
+					return false;
+				}
+			}
+		}
 
-			if (oldText.length !== text.length) return true;
-			return oldText !== text;
+		// Other protocols - JS reads file, native compares strings
+		try {
+			return await jsCompare(this.uri);
 		} catch (error) {
-			window.log("error", error);
+			console.error(error);
 			return false;
 		}
 	}
@@ -686,18 +1180,26 @@ export default class EditorFile {
 	 * Remove and closes the file.
 	 * @param {boolean} force if true, will prompt to save the file
 	 */
-	async remove(force = false) {
-		if (
-			this.id === constants.DEFAULT_FILE_SESSION &&
-			!editorManager.files.length
-		)
-			return;
+	async remove(force = false, options = {}) {
+		const { ignorePinned = false, silentPinned = false } = options || {};
+
+		if (this.id === config.DEFAULT_FILE_SESSION && !editorManager.files.length)
+			return false;
+		if (this.pinned && !ignorePinned) {
+			if (!silentPinned) {
+				toast(
+					strings["unpin tab before closing"] ||
+						"Unpin the tab before closing it.",
+				);
+			}
+			return false;
+		}
 		if (!force && this.isUnsaved) {
 			const confirmation = await confirm(
 				strings.warning.toUpperCase(),
 				strings["unsaved file"],
 			);
-			if (!confirmation) return;
+			if (!confirmation) return false;
 		}
 
 		this.#destroy();
@@ -706,18 +1208,20 @@ export default class EditorFile {
 			(file) => file.id !== this.id,
 		);
 		const { files, activeFile } = editorManager;
-		if (activeFile.id === this.id) {
+		const wasActive = activeFile?.id === this.id;
+		if (wasActive) {
 			editorManager.activeFile = null;
 		}
 		if (!files.length) {
 			Sidebar.hide();
 			editorManager.activeFile = null;
 			new EditorFile();
-		} else {
+		} else if (wasActive) {
 			files[files.length - 1].makeActive();
 		}
 		editorManager.onupdate("remove-file");
 		editorManager.emit("remove-file", this);
+		return true;
 	}
 
 	/**
@@ -738,13 +1242,37 @@ export default class EditorFile {
 		return this.#save(true);
 	}
 
+	setReadOnly(value) {
+		try {
+			const { editor, readOnlyCompartment } = editorManager;
+			if (!editor) return;
+			if (!readOnlyCompartment) return;
+			editor.dispatch({
+				effects: readOnlyCompartment.reconfigure(
+					EditorState.readOnly.of(!!value),
+				),
+			});
+		} catch (error) {
+			console.warn(
+				`Failed to update read-only state for ${this.filename || this.uri}`,
+				error,
+			);
+		}
+
+		// Sync internal flags and header
+		this.readOnly = !!value;
+		this.#editable = !this.readOnly;
+		if (editorManager.activeFile?.id === this.id) {
+			editorManager.header.subText = this.#getTitle();
+		}
+	}
+
 	/**
 	 * Sets syntax highlighting of the file.
 	 * @param {string} [mode]
 	 */
 	setMode(mode) {
 		if (this.type !== "editor") return;
-		const modelist = ace.require("ace/ext/modelist");
 		const event = createFileEvent(this);
 		this.#emit("changemode", event);
 		if (event.defaultPrevented) return;
@@ -754,13 +1282,18 @@ export default class EditorFile {
 			const modes = helpers.parseJSON(localStorage.modeassoc);
 			if (modes?.[ext]) {
 				mode = modes[ext];
-			} else {
-				mode = modelist.getModeForPath(this.filename).mode;
 			}
 		}
 
-		// sets ace editor EditSession mode
-		this.session.setMode(mode);
+		let modeInfo = mode ? getMode(mode) : null;
+		if (!modeInfo) {
+			modeInfo = getModeForPath(this.filename);
+		}
+		mode = modeInfo?.name || String(mode || "text").toLowerCase();
+
+		// Store mode info for later use when creating editor view
+		this.currentMode = mode;
+		this.currentLanguageExtension = modeInfo?.getExtension() || null;
 
 		// sets file icon
 		this.#tab.lead(
@@ -793,7 +1326,13 @@ export default class EditorFile {
 			if (this.focused) {
 				editor.focus();
 			} else {
-				editor.blur();
+				editor.contentDOM.blur();
+				// Ensure any native DOM selection is cleared on blur to avoid sticky selection handles
+				try {
+					document.getSelection()?.removeAllRanges();
+				} catch (error) {
+					console.warn("Failed to clear native text selection.", error);
+				}
 			}
 		} else {
 			editorManager.container.style.display = "none";
@@ -803,8 +1342,9 @@ export default class EditorFile {
 					editorManager.container.parentElement.appendChild(this.content);
 				}
 			}
+
 			if (activeFile && activeFile.type === "editor") {
-				activeFile.session.selection.clearSelection();
+				clearSelection(editorManager.editor);
 			}
 		}
 
@@ -813,6 +1353,19 @@ export default class EditorFile {
 
 		if (this.type === "editor" && !this.loaded && !this.loading) {
 			this.#loadText();
+		}
+
+		// Handle quicktools visibility based on hideQuickTools property
+		if (this.hideQuickTools) {
+			root.classList.add("hide-floating-button");
+			actions("set-height", { height: 0, save: false });
+		} else {
+			root.classList.remove("hide-floating-button");
+			const quickToolsHeight =
+				appSettings.value.quickTools !== undefined
+					? appSettings.value.quickTools
+					: 1;
+			actions("set-height", { height: quickToolsHeight, save: false });
 		}
 
 		editorManager.header.subText = this.#getTitle();
@@ -851,9 +1404,9 @@ export default class EditorFile {
 	render() {
 		this.makeActive();
 
-		if (this.id !== constants.DEFAULT_FILE_SESSION) {
+		if (this.id !== config.DEFAULT_FILE_SESSION) {
 			const defaultFile = editorManager.getFile(
-				constants.DEFAULT_FILE_SESSION,
+				config.DEFAULT_FILE_SESSION,
 				"id",
 			);
 			defaultFile?.remove();
@@ -1017,15 +1570,16 @@ export default class EditorFile {
 
 		this.#loadOptions = null;
 
-		editor.setReadOnly(true);
+		this.setReadOnly(true);
 		this.loading = true;
 		this.markChanged = false;
 		this.#emit("loadstart", createFileEvent(this));
-		this.session.setValue(strings["loading..."]);
 
 		try {
 			const cacheFs = fsOperation(this.cacheFile);
 			const cacheExists = await cacheFs.exists();
+			let loadedMtime = this.savedMtime;
+			let savedDoc = null;
 
 			if (cacheExists) {
 				value = await cacheFs.readFile(this.encoding);
@@ -1037,41 +1591,53 @@ export default class EditorFile {
 				if (!fileExists && cacheExists) {
 					this.deletedFile = true;
 					this.isUnsaved = true;
-				} else if (!cacheExists && fileExists) {
-					value = await file.readFile(this.encoding);
+				} else if (fileExists) {
+					const stat = await file.stat().catch(() => null);
+					loadedMtime = helpers.getStatMtime(stat);
+					const diskValue = await file.readFile(this.encoding);
+					savedDoc = EditorState.create({ doc: diskValue }).doc;
+					if (!cacheExists) {
+						value = diskValue;
+					}
 				} else if (!cacheExists && !fileExists) {
 					window.log("error", "unable to load file");
 					throw new Error("Unable to load file");
 				}
 			}
 
+			const isUnsaved = this.isUnsaved;
 			this.markChanged = false;
-			this.session.setValue(value);
+			this.session = EditorState.create({ doc: value });
+			this.__cmSessionReady = false;
+			this.__cmLanguageReady = false;
+			this.__cmLanguageSignature = null;
+			this.markLoaded({ mtime: loadedMtime, isUnsaved, savedDoc });
+			this.markChanged = true;
 			this.loaded = true;
 			this.loading = false;
 
 			const { activeFile, emit } = editorManager;
-			if (activeFile.id === this.id) {
-				editor.setReadOnly(false);
+			if (activeFile?.id === this.id) {
+				this.setReadOnly(editable === false);
+				emit("file-loaded", this);
+			} else if (editable !== undefined) {
+				this.readOnly = !editable;
+				this.#editable = editable;
 			}
 
 			setTimeout(() => {
 				this.#emit("load", createFileEvent(this));
-				emit("file-loaded", this);
-				if (cursorPos)
-					this.session.selection.moveCursorTo(cursorPos.row, cursorPos.column);
-				if (scrollTop) this.session.setScrollTop(scrollTop);
-				if (scrollLeft) this.session.setScrollLeft(scrollLeft);
-				if (editable !== undefined) this.editable = editable;
-
-				if (Array.isArray(folds)) {
-					const parsedFolds = EditorFile.#parseFolds(folds);
-					this.session?.addFolds(parsedFolds);
+				if (cursorPos) {
+					restoreSelection(editor, cursorPos);
 				}
+				if (scrollTop || scrollLeft) {
+					setScrollPosition(editor, scrollTop, scrollLeft);
+				}
+				restoreFolds(editor, folds);
 			}, 0);
 		} catch (error) {
 			this.#emit("loaderror", createFileEvent(this));
-			this.remove();
+			this.remove(false, { ignorePinned: true });
 			toast(`Unable to load: ${this.filename}`);
 			window.log("error", "Unable to load: " + this.filename);
 			window.log("error", error);
@@ -1080,109 +1646,74 @@ export default class EditorFile {
 		}
 	}
 
-	static #onfold(e) {
-		editorManager.editor._emit("fold", e);
-	}
+	// TODO: Implement CodeMirror equivalents for folding and scroll events
+	// static #onfold(e) {
+	// 	editorManager.editor._emit("fold", e);
+	// }
 
-	static #onscrolltop(e) {
-		editorManager.editor._emit("scrolltop", e);
-	}
+	// static #onscrolltop(e) {
+	// 	editorManager.editor._emit("scrolltop", e);
+	// }
 
-	static #onscrollleft(e) {
-		editorManager.editor._emit("scrollleft", e);
-	}
-
-	/**
-	 * Parse folds
-	 * @param {Array<Fold>} folds
-	 */
-	static #parseFolds(folds) {
-		if (!Array.isArray(folds)) return [];
-
-		const foldDataAr = [];
-
-		folds.forEach((fold) => {
-			if (!fold || !fold.range) return;
-
-			const { range } = fold;
-			const { start, end } = range;
-
-			if (!start || !end) return;
-
-			try {
-				const foldData = new Fold(
-					new Range(start.row, start.column, end.row, end.column),
-					fold.placeholder,
-				);
-
-				if (Array.isArray(fold.ranges) && fold.ranges.length > 0) {
-					const subFolds = EditorFile.#parseFolds(fold.ranges);
-					foldData.subFolds = subFolds;
-					foldData.ranges = subFolds;
-				}
-
-				foldDataAr.push(foldData);
-			} catch (error) {
-				console.warn("Error parsing fold:", error);
-			}
-		});
-
-		return foldDataAr;
-	}
+	// static #onscrollleft(e) {
+	// 	editorManager.editor._emit("scrollleft", e);
+	// }
 
 	#save(as) {
 		const event = createFileEvent(this);
 		this.#emit("save", event);
 
 		if (event.defaultPrevented) return Promise.resolve(false);
-		return Promise.all([this.writeToCache(), saveFile(this, as)]);
+		return Promise.all([this.flushCacheWrite(), saveFile(this, as)]);
 	}
 
 	#run(file) {
 		const event = createFileEvent(this);
 		this.#emit("run", event);
 		if (event.defaultPrevented) return;
-		run(false, file ? "inapp" : appSettings.value.previewMode, file);
+		run(false, appSettings.value.previewMode, file);
 	}
 
 	#updateTab() {
+		if (!this.#tab) return;
+
 		if (this.#isUnsaved) {
 			this.tab.classList.add("notice");
 		} else {
 			this.tab.classList.remove("notice");
 		}
+
+		this.tab.classList.toggle("pinned", this.#pinned);
+		this.#tab.tail(this.#createTabTail());
 	}
 
 	/**
-	 * Setup Ace EditSession for the file
+	 * Setup CodeMirror EditorState for the file
 	 */
 	#setupSession() {
 		if (this.type !== "editor") return;
-		const { value: settings } = appSettings;
-
-		this.session.setTabSize(settings.tabSize);
-		this.session.setUseSoftTabs(settings.softTab);
-		this.session.setUseWrapMode(settings.textWrap);
-		this.session.setUseWorker(false);
-
-		this.session.on("changeScrollTop", EditorFile.#onscrolltop);
-		this.session.on("changeScrollLeft", EditorFile.#onscrollleft);
-		this.session.on("changeFold", EditorFile.#onfold);
-		this.session.on("changeAnnotation", () => {
-			editorManager.editor._emit("changeAnnotation", this);
-		});
+		// CodeMirror configuration will be handled in the EditorView
+		// Store settings for when the editor view is created
+		this.editorSettings = {
+			tabSize: appSettings.value.tabSize,
+			softTab: appSettings.value.softTab,
+			textWrap: appSettings.value.textWrap,
+		};
 	}
 
 	#destroy() {
 		this.#emit("close", createFileEvent(this));
 		appSettings.off("update:openFileListPos", this.#onFilePosChange);
+		if (this.#cacheWriteTimer) {
+			clearTimeout(this.#cacheWriteTimer);
+			this.#cacheWriteTimer = null;
+		}
+		this.#cacheWritePromise = null;
+		this.#savedDoc = null;
 		if (this.type === "editor") {
-			this.session?.off("changeScrollTop", EditorFile.#onscrolltop);
-			this.session?.off("changeScrollLeft", EditorFile.#onscrollleft);
-			this.session?.off("changeFold", EditorFile.#onfold);
 			this.#removeCache();
-			this.session?.destroy();
-			delete this.session;
+			// CodeMirror EditorState doesn't need explicit cleanup
+			this.session = null;
 		} else if (this.content) {
 			this.content.remove();
 		}
@@ -1193,6 +1724,25 @@ export default class EditorFile {
 
 	#showNoAppError() {
 		toast(strings["no app found to handle this file"]);
+	}
+
+	#createTabTail() {
+		if (!this.#pinned) {
+			return tag("span", {
+				className: "icon cancel",
+				dataset: {
+					action: "close-file",
+				},
+			});
+		}
+
+		return tag("span", {
+			className: "icon pin",
+			title: strings["unpin tab"] || "Unpin tab",
+			dataset: {
+				action: "toggle-pin",
+			},
+		});
 	}
 
 	#getTitle() {
@@ -1241,6 +1791,10 @@ function tabOnclick(e) {
 	const { action } = e.target.dataset;
 	if (action === "close-file") {
 		this.remove();
+		return;
+	}
+	if (action === "toggle-pin") {
+		this.togglePinned();
 		return;
 	}
 	this.makeActive();
