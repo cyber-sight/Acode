@@ -1,8 +1,37 @@
 export PATH=/bin:/sbin:/usr/bin:/usr/sbin:/usr/share/bin:/usr/share/sbin:/usr/local/bin:/usr/local/sbin:/system/bin:/system/xbin:$PREFIX/local/bin
 export PS1="\[\e[38;5;46m\]\u\[\033[39m\]@localhost \[\033[39m\]\w \[\033[0m\]\\$ "
-export HOME=/home
+export HOME=/public
 export TERM=xterm-256color
 
+INSTALLING=false
+FAILSAFE=false
+
+# Parse internal flags
+while [ $# -gt 0 ]; do
+    case "$1" in
+        --installing)
+            INSTALLING=true
+            shift
+            ;;
+        --failsafe)
+            FAILSAFE=true
+            shift
+            ;;
+        --)
+            shift
+            break
+            ;;
+        *)
+            break
+            ;;
+    esac
+done
+
+# If a command was supplied, execute it and exit
+# without it Executor will break
+if [ "$INSTALLING" != true ] && [ $# -gt 0 ] && [ "${1#--}" = "$1" ]; then
+    exec "$@"
+fi
 
 required_packages="bash command-not-found tzdata wget"
 missing_packages=""
@@ -30,7 +59,7 @@ if [ ! -f /linkerconfig/ld.config.txt ]; then
 fi
 
 
-if [ "$1" = "--installing" ]; then
+if [ "$INSTALLING" = true ]; then
     echo "Configuring timezone..."
     
     if [ -n "$ANDROID_TZ" ] && [ -f "/usr/share/zoneinfo/$ANDROID_TZ" ]; then
@@ -42,12 +71,17 @@ if [ "$1" = "--installing" ]; then
     fi
 
     mkdir -p "$PREFIX/.configured"
+
+    if [ ! -f "$HOME/.bashrc" ]; then
+       touch "$HOME/.bashrc" && chmod 644 "$HOME/.bashrc"
+    fi
+
     echo "Installation completed."
     exit 0
 fi
 
 
-if [ "$#" -eq 0 ]; then
+
     echo "$$" > "$PREFIX/pid"
     chmod +x "$PREFIX/axs"
 
@@ -87,15 +121,27 @@ usage() {
 
 get_abs_path() {
     local path="$1"
-    local abs_path
-    abs_path=$(realpath -- "$path" 2>/dev/null)
-    if [[ $? -ne 0 ]]; then
-        if [[ "$path" == /* ]]; then
+    local abs_path=""
+
+    if command -v realpath >/dev/null 2>&1; then
+        abs_path=$(realpath -- "$path" 2>/dev/null)
+    fi
+
+    if [[ -z "$abs_path" ]]; then
+        if [[ -d "$path" ]]; then
+            abs_path=$(cd -- "$path" 2>/dev/null && pwd -P)
+        elif [[ -e "$path" ]]; then
+            local dir_name file_name
+            dir_name=$(dirname -- "$path")
+            file_name=$(basename -- "$path")
+            abs_path="$(cd -- "$dir_name" 2>/dev/null && pwd -P)/$file_name"
+        elif [[ "$path" == /* ]]; then
             abs_path="$path"
         else
             abs_path="$PWD/$path"
         fi
     fi
+
     echo "$abs_path"
 }
 
@@ -144,24 +190,17 @@ if [ -f "/etc/profile" ]; then
     source "/etc/profile"
 fi
 
-
-if [ -f "$HOME/.bashrc" ]; then
-    source "$HOME/.bashrc"
-fi
-
-if [ -f /etc/bash/bashrc ]; then
-    source /etc/bash/bashrc
-fi
-
 # Environment setup
 export PATH=$PATH:/bin:/sbin:/usr/bin:/usr/sbin:/usr/share/bin:/usr/share/sbin:/usr/local/bin:/usr/local/sbin
 
-export HOME=/home 
+export HOME=/public
 export TERM=xterm-256color 
 SHELL=/bin/bash
 export PIP_BREAK_SYSTEM_PACKAGES=1
 
-# Smart path shortening function (fish-style: ~/p/s/components)
+# Default prompt with fish-style path shortening (~/p/s/components)
+# To use custom prompts (Starship, Oh My Posh, etc.), just init them in ~/.bashrc:
+#   eval "$(starship init bash)"
 _shorten_path() {
     local path="$PWD"
     
@@ -190,14 +229,93 @@ _shorten_path() {
     [[ "$path" == /* ]] && echo "/$result" || echo "$result"
 }
 
-# Update prompt vars before each command
 PROMPT_COMMAND='_PS1_PATH=$(_shorten_path); _PS1_EXIT=$?'
+
+# Source user configs AFTER defaults (so user can override PROMPT_COMMAND)
+if [ -f "$HOME/.bashrc" ]; then
+    source "$HOME/.bashrc"
+fi
+
+if [ -f /etc/bash/bashrc ]; then
+    source /etc/bash/bashrc
+fi
 
 
 # Display MOTD if available
 if [ -s /etc/acode_motd ]; then
     cat /etc/acode_motd
 fi
+
+check_binary_execution() {
+    local cmd="$1"
+    local cmd_path=""
+
+    # Ignore shell builtins, keywords, etc.
+    [[ -z "$cmd" ]] && return
+
+    # If user executed a path directly (./foo, /path/foo)
+    if [[ "$cmd" == */* ]]; then
+        cmd_path="$(realpath "$cmd" 2>/dev/null)"
+    else
+        cmd_path="$(command -v "$cmd" 2>/dev/null)"
+
+        # Resolve symlinks/relative paths
+        if [[ -n "$cmd_path" ]]; then
+            cmd_path="$(realpath "$cmd_path" 2>/dev/null)"
+        fi
+    fi
+
+    [[ -z "$cmd_path" ]] && return
+    [[ ! -f "$cmd_path" ]] && return
+
+    if [[ "$cmd_path" == /storage/* ]] || \
+       [[ "$cmd_path" == /sdcard/* ]]; then
+        echo -e "\e[1;31m[!] ATTENTION REQUIRED\e[0m
+
+\e[1;31mThe binary is located in:\e[0m
+  \e[36m$cmd_path\e[0m
+
+\e[1;31mBinaries cannot be executed reliably from /sdcard or /storage.\e[0m
+These locations are backed by Android's external storage layer and do not support normal Linux executable permissions.
+
+Move your project or binary to a directory under:
+  \e[1;32m/home/\e[0m
+
+Example:
+  \e[1;32mmv myproject ~/myproject\e[0m
+  \e[1;32mcd ~/myproject\e[0m
+
+Then run the binary again.
+" >&2
+    fi
+}
+
+_acode_preexec() {
+    # Skip commands executed by the trap itself
+    [[ "$BASH_COMMAND" == trap* ]] && return
+
+    local cmd="${BASH_COMMAND%% *}"
+    check_binary_execution "$cmd"
+}
+
+# Preserve any existing DEBUG trap and append our handler instead of overwriting it.
+# This avoids clobbering user-installed preexec hooks (starship, fzf, bash-preexec, etc.).
+__acode_existing_debug_trap="$(trap -p DEBUG 2>/dev/null)"
+if [[ -n "${__acode_existing_debug_trap}" ]]; then
+    __acode_existing_cmd="$(printf "%s" "${__acode_existing_debug_trap}" | sed -E "s/.*'((.*)?)'.*/\1/")"
+else
+    __acode_existing_cmd=""
+fi
+
+# Only add our handler if it's not already present
+if [[ "${__acode_existing_cmd}" != *"_acode_preexec"* ]]; then
+    if [[ -n "${__acode_existing_cmd}" ]]; then
+        trap "${__acode_existing_cmd}; _acode_preexec" DEBUG
+    else
+        trap '_acode_preexec' DEBUG
+    fi
+fi
+unset __acode_existing_debug_trap __acode_existing_cmd
 
 # Command-not-found handler
 command_not_found_handle() {
@@ -228,12 +346,11 @@ if ! grep -q 'PS1=' "$PREFIX/alpine/initrc"; then
     # echo 'PS1="\[\033[1;32m\]\u\[\033[0m\]@localhost \[\033[1;34m\]\w\[\033[0m\] \$ "' >> "$PREFIX/alpine/initrc"
 fi
 
+
 chmod +x "$PREFIX/alpine/initrc"
 
-#actual source
-#everytime a terminal is started initrc will run
-"$PREFIX/axs" -c "bash --rcfile /initrc -i"
-
-else
-    exec "$@"
+if [ "$FAILSAFE" != true ]; then
+    #actual source
+    #everytime a terminal is started initrc will run
+    "$PREFIX/axs" -c "bash --rcfile /initrc -i"
 fi

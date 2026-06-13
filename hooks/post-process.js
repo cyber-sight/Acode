@@ -21,17 +21,26 @@ if (
 if (fs.existsSync(androidGradleFilePath)) fs.unlinkSync(androidGradleFilePath);
 fs.copyFileSync(gradleFilePath, androidGradleFilePath);
 
-deleteDirRecursively(resPath, [
-  path.join('values', 'strings.xml'),
-  path.join('values', 'colors.xml'),
-  path.join('values', 'styles.xml'),
-  'anim',
-  'xml',
-]);
+// Cordova Android 15 generates `cdv_*` resources and version-qualified value
+// directories that are required later in the build. Keep the generated tree and
+// only overlay this project's custom resources on top of it.
 copyDirRecursively(localResPath, resPath);
 enableLegacyJni();
 enableStaticContext();
 patchTargetSdkVersion();
+enableKeyboardWorkaround();
+
+function getPackageName() {
+  const configPath = path.resolve(__dirname, '../config.xml');
+  if (!fs.existsSync(configPath)) {
+    console.warn('[Cordova Hook] ⚠️ config.xml not found at', configPath);
+    throw new Error(`config.xml is missing at ${configPath}`);
+  }
+  const content = fs.readFileSync(configPath, 'utf-8');
+  const match = content.match(/id="([^"]+)"/);
+  const packageName = match ? match[1] : 'com.foxdebug.acode';
+  return packageName;
+}
 
 
 function getTmpDir() {
@@ -70,7 +79,7 @@ function patchTargetSdkVersion() {
   const sdkRegex = /targetSdkVersion\s+(cordovaConfig\.SDK_VERSION|\d+)/;
 
   if (sdkRegex.test(content)) {
-    let api = "35";
+    let api = "36";
     const tmp = getTmpDir();
     if (tmp == null) {
       console.warn("---------------------------------------------------------------------------------\n\n\n\n");
@@ -110,11 +119,17 @@ function enableLegacyJni() {
   const prefix = execSync('npm prefix').toString().trim();
   const gradleFile = path.join(prefix, 'platforms/android/app/build.gradle');
 
-  if (!fs.existsSync(gradleFile)) return;
+  if (!fs.existsSync(gradleFile)){
+    console.warn('[Cordova Hook] ⚠️ build.gradle not found');
+     return
+  };
 
   let content = fs.readFileSync(gradleFile, 'utf-8');
   // Check for correct block to avoid duplicate insertion
-  if (content.includes('useLegacyPackaging = true')) return;
+  if (content.includes('useLegacyPackaging = true')){
+    console.log('[Cordova Hook] ✅ Legacy JNI packaging already enabled, skipping');
+    return
+  };
 
   // Inject under android block with correct Groovy syntax
   content = content.replace(/android\s*{/, match => {
@@ -136,12 +151,16 @@ function enableLegacyJni() {
 function enableStaticContext() {
   try {
     const prefix = execSync('npm prefix').toString().trim();
+    const packageName = getPackageName();
     const mainActivityPath = path.join(
       prefix,
-      'platforms/android/app/src/main/java/com/foxdebug/acode/MainActivity.java'
+      'platforms/android/app/src/main/java',
+      packageName.replace(/\./g, '/'),
+      'MainActivity.java'
     );
 
     if (!fs.existsSync(mainActivityPath)) {
+      console.warn('[Cordova Hook] ⚠️ MainActivity.java not found at', mainActivityPath);
       return;
     }
 
@@ -153,6 +172,7 @@ function enableStaticContext() {
       content.includes('public static Context getContext()') &&
       content.includes('weakContext = new WeakReference<>(this);')
     ) {
+      console.log('[Cordova Hook] ✅ Static context already enabled, skipping');
       return;
     }
 
@@ -184,8 +204,65 @@ function enableStaticContext() {
     );
 
     fs.writeFileSync(mainActivityPath, content, 'utf-8');
+    console.log('[Cordova Hook] ✅ Enabled static context');
   } catch (err) {
     console.error('[Cordova Hook] ❌ Failed to patch MainActivity:', err.message);
+  }
+}
+
+function enableKeyboardWorkaround() {
+  try{
+    const prefix = execSync('npm prefix').toString().trim();
+    const packageName = getPackageName();
+    const mainActivityPath = path.join(
+      prefix,
+      'platforms/android/app/src/main/java',
+      packageName.replace(/\./g, '/'),
+      'MainActivity.java'
+    );
+
+    if (!fs.existsSync(mainActivityPath)) {
+      console.warn('[Cordova Hook] ⚠️ MainActivity.java not found at', mainActivityPath);
+      return;
+    }
+
+    let content = fs.readFileSync(mainActivityPath, 'utf-8');
+
+    // Skip if already patched
+    if (content.includes('SoftInputAssist')) {
+      console.log('[Cordova Hook] ✅ Keyboard workaround already enabled, skipping');
+      return;
+    }
+
+    // Add import
+    if (!content.includes('import com.foxdebug.system.SoftInputAssist;')) {
+      content = content.replace(
+        /import java.lang.ref.WeakReference;|import org\.apache\.cordova\.\*;/,
+        match =>
+          match + '\nimport com.foxdebug.system.SoftInputAssist;'
+      );
+    }
+
+    // Declare field
+    if (!content.includes('private SoftInputAssist softInputAssist;')) {
+      content = content.replace(
+        /public class MainActivity extends CordovaActivity\s*\{/,
+        match =>
+          match +
+          `\n\n    private SoftInputAssist softInputAssist;\n`
+      );
+    }
+
+    // Initialize in onCreate
+    content = content.replace(
+      /loadUrl\(launchUrl\);/,
+      `loadUrl(launchUrl);\n\n        softInputAssist = new SoftInputAssist(this);`
+    );
+
+    fs.writeFileSync(mainActivityPath, content, 'utf-8');
+    console.log('[Cordova Hook] ✅ Enabled keyboard workaround');
+  } catch (err) {
+    console.error('[Cordova Hook] ❌ Failed to enable keyboard workaround:', err.message);
   }
 }
 
@@ -220,10 +297,11 @@ function copyDirRecursively(src, dest, skip = [], currPath = '') {
         path.join(src, childItemName),
         path.join(dest, childItemName),
         skip,
-        childItemName,
+        relativePath,
       );
     });
   } else {
+    removeConflictingResourceFiles(src, dest);
     fs.copyFileSync(src, dest);
 
     // log
@@ -232,48 +310,35 @@ function copyDirRecursively(src, dest, skip = [], currPath = '') {
   }
 }
 
-/**
- * Delete directory recursively
- * @param {string} dir Directory to delete
- * @param {string[]} except Files to not delete
- */
-function deleteDirRecursively(dir, except = [], currPath = '') {
-  const exists = fs.existsSync(dir);
-  const stats = exists && fs.statSync(dir);
-  const isDirectory = exists && stats.isDirectory();
+function removeConflictingResourceFiles(src, dest) {
+  const parentDir = path.dirname(dest);
 
-  if (!exists) {
-    console.log(`File ${dir} does not exist`);
+  if (!fs.existsSync(parentDir)) {
     return;
   }
 
-  if (exists && isDirectory) {
-    let deleteDir = true;
-    fs.readdirSync(dir).forEach((childItemName) => {
-      const relativePath = path.join(currPath, childItemName);
-      if (
-        childItemName.startsWith('.')
-        || except.includes(childItemName)
-        || except.includes(relativePath)
-      ) {
-        console.log('\x1b[33m%s\x1b[0m', `skipped: ${relativePath}`); // yellow
-        deleteDir = false;
-        return;
-      }
+  const resourceDirName = path.basename(parentDir);
+  if (!resourceDirName.startsWith('mipmap') && !resourceDirName.startsWith('drawable')) {
+    return;
+  }
 
-      deleteDirRecursively(
-        path.join(dir, childItemName),
-        except,
-        childItemName,
-      );
-    });
+  const srcExt = path.extname(src);
+  const resourceName = path.basename(src, srcExt);
 
-    if (deleteDir) {
-      console.log('\x1b[31m%s\x1b[0m', `deleted: ${currPath || path.basename(dir)}`); // red
-      fs.rmSync(dir, { recursive: true });
+  for (const existingName of fs.readdirSync(parentDir)) {
+    const existingPath = path.join(parentDir, existingName);
+    if (existingPath === dest || !fs.statSync(existingPath).isFile()) {
+      continue;
     }
-  } else {
-    console.log('\x1b[31m%s\x1b[0m', `deleted: ${currPath || path.basename(dir)}`); // red
-    fs.rmSync(dir);
+
+    const existingExt = path.extname(existingName);
+    const existingResourceName = path.basename(existingName, existingExt);
+
+    if (existingResourceName !== resourceName || existingExt === srcExt) {
+      continue;
+    }
+
+    fs.rmSync(existingPath);
+    console.log('\x1b[31m%s\x1b[0m', `deleted conflicting resource: ${existingName}`);
   }
 }

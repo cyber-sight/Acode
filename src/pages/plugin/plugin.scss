@@ -66,15 +66,23 @@
         display: flex;
         gap: 16px;
         flex-wrap: wrap;
+        color: var(--secondary-text-color);
         color: color-mix(in srgb, var(--primary-text-color) 60%, transparent);
         font-size: 14px;
         margin-bottom: 12px;
 
-        .author-name {
+        .meta-item {
           display: inline-flex;
           align-items: center;
           gap: 4px;
+          vertical-align: middle;
 
+          .icon {
+            flex-shrink: 0;
+          }
+        }
+
+        .author-name {
           a {
             text-decoration: none;
             color: inherit;
@@ -97,6 +105,7 @@
         display: flex;
         flex-wrap: wrap;
         gap: 16px;
+        color: var(--secondary-text-color);
         color: color-mix(in srgb, var(--primary-text-color) 60%, transparent);
         font-size: 14px;
 
@@ -111,24 +120,16 @@
           }
 
           .rating-value {
-            padding: 2px 8px;
             border-radius: 12px;
             font-weight: 600;
           }
 
           .rating-high {
-            background: var(--link-text-color);
-            color: #0a3600;
-          }
-
-          .rating-medium {
-            background: #f0a500;
-            color: #3d2800;
+            color: var(--success-text-color);
           }
 
           .rating-low {
-            background: var(--error-text-color);
-            color: #fff;
+            color: var(--danger-color);
           }
         }
       }
@@ -141,6 +142,7 @@
         position: relative;
 
         .keyword {
+          background: var(--popup-background-color);
           background: color-mix(in srgb,
               var(--link-text-color) 10%,
               transparent);
@@ -149,7 +151,29 @@
           border-radius: 12px;
           font-size: 13px;
           transition: all 0.2s;
+          border: 1px solid var(--link-text-color);
           border: 1px solid color-mix(in srgb, var(--link-text-color) 25%, transparent);
+        }
+      }
+
+      .legacy-editor-warning {
+        display: inline-flex;
+        align-items: center;
+        gap: 6px;
+        max-width: 100%;
+        margin-top: 12px;
+        padding: 7px 10px;
+        border-radius: 8px;
+        border: 1px solid color-mix(in srgb, var(--error-text-color) 28%, transparent);
+        background: color-mix(in srgb, var(--error-text-color) 10%, transparent);
+        color: color-mix(in srgb, var(--primary-text-color) 88%, var(--error-text-color));
+        font-size: 12px;
+        line-height: 1.35;
+
+        .icon {
+          flex: 0 0 auto;
+          color: var(--error-text-color);
+          font-size: 15px;
         }
       }
     }
@@ -158,6 +182,7 @@
       display: flex;
       gap: 8px;
 
+      .info:not(.icon),
       .error {
         display: flex;
         color: rgb(255, 185, 92);
@@ -168,6 +193,14 @@
           color: inherit;
           text-decoration: none;
         }
+      }
+
+      .info:not(.icon) {
+        color: inherit;
+        align-items: start;
+        text-align: left;
+        gap: 5px;
+        opacity: 0.8;
       }
 
       .btn {
@@ -226,6 +259,7 @@
       border-bottom: 1px solid var(--border-color);
 
       .tab {
+        color: var(--secondary-text-color);
         color: color-mix(in srgb, var(--primary-text-color) 60%, transparent);
       }
 
@@ -238,24 +272,24 @@
       padding: 0 0 24px;
 
       #overview {
-        [class*="language-"] {
-          word-wrap: normal;
-          white-space: pre;
-          font-size: 0.8rem;
-          border-radius: 4px;
-          padding: 1em;
-          margin: 5px 0;
-          background: var(--primary-color);
-          color: var(--primary-text-color);
-          /* border-left: solid 5px var(--active-color); */
-          overflow: auto;
-          width: calc(100% - 10px);
-          display: block;
-          user-select: text;
+        pre {
+          margin: 16px 0;
+          border-radius: 8px;
+          overflow: hidden;
+        }
 
-          div {
-            background: var(--primary-color);
-          }
+        code[class*="language-"] {
+          display: block;
+          font-size: 13px;
+          line-height: 1.5;
+          padding: 16px;
+          margin: 0;
+          overflow-x: auto;
+          white-space: pre;
+          word-wrap: normal;
+          tab-size: 2;
+          user-select: text;
+          -webkit-overflow-scrolling: touch;
         }
       }
     }
@@ -266,6 +300,26 @@
 
     .content-section.active {
       display: block;
+    }
+
+    .content-section.md {
+      overflow-x: hidden;
+      overflow-wrap: break-word;
+
+      img {
+        max-width: 100%;
+        height: auto;
+      }
+
+      pre {
+        overflow-x: auto;
+        max-width: 100%;
+      }
+
+      * {
+        max-width: 100%;
+        box-sizing: border-box;
+      }
     }
 
     .contributor {
@@ -297,6 +351,7 @@
 
         .contributor-role {
           font-size: 13px;
+          color: var(--secondary-text-color);
           color: color-mix(in srgb, var(--primary-text-color) 60%, transparent);
         }
       }
@@ -306,6 +361,7 @@
       .no-changelog {
         text-align: center;
         padding: 2rem;
+        color: var(--secondary-text-color);
         color: color-mix(in srgb, var(--primary-text-color) 60%, transparent);
 
         i {
@@ -320,6 +376,29 @@
         }
       }
     }
+  }
+
+  @supports not (gap: 1px) {
+    .plugin-header > * {
+      margin-right: 20px;
+      margin-bottom: 20px;
+    }
+    .plugin-header > *:last-child {
+      margin-right: 0;
+      margin-bottom: 0;
+    }
+    .title-wrapper > * + * { margin-left: 16px; }
+    .source-indicator > * + * { margin-left: 6px; }
+    .plugin-meta > * + * { margin-left: 16px; }
+    .meta-item > * + * { margin-left: 4px; }
+    .metrics-row > * + * { margin-left: 16px; }
+    .metric > * + * { margin-left: 4px; }
+    .keywords > * + * { margin-left: 6px; }
+    .legacy-editor-warning > * + * { margin-left: 6px; }
+    .action-buttons > * + * { margin-left: 8px; }
+    .info:not(.icon) > * + * { margin-left: 5px; }
+    .btn > * + * { margin-left: 6px; }
+    .contributor > * + * { margin-left: 12px; }
   }
 
   @media (max-width: 768px) {

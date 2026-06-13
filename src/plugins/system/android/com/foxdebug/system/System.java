@@ -78,6 +78,8 @@ import java.io.FileOutputStream;
 import java.io.InputStream;
 import java.io.OutputStream;
 import java.io.IOException;
+import java.io.BufferedReader;
+import java.io.InputStreamReader;
 
 import android.os.Build;
 import android.os.Environment;
@@ -87,13 +89,41 @@ import android.content.Intent;
 import android.content.pm.PackageInfo;
 import android.content.pm.PackageManager;
 import android.net.Uri;
+import android.provider.DocumentsContract;
 import android.provider.Settings;
 
 import androidx.core.content.ContextCompat;
 
 
+import android.graphics.Paint;
+import android.graphics.RectF;
+import android.graphics.Typeface;
+import android.graphics.Canvas;
+import android.util.TypedValue;
+
+import android.provider.MediaStore;
+import android.graphics.Bitmap;
+import android.os.Build;
+import android.graphics.ImageDecoder;
+
+
+import java.security.MessageDigest;
+import java.security.MessageDigest;
+
+import android.content.pm.InstallSourceInfo;
+import android.content.pm.PackageManager;
+import android.os.Build;
+
+import android.content.Intent;
+
+import org.apache.cordova.CallbackContext;
+import org.apache.cordova.CordovaPlugin;
+
+import org.json.JSONArray;
+import org.json.JSONException;
 
 public class System extends CordovaPlugin {
+    private static final String TAG = "SystemPlugin";
 
     private CallbackContext requestPermissionCallback;
     private Activity activity;
@@ -105,12 +135,22 @@ public class System extends CordovaPlugin {
     private CallbackContext intentHandler;
     private CordovaWebView webView;
     private String fileProviderAuthority;
+    private RewardPassManager rewardPassManager;
 
     public void initialize(CordovaInterface cordova, CordovaWebView webView) {
         super.initialize(cordova, webView);
         this.context = cordova.getContext();
         this.activity = cordova.getActivity();
         this.webView = webView;
+        this.rewardPassManager = new RewardPassManager(this.context);
+        this.activity.runOnUiThread(
+            new Runnable() {
+                @Override
+                public void run() {
+                    setNativeContextMenuDisabled(false);
+                }
+            }
+        );
 
         // Set up global exception handler
         Thread.setDefaultUncaughtExceptionHandler(
@@ -153,6 +193,7 @@ public class System extends CordovaPlugin {
         switch (action) {
             case "get-webkit-info":
             case "file-action":
+            case "checksumText":
             case "is-powersave-mode":
             case "get-app-info":
             case "add-shortcut":
@@ -169,6 +210,11 @@ public class System extends CordovaPlugin {
             case "decode":
             case "encode":
             case "copyToUri":
+            case "getInstaller":
+            case "compare-file-text":
+            case "compare-texts":
+            case "extractAsset":
+            case "pin-file-shortcut":
                 break;
             case "get-configuration":
                 getConfiguration(callbackContext);
@@ -177,11 +223,44 @@ public class System extends CordovaPlugin {
                 setInputType(arg1);
                 callbackContext.success();
                 return true;
+            case "set-native-context-menu-disabled":
+                this.cordova.getActivity()
+                    .runOnUiThread(
+                        new Runnable() {
+                            @Override
+                            public void run() {
+                                setNativeContextMenuDisabled(Boolean.parseBoolean(arg1));
+                                callbackContext.success();
+                            }
+                        }
+                    );
+                return true;
             case "get-cordova-intent":
                 getCordovaIntent(callbackContext);
                 return true;
             case "set-intent-handler":
                 setIntentHandler(callbackContext);
+                return true;
+
+            case "shareText":
+                String text = args.getString(0);
+
+                cordova.getActivity().runOnUiThread(() -> {
+                    try {
+                        Intent shareIntent = new Intent(Intent.ACTION_SEND);
+                        shareIntent.setType("text/plain");
+                        shareIntent.putExtra(Intent.EXTRA_TEXT, text);
+
+                        cordova.getActivity().startActivity(
+                            Intent.createChooser(shareIntent, "Share")
+                        );
+
+                        callbackContext.success();
+
+                    } catch (Exception e) {
+                        callbackContext.error(e.getMessage());
+                    }
+                });
                 return true;
             case "set-ui-theme":
                 this.cordova.getActivity()
@@ -218,6 +297,12 @@ public class System extends CordovaPlugin {
 
             case "getFilesDir":
                 callbackContext.success(getFilesDir());
+                return true;
+            case "getRewardStatus":
+                callbackContext.success(rewardPassManager.getRewardStatus());
+                return true;
+            case "redeemReward":
+                callbackContext.success(rewardPassManager.redeemReward(args.getString(0)));
                 return true;
 
             case "getParentPath":
@@ -333,7 +418,7 @@ public class System extends CordovaPlugin {
                 if (new File(args.getString(0)).setExecutable(Boolean.parseBoolean(args.getString(1)))) {
                     callbackContext.success();
                 } else {
-                    callbackContext.error("set exec faild");
+                    callbackContext.error("set exec failed");
                 }
 
                 return true;
@@ -347,6 +432,40 @@ public class System extends CordovaPlugin {
                 new Runnable() {
                     public void run() {
                         switch (action) {
+                            case "extractAsset":
+                                try{
+                                    String assetName = args.getString(0);
+                                    String destinationPath = args.getString(1);
+                                    extractAsset(assetName, destinationPath, callbackContext);
+                                }catch(Exception e){
+                                    callbackContext.error("Failed to extract asset: " + e.getMessage());
+                                            
+                                }
+                                return;
+                            
+                            case "getInstaller":
+                                try {
+                                    PackageManager pm = context.getPackageManager();
+
+                                    String installer;
+
+                                    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+                                        InstallSourceInfo info =
+                                            pm.getInstallSourceInfo(context.getPackageName());
+
+                                        installer = info.getInstallingPackageName();
+                                    } else {
+                                        installer = pm.getInstallerPackageName(
+                                            context.getPackageName()
+                                        );
+                                    }
+
+                                    callbackContext.success(installer);
+
+                                } catch (Exception e) {
+                                    callbackContext.error(e.getMessage());
+                                }
+                                break;
                             case "copyToUri":
                                 try {
                                     //srcUri is a file
@@ -458,6 +577,9 @@ public class System extends CordovaPlugin {
                             case "get-app-info":
                                 getAppInfo(callbackContext);
                                 break;
+                            case "pin-file-shortcut":
+                                pinFileShortcut(args.optJSONObject(0), callbackContext);
+                                break;
                             case "add-shortcut":
                                 addShortcut(
                                     arg1,
@@ -491,7 +613,7 @@ public class System extends CordovaPlugin {
                                 openInBrowser(arg1, callbackContext);
                                 break;
                             case "launch-app":
-                                launchApp(arg1, arg2, arg3, callbackContext);
+                                launchApp(arg1, arg2, args.optJSONObject(2), callbackContext);
                                 break;
                             case "get-global-setting":
                                 getGlobalSetting(arg1, callbackContext);
@@ -505,6 +627,39 @@ public class System extends CordovaPlugin {
                             case "encode":
                                 encode(arg1, arg2, callbackContext);
                                 break;
+                            case "compare-file-text":
+                                compareFileText(arg1, arg2, arg3, callbackContext);
+                                break;
+                            case "compare-texts":
+                                compareTexts(arg1, arg2, callbackContext);
+                                break;
+                            case "checksumText":
+                            
+                                cordova.getThreadPool().execute(() -> {
+                                    try {
+                                        
+                                        MessageDigest digest = MessageDigest.getInstance("SHA-256");
+
+                                        byte[] hash = digest.digest(args.getString(0).getBytes("UTF-8"));
+
+                                        StringBuilder hexString = new StringBuilder();
+
+                                        for (byte b : hash) {
+                                            String hex = Integer.toHexString(0xff & b);
+
+                                            if (hex.length() == 1) hexString.append('0');
+
+                                            hexString.append(hex);
+                                        }
+
+
+                                        callbackContext.success(hexString.toString());
+                                    } catch (Exception e) {
+                                        callbackContext.error(e.getMessage());
+                                    }
+                                });
+
+                                break;
                             default:
                                 break;
                         }
@@ -517,19 +672,21 @@ public class System extends CordovaPlugin {
 
     private void sendLogToJavaScript(String level, String message) {
         final String js =
-            "window.log('" + level + "', " + JSONObject.quote(message) + ");";
-        cordova
-            .getActivity()
-            .runOnUiThread(
-                new Runnable() {
-                    @Override
-                    public void run() {
-                        webView.loadUrl("javascript:" + js);
-                    }
-                }
-            );
-    }
+            "if (typeof window.log === 'function')" +
+            "  window.log(" + JSONObject.quote(level) + ", " + JSONObject.quote(message) + ");" +
+            "else" +
+            "  console.log(" + JSONObject.quote(level) + ", " + JSONObject.quote(message) + ");";
 
+        cordova.getActivity().runOnUiThread(() -> {
+            try {
+                ((android.webkit.WebView) webView.getEngine().getView())
+                    .evaluateJavascript(js, null);
+            } catch (Exception e) {
+                Log.e(TAG, "Failed to send log to JavaScript: " + e.getMessage());
+            }
+        });
+    }
+    
     // Helper method to determine MIME type using Android's built-in MimeTypeMap
     private String getMimeTypeFromExtension(String fileName) {
         String extension = "";
@@ -616,6 +773,172 @@ public class System extends CordovaPlugin {
         }
     }
 
+    /**
+     * Compares file content with provided text.
+     * This method runs in a background thread to avoid blocking the UI.
+     * 
+     * @param fileUri The URI of the file to read (file:// or content://)
+     * @param encoding The character encoding to use when reading the file
+     * @param currentText The text to compare against the file content
+     * @param callback Returns 1 if texts are different, 0 if same
+     */
+    private void compareFileText(
+        String fileUri,
+        String encoding,
+        String currentText,
+        CallbackContext callback
+    ) {
+        try {
+            if (fileUri == null || fileUri.isEmpty()) {
+                callback.error("File URI is required");
+                return;
+            }
+
+            if (encoding == null || encoding.isEmpty()) {
+                encoding = "UTF-8";
+            }
+
+            if (!Charset.isSupported(encoding)) {
+                callback.error("Charset not supported: " + encoding);
+                return;
+            }
+
+            Uri uri = Uri.parse(fileUri);
+            Charset charset = Charset.forName(encoding);
+            String fileContent;
+
+            // Handle file:// URIs
+            if ("file".equalsIgnoreCase(uri.getScheme())) {
+                File file = new File(uri.getPath());
+                
+                // Validate file
+                if (!file.exists()) {
+                    callback.error("File does not exist");
+                    return;
+                }
+                if (!file.isFile()) {
+                    callback.error("Path is not a file");
+                    return;
+                }
+                if (!file.canRead()) {
+                    callback.error("File is not readable");
+                    return;
+                }
+
+                Path path = file.toPath();
+                fileContent = new String(Files.readAllBytes(path), charset);
+
+            } else if ("content".equalsIgnoreCase(uri.getScheme())) {
+                // Handle content:// URIs (including SAF tree URIs)
+                InputStream inputStream = null;
+                try {
+                    String uriString = fileUri;
+                    Uri resolvedUri = uri;
+                    
+                    // Check if this is a SAF tree URI with :: separator
+                    if (uriString.contains("::")) {
+                        try {
+                            // Split into tree URI and document ID
+                            String[] parts = uriString.split("::", 2);
+                            String treeUriStr = parts[0];
+                            String docId = parts[1];
+                            
+                            // Build document URI directly from tree URI and document ID
+                            Uri treeUri = Uri.parse(treeUriStr);
+                            resolvedUri = DocumentsContract.buildDocumentUriUsingTree(treeUri, docId);
+                        } catch (Exception e) {
+                            callback.error("SAF_FALLBACK: Invalid SAF URI format - " + e.getMessage());
+                            return;
+                        }
+                    }
+                    
+                    // Try to open the resolved URI
+                    inputStream = context.getContentResolver().openInputStream(resolvedUri);
+                    
+                    if (inputStream == null) {
+                        callback.error("Cannot open file");
+                        return;
+                    }
+
+                    StringBuilder sb = new StringBuilder();
+                    try (BufferedReader reader = new BufferedReader(
+                            new InputStreamReader(inputStream, charset))) {
+                        char[] buffer = new char[8192];
+                        int charsRead;
+                        while ((charsRead = reader.read(buffer)) != -1) {
+                            sb.append(buffer, 0, charsRead);
+                        }
+                    }
+                    fileContent = sb.toString();
+                    
+                } finally {
+                    if (inputStream != null) {
+                        try {
+                            inputStream.close();
+                        } catch (IOException closeError) {
+                            Log.w(TAG, "Failed to close input stream while reading file.", closeError);
+                        }
+                    }
+                }
+            } else {
+                callback.error("Unsupported URI scheme: " + uri.getScheme());
+                return;
+            }
+
+            // check length first 
+            if (fileContent.length() != currentText.length()) {
+                callback.success(1); // Changed
+                return;
+            }
+
+            // Full comparison
+            if (fileContent.equals(currentText)) {
+                callback.success(0); // Not changed
+            } else {
+                callback.success(1); // Changed
+            }
+
+        } catch (Exception e) {
+            callback.error(e.toString());
+        }
+    }
+
+    /**
+     * Compares two text strings.
+     * This method runs in a background thread to avoid blocking the UI
+     * for large string comparisons.
+     * 
+     * @param text1 First text to compare
+     * @param text2 Second text to compare
+     * @param callback Returns 1 if texts are different, 0 if same
+     */
+    private void compareTexts(
+        String text1,
+        String text2,
+        CallbackContext callback
+    ) {
+        try {
+            if (text1 == null) text1 = "";
+            if (text2 == null) text2 = "";
+
+            // check length first
+            if (text1.length() != text2.length()) {
+                callback.success(1); // Changed
+                return;
+            }
+
+            // Full comparison
+            if (text1.equals(text2)) {
+                callback.success(0); // Not changed
+            } else {
+                callback.success(1); // Changed
+            }
+
+        } catch (Exception e) {
+            callback.error(e.toString());
+        }
+    }
+
     private void getAvailableEncodings(CallbackContext callback) {
         try {
             Map < String, Charset > charsets = Charset.availableCharsets();
@@ -692,30 +1015,20 @@ public class System extends CordovaPlugin {
     }
 
     public boolean fileExists(String path, String countSymlinks) {
-        boolean followSymlinks = !Boolean.parseBoolean(countSymlinks);
+        boolean countSymbolicLinks = Boolean.parseBoolean(countSymlinks);
         File file = new File(path);
 
         // Android < O does not implement File#toPath(), fall back to legacy checks
         if (Build.VERSION.SDK_INT < Build.VERSION_CODES.O) {
-            if (!file.exists()) return false;
-            if (followSymlinks) {
-                try {
-                    // If canonical and absolute paths differ, it's a symlink
-                    return file.getCanonicalPath().equals(file.getAbsolutePath());
-                } catch (IOException ignored) {
-                    return false;
-                }
-            }
-            return true;
+            return file.exists();
         }
 
         Path p = file.toPath();
         try {
-            if (followSymlinks) {
-                return Files.exists(p) && !Files.isSymbolicLink(p);
-            } else {
+            if (countSymbolicLinks) {
                 return Files.exists(p, LinkOption.NOFOLLOW_LINKS);
             }
+            return Files.exists(p);
         } catch (Exception e) {
             return false;
         }
@@ -802,13 +1115,15 @@ public class System extends CordovaPlugin {
         for (int i = 0; i < arr.length(); i++) {
             try {
                 String permission = arr.getString(i);
-                if (permission != null || !permission.equals("")) {
+                if (permission == null || permission.equals("")) {
                     throw new Exception("Permission cannot be null or empty");
                 }
                 if (!cordova.hasPermission(permission)) {
                     list.add(permission);
                 }
-            } catch (JSONException e) {}
+            } catch (JSONException e) {
+                Log.w(TAG, "Invalid permission entry at index " + i, e);
+            }
         }
 
         String[] res = new String[list.size()];
@@ -869,6 +1184,309 @@ public class System extends CordovaPlugin {
         boolean powerSaveMode = powerManager.isPowerSaveMode();
 
         callback.success(powerSaveMode ? 1 : 0);
+    }
+
+    private void pinFileShortcut(JSONObject shortcutJson, CallbackContext callback) {
+        if (shortcutJson == null) {
+            callback.error("Invalid shortcut data");
+            return;
+        }
+
+        String id = shortcutJson.optString("id", "");
+        String label = shortcutJson.optString("label", "");
+        String description = shortcutJson.optString("description", label);
+        String iconSrc = shortcutJson.optString("icon", "");
+        String uriString = shortcutJson.optString("uri", "");
+
+        if (id.isEmpty() || label.isEmpty() || uriString.isEmpty()) {
+            callback.error("Missing required shortcut fields");
+            return;
+        }
+
+        if (!ShortcutManagerCompat.isRequestPinShortcutSupported(context)) {
+            callback.error("Pin shortcut not supported on this launcher");
+            return;
+        }
+
+        try {
+            Uri dataUri = Uri.parse(uriString);
+            String packageName = context.getPackageName();
+            PackageManager pm = context.getPackageManager();
+
+            Intent launchIntent = pm.getLaunchIntentForPackage(packageName);
+            if (launchIntent == null) {
+                callback.error("Launch intent not found for package: " + packageName);
+                return;
+            }
+
+            ComponentName componentName = launchIntent.getComponent();
+            if (componentName == null) {
+                callback.error("ComponentName is null");
+                return;
+            }
+
+            Intent intent = new Intent(Intent.ACTION_VIEW);
+            intent.setComponent(componentName);
+            intent.setData(dataUri);
+            intent.putExtra("acodeFileUri", uriString);
+
+            IconCompat icon;
+
+            if (iconSrc != null && !iconSrc.isEmpty()) {
+                try {
+                    Uri iconUri = Uri.parse(iconSrc);
+                    Bitmap bitmap;
+
+                    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
+                        // API 28+
+                        ImageDecoder.Source source =
+                                ImageDecoder.createSource(
+                                        context.getContentResolver(),
+                                        iconUri
+                                );
+                        bitmap = ImageDecoder.decodeBitmap(source);
+                    } else {
+                        // Below API 28
+                        bitmap = MediaStore.Images.Media.getBitmap(
+                                context.getContentResolver(),
+                                iconUri
+                        );
+                    }
+
+                    icon = IconCompat.createWithBitmap(bitmap);
+
+                } catch (Exception e) {
+                    icon = getFileShortcutIcon(label);
+                }
+            } else {
+                icon = getFileShortcutIcon(label);
+            }
+
+            ShortcutInfoCompat shortcut = new ShortcutInfoCompat.Builder(context, id)
+                .setShortLabel(label)
+                .setLongLabel(
+                    description != null && !description.isEmpty() ? description : label
+                )
+                .setIcon(icon)
+                .setIntent(intent)
+                .build();
+
+            ShortcutManagerCompat.pushDynamicShortcut(context, shortcut);
+
+            boolean requested = ShortcutManagerCompat.requestPinShortcut(
+                context,
+                shortcut,
+                null
+            );
+
+            if (!requested) {
+                callback.error("Failed to request pin shortcut");
+                return;
+            }
+
+            callback.success();
+        } catch (Exception e) {
+            callback.error(e.toString());
+        }
+    }
+
+    private IconCompat getFileShortcutIcon(String filename) {
+        Bitmap fallback = createFileShortcutBitmap(filename);
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+            return IconCompat.createWithAdaptiveBitmap(fallback);
+        }
+        return IconCompat.createWithBitmap(fallback);
+    }
+
+    private Bitmap createFileShortcutBitmap(String filename) {
+        final float baseSizeDp = 72f;
+        float sizePx = TypedValue.applyDimension(
+            TypedValue.COMPLEX_UNIT_DIP,
+            baseSizeDp,
+            context.getResources().getDisplayMetrics()
+        );
+        if (sizePx <= 0) {
+            sizePx = baseSizeDp;
+        }
+        int size = Math.round(sizePx);
+        Bitmap bitmap = Bitmap.createBitmap(size, size, Bitmap.Config.ARGB_8888);
+        Canvas canvas = new Canvas(bitmap);
+        Paint paint = new Paint(Paint.ANTI_ALIAS_FLAG | Paint.DITHER_FLAG | Paint.FILTER_BITMAP_FLAG);
+
+        int backgroundColor = pickShortcutColor(filename);
+        paint.setColor(backgroundColor);
+        float radius = size * 0.24f;
+        RectF bounds = new RectF(0, 0, size, size);
+        canvas.drawRoundRect(bounds, radius, radius, paint);
+
+        paint.setColor(Color.WHITE);
+        paint.setTextAlign(Paint.Align.CENTER);
+        paint.setTypeface(Typeface.create("sans-serif-medium", Typeface.BOLD));
+
+        String label = getShortcutLabel(filename);
+        float textLength = Math.max(1, label.length());
+        float factor = textLength > 4 ? 0.22f : textLength > 3 ? 0.26f : 0.34f;
+        paint.setTextSize(size * factor);
+        Paint.FontMetrics metrics = paint.getFontMetrics();
+        float baseline = (size - metrics.bottom - metrics.top) / 2f;
+        canvas.drawText(label, size / 2f, baseline, paint);
+
+        return bitmap;
+    }
+
+    private String getFileExtension(String filename) {
+        if (filename == null) return "";
+        int dot = filename.lastIndexOf('.');
+        if (dot < 0 || dot == filename.length() - 1) return "";
+        return filename.substring(dot + 1).toLowerCase(Locale.getDefault());
+    }
+
+    private String getShortcutLabel(String filename) {
+        String ext = getFileExtension(filename);
+        if (!ext.isEmpty()) {
+            switch (ext) {
+                case "js":
+                case "jsx":
+                    return "JS";
+                case "ts":
+                case "tsx":
+                    return "TS";
+                case "md":
+                case "markdown":
+                    return "MD";
+                case "json":
+                    return "JSON";
+                case "html":
+                case "htm":
+                    return "HTML";
+                case "css":
+                    return "CSS";
+                case "java":
+                    return "JAVA";
+                case "kt":
+                case "kts":
+                    return "KOT";
+                case "py":
+                    return "PY";
+                case "rb":
+                    return "RB";
+                case "c":
+                    return "C";
+                case "cpp":
+                case "cc":
+                case "cxx":
+                    return "CPP";
+                case "h":
+                case "hpp":
+                    return "HDR";
+                case "go":
+                    return "GO";
+                case "rs":
+                    return "RS";
+                case "php":
+                    return "PHP";
+                case "xml":
+                    return "XML";
+                case "yml":
+                case "yaml":
+                    return "YML";
+                case "txt":
+                    return "TXT";
+                case "sh":
+                case "bash":
+                    return "SH";
+                default:
+                    String label = ext.replaceAll("[^A-Za-z0-9]", "");
+                    if (label.isEmpty()) label = ext;
+                    if (label.length() > 4) {
+                        label = label.substring(0, 4);
+                    }
+                    return label.toUpperCase(Locale.getDefault());
+            }
+        }
+
+        if (filename != null && !filename.trim().isEmpty()) {
+            String cleaned = filename.replaceAll("[^A-Za-z0-9]", "");
+            if (!cleaned.isEmpty()) {
+                if (cleaned.length() > 3) cleaned = cleaned.substring(0, 3);
+                return cleaned.toUpperCase(Locale.getDefault());
+            }
+            return filename.substring(0, 1).toUpperCase(Locale.getDefault());
+        }
+
+        return "FILE";
+    }
+
+    private int pickShortcutColor(String filename) {
+        String ext = getFileExtension(filename);
+        switch (ext) {
+            case "js":
+            case "jsx":
+                return 0xFFF7DF1E;
+            case "ts":
+            case "tsx":
+                return 0xFF3178C6;
+            case "md":
+            case "markdown":
+                return 0xFF546E7A;
+            case "json":
+                return 0xFF4CAF50;
+            case "html":
+            case "htm":
+                return 0xFFF4511E;
+            case "css":
+                return 0xFF2962FF;
+            case "java":
+                return 0xFFEC6F2D;
+            case "kt":
+            case "kts":
+                return 0xFF7F52FF;
+            case "py":
+                return 0xFF306998;
+            case "rb":
+                return 0xFFCC342D;
+            case "c":
+                return 0xFF546E7A;
+            case "cpp":
+            case "cc":
+            case "cxx":
+                return 0xFF00599C;
+            case "h":
+            case "hpp":
+                return 0xFF8D6E63;
+            case "go":
+                return 0xFF00ADD8;
+            case "rs":
+                return 0xFFB7410E;
+            case "php":
+                return 0xFF8892BF;
+            case "xml":
+                return 0xFF5C6BC0;
+            case "yml":
+            case "yaml":
+                return 0xFF757575;
+            case "txt":
+                return 0xFF546E7A;
+            case "sh":
+            case "bash":
+                return 0xFF388E3C;
+            default:
+                final int[] colors = new int[] {
+                    0xFF1E88E5,
+                    0xFF6D4C41,
+                    0xFF00897B,
+                    0xFF8E24AA,
+                    0xFF3949AB,
+                    0xFF039BE5,
+                    0xFFD81B60,
+                    0xFF43A047
+                };
+                String key = ext.isEmpty()
+                    ? (filename == null ? "file" : filename)
+                    : ext;
+                int hash = Math.abs(key.hashCode());
+                return colors[hash % colors.length];
+        }
     }
 
     private void fileAction(
@@ -1005,7 +1623,7 @@ public class System extends CordovaPlugin {
     private void launchApp(
         String appId,
         String className,
-        String data,
+        JSONObject extras,
         CallbackContext callback
     ) {
         if (appId == null || appId.equals("")) {
@@ -1023,20 +1641,37 @@ public class System extends CordovaPlugin {
             intent.addCategory(Intent.CATEGORY_LAUNCHER);
             intent.setPackage(appId);
             intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
+            intent.setClassName(appId, className);
 
-            if (data != null && !data.equals("")) {
-                intent.putExtra("acode_data", data);
+            if (extras != null) {
+                Iterator<String> keys = extras.keys();
+
+                while (keys.hasNext()) {
+                    String key = keys.next();
+                    Object value = extras.get(key);
+
+                    if (value instanceof Integer) {
+                        intent.putExtra(key, (Integer) value);
+                    } else if (value instanceof Boolean) {
+                        intent.putExtra(key, (Boolean) value);
+                    } else if (value instanceof Double) {
+                        intent.putExtra(key, (Double) value);
+                    } else if (value instanceof Long) {
+                        intent.putExtra(key, (Long) value);
+                    } else if (value instanceof String) {
+                        intent.putExtra(key, (String) value);
+                    } else {
+                        intent.putExtra(key, value.toString());
+                    }
+                }
             }
 
-            intent.setClassName(appId, className);
             activity.startActivity(intent);
             callback.success("Launched " + appId);
+
         } catch (Exception e) {
             callback.error(e.toString());
-            return;
         }
-
-
 
     }
 
@@ -1127,54 +1762,55 @@ public class System extends CordovaPlugin {
     }
 
     private void setUiTheme(
-        final String systemBarColor,
-        final JSONObject scheme,
-        final CallbackContext callback
+            final String systemBarColor,
+            final JSONObject scheme,
+            final CallbackContext callback
     ) {
-        this.systemBarColor = Color.parseColor(systemBarColor);
-        this.theme = new Theme(scheme);
-
-        final Window window = activity.getWindow();
-        // Method and constants not available on all SDKs but we want to be able to compile this code with any SDK
-        window.clearFlags(0x04000000); // SDK 19: WindowManager.LayoutParams.FLAG_TRANSLUCENT_STATUS);
-        window.addFlags(0x80000000); // SDK 21: WindowManager.LayoutParams.FLAG_DRAWS_SYSTEM_BAR_BACKGROUNDS);
         try {
-            // Using reflection makes sure any 5.0+ device will work without having to compile with SDK level 21
+            this.systemBarColor = Color.parseColor(systemBarColor);
+            this.theme = new Theme(scheme);
 
-            window
-                .getClass()
-                .getMethod("setNavigationBarColor", int.class)
-                .invoke(window, this.systemBarColor);
+            preferences.set("BackgroundColor", this.systemBarColor);
+            webView.getPluginManager().postMessage("updateSystemBars", null);
+            applySystemBarTheme();
 
-            window
-                .getClass()
-                .getMethod("setStatusBarColor", int.class)
-                .invoke(window, this.systemBarColor);
-
-            window.getDecorView().setBackgroundColor(this.systemBarColor);
-
-            if (Build.VERSION.SDK_INT < 30) {
-                setStatusBarStyle(window);
-                setNavigationBarStyle(window);
-            } else {
-                String themeType = theme.getType();
-                WindowInsetsController controller = window.getInsetsController();
-                int appearance =
-                    WindowInsetsController.APPEARANCE_LIGHT_STATUS_BARS |
-                    WindowInsetsController.APPEARANCE_LIGHT_NAVIGATION_BARS;
-
-                if (themeType.equals("light")) {
-                    controller.setSystemBarsAppearance(appearance, appearance);
-                } else {
-                    controller.setSystemBarsAppearance(0, appearance);
-                }
-            }
-            callback.success("OK");
-        } catch (IllegalArgumentException error) {
-            callback.error(error.toString());
-        } catch (Exception error) {
-            callback.error(error.toString());
+            callback.success();
+        } catch (IllegalArgumentException e) {
+            callback.error("Invalid color: " + systemBarColor);
+        } catch (Exception e) {
+            callback.error(e.toString());
         }
+    }
+
+    private void applySystemBarTheme() {
+        final Window window = activity.getWindow();
+        final View decorView = window.getDecorView();
+
+        // Keep Cordova's BackgroundColor flow for API 36+, but also apply the
+        // window colors directly so OEM variants do not leave stale system-bar
+        // colors behind after a theme switch.
+        window.clearFlags(0x04000000 | 0x08000000); // FLAG_TRANSLUCENT_STATUS | FLAG_TRANSLUCENT_NAVIGATION
+        window.addFlags(0x80000000); // FLAG_DRAWS_SYSTEM_BAR_BACKGROUNDS
+
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+            window.setNavigationBarContrastEnforced(false);
+            window.setStatusBarContrastEnforced(false);
+        }
+
+        decorView.setBackgroundColor(this.systemBarColor);
+
+        View rootView = activity.findViewById(android.R.id.content);
+        if (rootView != null) {
+            rootView.setBackgroundColor(this.systemBarColor);
+        }
+
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.LOLLIPOP) {
+            window.setStatusBarColor(this.systemBarColor);
+            window.setNavigationBarColor(this.systemBarColor);
+        }
+
+        setStatusBarStyle(window);
+        setNavigationBarStyle(window);
     }
 
     private void setStatusBarStyle(final Window window) {
@@ -1210,22 +1846,22 @@ public class System extends CordovaPlugin {
         String themeType = theme.getType();
         View decorView = window.getDecorView();
         int uiOptions;
+        int lightNavigationBar;
 
         if (SDK_INT <= 30) {
             uiOptions = getDeprecatedSystemUiVisibility(decorView);
-            // 0x80000000 FLAG_DRAWS_SYSTEM_BAR_BACKGROUNDS
-            // 0x00000010 SYSTEM_UI_FLAG_LIGHT_NAVIGATION_BAR
+            lightNavigationBar = View.SYSTEM_UI_FLAG_LIGHT_NAVIGATION_BAR;
 
             if (themeType.equals("light")) {
-                setDeprecatedSystemUiVisibility(decorView, uiOptions | 0x80000000 | 0x00000010);
+                setDeprecatedSystemUiVisibility(decorView, uiOptions | lightNavigationBar);
                 return;
             }
-            setDeprecatedSystemUiVisibility(decorView, uiOptions | (0x80000000 & ~0x00000010));
+            setDeprecatedSystemUiVisibility(decorView, uiOptions & ~lightNavigationBar);
             return;
         }
 
         uiOptions = Objects.requireNonNull(decorView.getWindowInsetsController()).getSystemBarsAppearance();
-        int lightNavigationBar = WindowInsetsController.APPEARANCE_LIGHT_NAVIGATION_BARS;
+        lightNavigationBar = WindowInsetsController.APPEARANCE_LIGHT_NAVIGATION_BARS;
 
         if (themeType.equals("light")) {
             decorView.getWindowInsetsController().setSystemBarsAppearance(uiOptions | lightNavigationBar, lightNavigationBar);
@@ -1476,7 +2112,9 @@ public class System extends CordovaPlugin {
                     }
                 }
             }
-        } catch (PackageManager.NameNotFoundException ignored) {}
+        } catch (PackageManager.NameNotFoundException error) {
+            Log.w(TAG, "Unable to inspect package providers for FileProvider authority.", error);
+        }
 
         if (fileProviderAuthority == null || fileProviderAuthority.isEmpty()) {
             fileProviderAuthority = context.getPackageName() + ".provider";
@@ -1519,5 +2157,31 @@ public class System extends CordovaPlugin {
             mode = 1;
         }
         webView.setInputType(mode);
+    }
+
+    private void setNativeContextMenuDisabled(boolean disabled) {
+        if (webView == null) {
+            return;
+        }
+        webView.setNativeContextMenuDisabled(disabled);
+    }
+
+    private void extractAsset(String assetName, String destinationPath, CallbackContext callback) {
+        try (
+            InputStream in = context.getAssets().open(assetName);
+            OutputStream out = new FileOutputStream(destinationPath)
+        ) {
+            byte[] buffer = new byte[8192];
+            int length;
+            while ((length = in.read(buffer)) != -1) {
+                out.write(buffer, 0, length);
+            }
+            out.flush();
+            callback.success();
+        }catch (IOException e) {
+            StringWriter sw = new StringWriter();
+            e.printStackTrace(new PrintWriter(sw));
+            callback.error(sw.toString());
+        }
     }
 }

@@ -1,3 +1,13 @@
+import {
+	findNext as cmFindNext,
+	findPrevious as cmFindPrevious,
+	replaceAll as cmReplaceAll,
+	replaceNext as cmReplaceNext,
+	getSearchQuery,
+	SearchQuery,
+	setSearchQuery,
+} from "@codemirror/search";
+import { executeCommand } from "cm/commandRegistry";
 import quickTools from "components/quickTools";
 import actionStack from "lib/actionStack";
 import searchHistory from "lib/searchHistory";
@@ -22,6 +32,88 @@ const events = {
 	meta: [],
 };
 
+function getRefValue(ref) {
+	if (!ref) return "";
+	const direct = ref.value;
+	if (typeof direct === "string") return direct;
+	if (typeof direct === "number") return String(direct);
+	if (ref.el) {
+		const elValue = ref.el.value;
+		if (typeof elValue === "string") return elValue;
+		if (typeof elValue === "number") return String(elValue);
+	}
+	return "";
+}
+
+function setRefValue(ref, value) {
+	if (!ref) return;
+	const normalized = typeof value === "string" ? value : String(value ?? "");
+	if (ref.el) ref.el.value = normalized;
+	ref.value = normalized;
+}
+
+function applySearchQuery(editor, searchValue, replaceValue) {
+	if (!editor) return null;
+	const options = appSettings?.value?.search ?? {};
+	const queryConfig = {
+		search: String(searchValue ?? ""),
+		caseSensitive: !!options.caseSensitive,
+		regexp: !!options.regExp,
+		wholeWord: !!options.wholeWord,
+	};
+	if (replaceValue !== undefined) {
+		queryConfig.replace = String(replaceValue ?? "");
+	}
+	const query = new SearchQuery(queryConfig);
+	editor.dispatch({ effects: setSearchQuery.of(query) });
+	return query;
+}
+
+function clearSearchQuery(editor) {
+	if (!editor) return;
+	editor.dispatch({
+		effects: setSearchQuery.of(new SearchQuery({ search: "" })),
+	});
+}
+
+function getSelectedText(editor) {
+	if (!editor) return "";
+	if (typeof editor.getSelectedText === "function") {
+		try {
+			return editor.getSelectedText() ?? "";
+		} catch (_) {
+			// fall back to CodeMirror state
+		}
+	}
+	try {
+		const { state } = editor;
+		if (!state) return "";
+		const { from, to } = state.selection.main ?? {};
+		if (typeof from !== "number" || typeof to !== "number") return "";
+		if (from === to) return "";
+		return state.sliceDoc(from, to);
+	} catch (_) {
+		return "";
+	}
+}
+
+function selectionMatchesQuery(editor, query) {
+	try {
+		if (!editor || !query || !query.valid || !query.search) return false;
+		const range = editor.state?.selection?.main;
+		if (!range || range.from === range.to) return false;
+		const cursor = query.getCursor(editor.state.doc, range.from, range.to);
+		cursor.next();
+		return (
+			!cursor.done &&
+			cursor.value.from === range.from &&
+			cursor.value.to === range.to
+		);
+	} catch (_) {
+		return false;
+	}
+}
+
 /**
  * @typedef { 'shift' | 'alt' | 'ctrl' | 'meta' } QuickToolsEvent
  * @typedef {(value: boolean)=>void} QuickToolsEventListener
@@ -33,14 +125,19 @@ quickTools.$input.addEventListener("input", (e) => {
 	if (!key || key.length > 1) return;
 	const keyCombination = getKeys({ key });
 
-	if (keyCombination.shiftKey && !keyCombination.ctrlKey) {
+	if (
+		keyCombination.shiftKey &&
+		!keyCombination.ctrlKey &&
+		!keyCombination.altKey &&
+		!keyCombination.metaKey
+	) {
 		resetKeys();
-		editorManager.editor.insert(shiftKeyMapping(key));
+		insertText(shiftKeyMapping(key));
 		return;
 	}
 
 	const event = KeyboardEvent("keydown", keyCombination);
-	input = input || editorManager.editor.textInput.getElement();
+	input = input || editorManager.editor.contentDOM;
 
 	resetKeys();
 	input.dispatchEvent(event);
@@ -62,8 +159,8 @@ quickTools.$input.addEventListener("keydown", (e) => {
 	if (input && input !== quickTools.$input) {
 		input.dispatchEvent(event);
 	} else {
-		// Otherwise fallback to editor input
-		editorManager.editor.textInput.getElement().dispatchEvent(event);
+		// Otherwise fallback to editor view content
+		editorManager.editor.contentDOM.dispatchEvent(event);
 	}
 });
 
@@ -76,19 +173,27 @@ appSettings.on("update:quicktoolsItems:after", () => {
 	}, 100);
 });
 
+let historyNavigationInitialized = false;
 // Initialize history navigation
 function setupHistoryNavigation() {
+	if (historyNavigationInitialized) return;
+	historyNavigationInitialized = true;
 	const { $searchInput, $replaceInput } = quickTools;
 
 	// Search input history navigation
 	if ($searchInput.el) {
 		$searchInput.el.addEventListener("keydown", (e) => {
-			if (e.key === "ArrowUp") {
+			if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "f") {
+				e.preventDefault();
+				const { editor, activeFile } = editorManager;
+				editor.focus();
+				actionStack.get("search-bar")?.action();
+			} else if (e.key === "ArrowUp") {
 				e.preventDefault();
 				const newValue = searchHistory.navigateSearchUp($searchInput.el.value);
 				$searchInput.el.value = newValue;
 				// Trigger search
-				if (newValue) find(0, false);
+				find(0, false);
 			} else if (e.key === "ArrowDown") {
 				e.preventDefault();
 				const newValue = searchHistory.navigateSearchDown(
@@ -96,7 +201,7 @@ function setupHistoryNavigation() {
 				);
 				$searchInput.el.value = newValue;
 				// Trigger search
-				if (newValue) find(0, false);
+				find(0, false);
 			} else if (e.key === "Enter" || e.key === "Escape") {
 				// Reset navigation on enter or escape
 				searchHistory.resetSearchNavigation();
@@ -196,12 +301,14 @@ export default function actions(action, value) {
 
 	switch (action) {
 		case "insert":
-			editor.insert(value);
-			return true;
+			return insertText(value);
 
-		case "command":
-			editor.execCommand(value);
-			return true;
+		case "command": {
+			const commandName =
+				typeof value === "string" ? value : String(value ?? "");
+			if (!commandName) return false;
+			return executeCommand(commandName, editor);
+		}
 
 		case "key": {
 			value = Number.parseInt(value, 10);
@@ -252,14 +359,36 @@ export default function actions(action, value) {
 			if ($replaceInput.value) {
 				searchHistory.addToHistory($replaceInput.value);
 			}
-			editor.replace($replaceInput.value || "");
+			if (editor) {
+				const replaceValue = getRefValue($replaceInput);
+				const query = applySearchQuery(
+					editor,
+					getRefValue(quickTools.$searchInput),
+					replaceValue,
+				);
+				if (query && query.search && query.valid) {
+					cmReplaceNext(editor);
+				}
+				updateSearchState();
+			}
 			return true;
 
 		case "search-replace-all":
 			if ($replaceInput.value) {
 				searchHistory.addToHistory($replaceInput.value);
 			}
-			editor.replaceAll($replaceInput.value || "");
+			if (editor) {
+				const replaceValue = getRefValue($replaceInput);
+				const query = applySearchQuery(
+					editor,
+					getRefValue(quickTools.$searchInput),
+					replaceValue,
+				);
+				if (query && query.search && query.valid) {
+					cmReplaceAll(editor);
+				}
+			}
+			updateSearchState();
 			return true;
 
 		default:
@@ -268,6 +397,12 @@ export default function actions(action, value) {
 }
 
 function setInput() {
+	const terminalInput = getActiveTerminalInput();
+	if (terminalInput) {
+		input = terminalInput;
+		return;
+	}
+
 	const { activeElement } = document;
 	if (
 		!activeElement ||
@@ -285,7 +420,7 @@ function toggleSearch() {
 	const $searchInput = quickTools.$searchInput.el;
 	const $toggler = quickTools.$toggler;
 	const { editor } = editorManager;
-	const selectedText = editor.getSelectedText();
+	const selectedText = getSelectedText(editor);
 
 	if (!$footer.contains($searchRow1)) {
 		const { className } = quickTools.$toggler;
@@ -294,16 +429,18 @@ function toggleSearch() {
 
 		$toggler.className = "floating icon clearclose";
 		$footer.content = [$searchRow1, $searchRow2];
-		$searchInput.value = selectedText || "";
+		setRefValue($searchInput, selectedText || "");
 
-		$searchInput.oninput = function (e) {
-			if (this.value) find(0, false);
+		$searchInput.oninput = function () {
+			find(0, false);
 		};
 
 		$searchInput.onsearch = function () {
 			if (this.value) {
 				searchHistory.addToHistory(this.value);
 				find(1, false);
+			} else {
+				find(0, false);
 			}
 		};
 
@@ -323,9 +460,9 @@ function toggleSearch() {
 			},
 		});
 	} else {
-		const inputValue = $searchInput?.value || "";
+		const inputValue = getRefValue($searchInput);
 		if (inputValue !== selectedText) {
-			$searchInput.value = selectedText;
+			setRefValue($searchInput, selectedText || "");
 			find(0, false);
 			return;
 		}
@@ -334,7 +471,6 @@ function toggleSearch() {
 	}
 
 	$searchInput.focus();
-	editor.resize(true);
 }
 
 function toggle() {
@@ -361,13 +497,18 @@ function toggle() {
 
 function setHeight(height = 1, save = true) {
 	const { $footer, $row1, $row2 } = quickTools;
-	const { editor } = editorManager;
+	const { editor, activeFile } = editorManager;
+
+	// If active file has hideQuickTools, force height to 0 and don't save
+	if (activeFile?.hideQuickTools) {
+		height = 0;
+		save = false;
+	}
 
 	setFooterHeight(height);
 	if (save) {
 		appSettings.update({ quickTools: height }, false);
 	}
-	editor.resize(true);
 
 	if (!height) {
 		$row1.remove();
@@ -411,7 +552,7 @@ function removeSearch() {
 	// Reset history navigation when search is closed
 	searchHistory.resetAllNavigation();
 
-	const { activeFile } = editorManager;
+	const { activeFile, editor } = editorManager;
 
 	// Check if current tab is a terminal
 	if (
@@ -423,6 +564,7 @@ function removeSearch() {
 		activeFile.terminalComponent.searchAddon?.clearActiveDecoration();
 		return;
 	}
+	clearSearchQuery(editor);
 	focusEditor();
 }
 
@@ -443,12 +585,24 @@ function find(skip, backward) {
 	) {
 		activeFile.terminalComponent.search($searchInput.value, skip, backward);
 	} else {
-		// Use ACE editor search for regular files
-		editorManager.editor.find($searchInput.value, {
-			skipCurrent: skip,
-			...appSettings.value.search,
-			backwards: backward,
-		});
+		const editor = editorManager.editor;
+		const searchValue = getRefValue($searchInput);
+		const query = applySearchQuery(editor, searchValue);
+		if (!query || !query.search || !query.valid) {
+			updateSearchState();
+			return;
+		}
+
+		const normalizedSkip = Number(skip) || 0;
+		if (normalizedSkip === 0 && selectionMatchesQuery(editor, query)) {
+			updateSearchState();
+			return;
+		}
+		const steps = Math.max(1, normalizedSkip);
+		const runCommand = backward ? cmFindPrevious : cmFindNext;
+		for (let i = 0; i < steps; ++i) {
+			if (!runCommand(editor)) break;
+		}
 	}
 
 	updateSearchState();
@@ -456,7 +610,7 @@ function find(skip, backward) {
 
 function updateSearchState() {
 	const MAX_COUNT = 999;
-	const { activeFile } = editorManager;
+	const { activeFile, editor } = editorManager;
 	const { $searchPos, $searchTotal } = quickTools;
 
 	// Check if current tab is a terminal
@@ -468,30 +622,31 @@ function updateSearchState() {
 		$searchPos.textContent = "?";
 		return;
 	}
+	const query = editor ? getSearchQuery(editor.state) : null;
+	if (!query || !query.search || !query.valid) {
+		$searchTotal.textContent = "0";
+		$searchPos.textContent = "0";
+		return;
+	}
 
-	// Use ACE editor search state for regular files
-	const { editor } = editorManager;
-	let regex = editor.$search.$options.re;
-	let all = 0;
+	const cursor = query.getCursor(editor.state.doc);
+	let total = 0;
 	let before = 0;
-	if (regex) {
-		const value = editor.getValue();
-		const offset = editor.session.doc.positionToIndex(editor.selection.anchor);
-		let last = (regex.lastIndex = 0);
-		let m;
-		while ((m = regex.exec(value))) {
-			all++;
-			last = m.index;
-			if (last <= offset) before++;
-			if (all > MAX_COUNT) break;
-			if (!m[0]) {
-				regex.lastIndex = last += 1;
-				if (last >= value.length) break;
-			}
+	let limited = false;
+	const cursorPos = editor.state.selection.main.head;
+	for (cursor.next(); !cursor.done; cursor.next()) {
+		total++;
+		if (cursorPos >= cursor.value.from) {
+			before = Math.min(total, MAX_COUNT);
+		}
+		if (total === MAX_COUNT) {
+			cursor.next();
+			limited = !cursor.done;
+			break;
 		}
 	}
-	$searchTotal.textContent = all > MAX_COUNT ? "999+" : all;
-	$searchPos.textContent = before;
+	$searchTotal.textContent = limited ? "999+" : String(total);
+	$searchPos.textContent = String(before);
 }
 
 /**
@@ -521,7 +676,16 @@ function getFooterHeight() {
 
 function focusEditor() {
 	const { editor, activeFile } = editorManager;
-	if (activeFile.focused) {
+	if (!activeFile?.focused) {
+		return;
+	}
+
+	if (activeFile.type === "terminal" && activeFile.terminalComponent) {
+		activeFile.terminalComponent.focus();
+		return;
+	}
+
+	if (editor) {
 		editor.focus();
 	}
 }
@@ -535,7 +699,7 @@ function resetKeys() {
 	events.ctrl.forEach((cb) => cb(false));
 	state.meta = false;
 	events.meta.forEach((cb) => cb(false));
-	input.focus();
+	input?.focus?.();
 }
 
 /**
@@ -553,6 +717,41 @@ export function getKeys(key = {}) {
 		ctrlKey: state.ctrl,
 		metaKey: state.meta,
 	};
+}
+
+function getActiveTerminalComponent() {
+	const { activeFile } = editorManager;
+	if (activeFile?.type !== "terminal") return null;
+	return activeFile.terminalComponent || null;
+}
+
+function getActiveTerminalInput() {
+	return getActiveTerminalComponent()?.terminal?.textarea || null;
+}
+
+function insertText(value) {
+	const text = String(value ?? "");
+	if (!text) return false;
+
+	const terminalComponent = getActiveTerminalComponent();
+	if (terminalComponent?.terminal) {
+		if (typeof terminalComponent.terminal.paste === "function") {
+			terminalComponent.terminal.paste(text);
+			terminalComponent.focus();
+			return true;
+		}
+
+		if (terminalComponent.serverMode && terminalComponent.isConnected) {
+			terminalComponent.write(text);
+			terminalComponent.focus();
+			return true;
+		}
+
+		return false;
+	}
+
+	const { editor } = editorManager;
+	return editor ? editor.insert(text) : false;
 }
 
 function shiftKeyMapping(char) {

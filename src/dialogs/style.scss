@@ -39,6 +39,13 @@
     .title {
       text-transform: uppercase;
     }
+
+    .confirm-checkbox {
+      width: auto;
+      min-height: 40px;
+      margin: 0 10px;
+      justify-content: flex-start;
+    }
   }
 
   &.select {
@@ -103,6 +110,10 @@
     z-index: 111;
     background-color: rgb(0, 0, 0);
     opacity: 0.4;
+
+    ~.mask {
+      opacity: 0;
+    }
   }
 
   &.hide {

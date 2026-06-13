@@ -19,6 +19,14 @@ interface ShortCut {
   data: string;
 }
 
+interface FileShortcut {
+  id: string;
+  label: string;
+  description?: string;
+  icon?: string;
+  uri: string;
+}
+
 interface Intent {
   action: string;
   data: string;
@@ -27,6 +35,24 @@ interface Intent {
   extras: {
     [key: string]: any;
   };
+}
+
+interface RewardStatus {
+  adFreeUntil: number;
+  lastExpiredRewardUntil: number;
+  isActive: boolean;
+  remainingMs: number;
+  redemptionsToday: number;
+  remainingRedemptions: number;
+  maxRedemptionsPerDay: number;
+  maxActivePassMs: number;
+  hasPendingExpiryNotice: boolean;
+  expiryNoticePendingUntil: number;
+  canRedeem: boolean;
+  redeemDisabledReason: string;
+  grantedDurationMs?: number;
+  appliedDurationMs?: number;
+  offerId?: string;
 }
 
 type FileAction = 'VIEW' | 'EDIT' | 'SEND' | 'RUN';
@@ -131,6 +157,18 @@ interface System {
    * @param onFail
    */
   pinShortcut(id: string, onSuccess: OnSuccessBool, onFail: OnFail): void;
+
+  /**
+   * Pin a shortcut for a specific file to the home screen
+   * @param shortcut Shortcut configuration
+   * @param onSuccess
+   * @param onFail
+   */
+  pinFileShortcut(
+    shortcut: FileShortcut,
+    onSuccess: OnSuccessBool,
+    onFail: OnFail,
+  ): void;
   /**
    * Gets android version
    * @param onSuccess
@@ -188,19 +226,20 @@ interface System {
    */
   openInBrowser(src: string): void;
   /**
-   * Launches and app
-   * @param app the package name of the app
-   * @param className the full class name of the activity
-   * @param data Data to pass to the app
-   * @param onSuccess
-   * @param onFail
+   * Launch an Android application activity.
+   *
+   * @param app Package name of the application (e.g. `com.example.app`)
+   * @param className Fully qualified activity class name (e.g. `com.example.app.MainActivity`)
+   * @param extras Optional key-value pairs passed as Android Intent extras
+   * @param onSuccess Called when the activity launches successfully
+   * @param onFail Called if launching the activity fails
    */
   launchApp(
     app: string,
     className: string,
-    data: string,
-    onSuccess: OnSuccessBool,
-    onFail: OnFail,
+    extras?: Record<string, string | number | boolean>,
+    onSuccess?: OnSuccessBool,
+    onFail?: OnFail,
   ): void;
 
   /**
@@ -235,6 +274,27 @@ interface System {
    * @param onFail
    */
   getCordovaIntent(onSuccess: (intent: Intent) => void, onFail: OnFail): void;
+  getRewardStatus(
+    onSuccess: (status: RewardStatus | string) => void,
+    onFail: OnFail,
+  ): void;
+  redeemReward(
+    offerId: string,
+    onSuccess: (status: RewardStatus | string) => void,
+    onFail: OnFail,
+  ): void;
+  /**
+   * Enable/disable native WebView long-press context behavior.
+   * Use this when rendering a custom editor context menu.
+   * @param disabled
+   * @param onSuccess
+   * @param onFail
+   */
+  setNativeContextMenuDisabled(
+    disabled: boolean,
+    onSuccess?: () => void,
+    onFail?: OnFail,
+  ): void;
 }
 
 interface Window{

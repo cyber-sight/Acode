@@ -30,6 +30,15 @@ module.exports = {
   setExec: function (path, executable, success, error) {
     cordova.exec(success, error, 'System', 'setExec', [path, String(executable)]);
   },
+  getInstaller: function (success, error) {
+    cordova.exec(success, error, 'System', 'getInstaller', []);
+  },
+  shareText: function (text, success, error) {
+    cordova.exec(success, error, 'System', 'shareText', [text]);
+  },
+  getNativeLibraryPath: function (success, error) {
+    cordova.exec(success, error, 'System', 'getNativeLibraryPath', []);
+  },
 
 
   getNativeLibraryPath: function (success, error) {
@@ -38,6 +47,15 @@ module.exports = {
 
   getFilesDir: function (success, error) {
     cordova.exec(success, error, 'System', 'getFilesDir', []);
+  },
+  getRewardStatus: function (success, error) {
+    cordova.exec(success, error, 'System', 'getRewardStatus', []);
+  },
+  redeemReward: function (offerId, success, error) {
+    cordova.exec(success, error, 'System', 'redeemReward', [offerId]);
+  },
+  extractAsset: function (assetName, destinationPath, success, error) {
+    cordova.exec(success, error, 'System', 'extractAsset', [assetName, destinationPath]);
   },
 
   getParentPath: function (path, success, error) {
@@ -93,37 +111,62 @@ module.exports = {
     icon = shortcut.icon;
     data = shortcut.data;
     action = shortcut.action;
-    cordova.exec(onSuccess, onFail, 'System', action('add-shortcut'), [id, label, description, icon, action, data]);
+    cordova.exec(onSuccess, onFail, 'System', 'add-shortcut', [id, label, description, icon, action, data]);
   },
   removeShortcut: function (id, onSuccess, onFail) {
-    cordova.exec(onSuccess, onFail, 'System', action('remove-shortcut'), [id]);
+    cordova.exec(onSuccess, onFail, 'System', 'remove-shortcut', [id]);
   },
   pinShortcut: function (id, onSuccess, onFail) {
-    cordova.exec(onSuccess, onFail, 'System', action('pin-shortcut'), [id]);
+    cordova.exec(onSuccess, onFail, 'System', 'pin-shortcut', [id]);
+  },
+  pinFileShortcut: function (shortcut, onSuccess, onFail) {
+    cordova.exec(onSuccess, onFail, 'System', 'pin-file-shortcut', [shortcut]);
   },
   manageAllFiles: function (onSuccess, onFail) {
-    cordova.exec(onSuccess, onFail, 'System', action('manage-all-files'), []);
+    cordova.exec(onSuccess, onFail, 'System', 'manage-all-files', []);
   },
   getAndroidVersion: function (onSuccess, onFail) {
-    cordova.exec(onSuccess, onFail, 'System', action('get-android-version'), []);
+    cordova.exec(onSuccess, onFail, 'System', 'get-android-version', []);
   },
   isExternalStorageManager: function (onSuccess, onFail) {
     cordova.exec(onSuccess, onFail, 'System', 'is-external-storage-manager', []);
   },
   requestPermission: function (permission, onSuccess, onFail) {
-    cordova.exec(onSuccess, onFail, 'System', action('request-permission'), [permission]);
+    cordova.exec(onSuccess, onFail, 'System', 'request-permission', [permission]);
   },
   requestPermissions: function (permissions, onSuccess, onFail) {
-    cordova.exec(onSuccess, onFail, 'System', action('request-permissions'), [permissions]);
+    cordova.exec(onSuccess, onFail, 'System', 'request-permissions', [permissions]);
   },
   hasPermission: function (permission, onSuccess, onFail) {
-    cordova.exec(onSuccess, onFail, 'System', action('has-permission'), [permission]);
+    cordova.exec(onSuccess, onFail, 'System', 'has-permission', [permission]);
   },
   openInBrowser: function (src) {
-    cordova.exec(null, null, 'System', action('open-in-browser'), [src]);
+    cordova.exec(null, null, 'System', 'open-in-browser', [src]);
   },
-  launchApp: function (app, className, data, onSuccess, onFail) {
-    cordova.exec(onSuccess, onFail, 'System', action('launch-app'), [app, className, data]);
+  /**
+   * Launch an Android application activity.
+   *
+   * @param {string} app - Package name of the application (e.g. `com.example.app`).
+   * @param {string} className - Fully qualified activity class name (e.g. `com.example.app.MainActivity`).
+   * @param {Object<string, (string|number|boolean)>} [extras] - Optional key-value pairs passed as Intent extras.
+   * @param {(message: string) => void} [onSuccess] - Callback invoked when the activity launches successfully.
+   * @param {(error: any) => void} [onFail] - Callback invoked if launching the activity fails.
+   *
+   * @example
+   * System.launchApp(
+   *   "com.example.app",
+   *   "com.example.app.MainActivity",
+   *   {
+   *     user: "example",
+   *     age: 20,
+   *     premium: true
+   *   },
+   *   (msg) => console.log(msg),
+   *   (err) => console.error(err)
+   * );
+   */
+  launchApp: function (app, className, extras, onSuccess, onFail) {
+    cordova.exec(onSuccess, onFail, 'System', 'launch-app', [app, className, extras]);
   },
   inAppBrowser: function (url, title, showButtons, disableCache) {
     var myInAppBrowser = {
@@ -132,33 +175,107 @@ module.exports = {
     };
 
     cordova.exec(function (data) {
-      try {
-        var dataTag = data.split(':')[0];
-        var dataUrl = data.split(':')[1];
-        if (dataTag === 'onOpenExternalBrowser') {
+      if (typeof data !== 'string') {
+        console.warn('System.inAppBrowser: invalid callback payload', data);
+        return;
+      }
+      var separatorIndex = data.indexOf(':');
+      if (separatorIndex < 0) {
+        console.warn('System.inAppBrowser: malformed callback payload', data);
+        return;
+      }
+      var dataTag = data.slice(0, separatorIndex);
+      var dataUrl = data.slice(separatorIndex + 1);
+      if (dataTag === 'onOpenExternalBrowser') {
+        if (typeof myInAppBrowser.onOpenExternalBrowser === 'function') {
           myInAppBrowser.onOpenExternalBrowser(dataUrl);
+        } else {
+          console.warn('System.inAppBrowser: onOpenExternalBrowser handler is not set');
         }
-      } catch (error) { }
+      }
     }, function (err) {
-      try {
-        onError(err);
-      } catch (error) { }
-    }, 'System', action('in-app-browser'), [url, title, !!showButtons, disableCache]);
+      if (typeof myInAppBrowser.onError === 'function') {
+        myInAppBrowser.onError(err);
+        return;
+      }
+      console.warn('System.inAppBrowser error callback not handled', err);
+    }, 'System', 'in-app-browser', [url, title, !!showButtons, disableCache]);
     return myInAppBrowser;
   },
   setUiTheme: function (systemBarColor, theme, onSuccess, onFail) {
-    cordova.exec(onSuccess, onFail, 'System', action('set-ui-theme'), [systemBarColor, theme]);
+    const color = systemBarColor.toLowerCase();
+
+    if (color === '#ffffff' || color === '#ffffffff') {
+      systemBarColor = '#fffffe';
+    }
+
+    cordova.exec((out) => {
+      window.statusbar.setBackgroundColor(systemBarColor);
+
+      if (typeof onSuccess === "function") {
+        onSuccess(out);
+      }
+
+    }, onFail, 'System', 'set-ui-theme', [systemBarColor, theme]);
   },
   setIntentHandler: function (handler, onerror) {
-    cordova.exec(handler, onerror, 'System', action('set-intent-handler'), []);
+    cordova.exec(handler, onerror, 'System', 'set-intent-handler', []);
   },
   getCordovaIntent: function (onSuccess, onFail) {
-    cordova.exec(onSuccess, onFail, 'System', action('get-cordova-intent'), []);
+    cordova.exec(onSuccess, onFail, 'System', 'get-cordova-intent', []);
   },
   setInputType: function (type, onSuccess, onFail) {
-    cordova.exec(onSuccess, onFail, 'System', action('set-input-type'), [type]);
+    cordova.exec(onSuccess, onFail, 'System', 'set-input-type', [type]);
+  },
+  setNativeContextMenuDisabled: function (disabled, onSuccess, onFail) {
+    cordova.exec(
+      onSuccess,
+      onFail,
+      'System',
+      'set-native-context-menu-disabled',
+      [String(!!disabled)]
+    );
   },
   getGlobalSetting: function (key, onSuccess, onFail) {
-    cordova.exec(onSuccess, onFail, 'System', action('get-global-setting'), [key]);
+    cordova.exec(onSuccess, onFail, 'System', 'get-global-setting', [key]);
+  },
+  /**
+   * Compare file content with provided text in a background thread.
+   * @param {string} fileUri - The URI of the file to read
+   * @param {string} encoding - The character encoding to use
+   * @param {string} currentText - The text to compare against
+   * @returns {Promise<boolean>} - Resolves to true if content differs, false if same
+   */
+  compareFileText: function (fileUri, encoding, currentText) {
+    return new Promise((resolve, reject) => {
+      cordova.exec(
+        function(result) {
+          resolve(result === 1);
+        },
+        reject,
+        'System',
+        'compare-file-text',
+        [fileUri, encoding, currentText]
+      );
+    });
+  },
+  /**
+   * Compare two text strings in a background thread.
+   * @param {string} text1 - First text to compare
+   * @param {string} text2 - Second text to compare
+   * @returns {Promise<boolean>} - Resolves to true if texts differ, false if same
+   */
+  compareTexts: function (text1, text2) {
+    return new Promise((resolve, reject) => {
+      cordova.exec(
+        function(result) {
+          resolve(result === 1);
+        },
+        reject,
+        'System',
+        'compare-texts',
+        [text1, text2]
+      );
+    });
   }
 };

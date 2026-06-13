@@ -1,3 +1,5 @@
+import appSettings from "lib/settings";
+
 const exec = (command) => {
 	const { editor } = editorManager;
 	editor.execCommand(command);
@@ -8,6 +10,20 @@ const exec = (command) => {
 		editor.setMenu(true);
 	}
 	editor.focus();
+};
+
+const showCodeActions = async () => {
+	const { editor } = editorManager;
+	if (!editor) return;
+
+	try {
+		const { showCodeActionsMenu, supportsCodeActions } = await import("cm/lsp");
+		if (supportsCodeActions(editor)) {
+			await showCodeActionsMenu(editor);
+		}
+	} catch (error) {
+		console.warn("[SelectionMenu] Code actions not available:", error);
+	}
 };
 
 const items = [];
@@ -28,13 +44,26 @@ export default function selectionMenu() {
 			"all",
 			true,
 		),
+		appSettings.get("showShareButton") &&
+			item(
+				() => exec("share"),
+				<span className="icon share"></span>,
+				"selected",
+				true,
+			),
 		item(
 			(color) => acode.exec("insert-color", color),
 			<span className="icon color_lenspalette"></span>,
 			"all",
 		),
+		item(
+			() => showCodeActions(),
+			<span className="icon lightbulb" title="Code Actions"></span>,
+			"all",
+			true,
+		),
 		...items,
-	];
+	].filter(Boolean);
 }
 
 /**

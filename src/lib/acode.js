@@ -1,7 +1,31 @@
 import fsOperation from "fileSystem";
 import sidebarApps from "sidebarApps";
-import ajax from "@deadlyjack/ajax";
-import { addMode, removeMode } from "ace/modelist";
+import * as cmAutocomplete from "@codemirror/autocomplete";
+import * as cmCommands from "@codemirror/commands";
+import * as cmLanguage from "@codemirror/language";
+import * as cmLint from "@codemirror/lint";
+import * as cmSearch from "@codemirror/search";
+import * as cmState from "@codemirror/state";
+import * as cmView from "@codemirror/view";
+import * as lezerHighlight from "@lezer/highlight";
+import {
+	getRegisteredCommands as listRegisteredCommands,
+	refreshCommandKeymap,
+	registerExternalCommand,
+	removeExternalCommand,
+	executeCommand as runCommand,
+} from "cm/commandRegistry";
+import { default as lspApi } from "cm/lsp/api";
+import lspClientManager from "cm/lsp/clientManager";
+import { registerLspFormatter } from "cm/lsp/formatter";
+import {
+	addMode,
+	getModeForPath,
+	getModes,
+	getModesByName,
+	removeMode,
+} from "cm/modelist";
+import cmThemeRegistry from "cm/themes";
 import Contextmenu from "components/contextmenu";
 import inputhints from "components/inputhints";
 import Page from "components/page";
@@ -12,9 +36,9 @@ import { TerminalManager, TerminalThemeManager } from "components/terminal";
 import toast from "components/toast";
 import tutorial from "components/tutorial";
 import alert from "dialogs/alert";
-import box from "dialogs/box";
 import colorPicker from "dialogs/color";
 import confirm from "dialogs/confirm";
+import dialog from "dialogs/dialog";
 import loader from "dialogs/loader";
 import multiPrompt from "dialogs/multiPrompt";
 import prompt from "dialogs/prompt";
@@ -29,6 +53,12 @@ import EditorFile from "lib/editorFile";
 import files from "lib/fileList";
 import fileTypeHandler from "lib/fileTypeHandler";
 import fonts from "lib/fonts";
+import {
+	BROKEN_PLUGINS,
+	LOADED_PLUGINS,
+	onPluginLoadCallback,
+	onPluginsLoadCompleteCallback,
+} from "lib/loadPlugins";
 import NotificationManager from "lib/notificationManager";
 import openFolder, { addedFolder } from "lib/openFolder";
 import projects from "lib/projects";
@@ -43,28 +73,29 @@ import encodings, { decode, encode } from "utils/encodings";
 import helpers from "utils/helpers";
 import KeyboardEvent from "utils/keyboardEvent";
 import Url from "utils/Url";
-import constants from "./constants";
-
-const { Fold } = ace.require("ace/edit_session/fold");
-const { Range } = ace.require("ace/range");
+import config from "./config";
 
 export default class Acode {
 	#modules = {};
 	#pluginsInit = {};
 	#pluginUnmount = {};
-	#formatter = [
-		{
-			id: "default",
-			name: "Default",
-			exts: ["*"],
-			format: async () => {
-				const { beautify } = ace.require("ace/ext/beautify");
-				const cursorPos = editorManager.editor.getCursorPosition();
-				beautify(editorManager.editor.session);
-				editorManager.editor.gotoLine(cursorPos.row + 1, cursorPos.column);
-			},
-		},
-	];
+	// Registered formatter implementations (populated by plugins)
+	#formatter = [];
+	#pluginWatchers = {};
+
+	/**
+	 * Clear a plugin's broken mark (so it can be retried)
+	 * @param {string} pluginId
+	 */
+	clearBrokenPluginMark(pluginId) {
+		try {
+			if (BROKEN_PLUGINS.has(pluginId)) {
+				BROKEN_PLUGINS.delete(pluginId);
+			}
+		} catch (e) {
+			console.warn("Failed to clear broken plugin mark:", e);
+		}
+	}
 
 	constructor() {
 		const encodingsModule = {
@@ -84,20 +115,173 @@ export default class Acode {
 			apply: () => {},
 		};
 
+		// CodeMirror editor theme API for plugins
+		const normalizeThemeSpec = (spec) => {
+			if (!spec || typeof spec !== "object" || Array.isArray(spec)) {
+				console.warn(
+					"[editorThemes] register(spec) expects an object: { id, caption?, dark?, getExtension|extensions|extension|theme, config? }",
+				);
+				return null;
+			}
+
+			const id = spec.id || spec.name;
+			if (!id) {
+				console.warn("[editorThemes] register(spec) requires a valid `id`.");
+				return null;
+			}
+
+			const extensionSource =
+				spec.getExtension || spec.extensions || spec.extension || spec.theme;
+			if (extensionSource === undefined || extensionSource === null) {
+				console.warn(
+					`[editorThemes] register('${id}') requires extensions via getExtension/extensions/extension/theme.`,
+				);
+				return null;
+			}
+
+			return {
+				id,
+				caption: spec.caption || spec.label || id,
+				isDark: spec.isDark ?? spec.dark ?? false,
+				getExtension:
+					typeof extensionSource === "function"
+						? extensionSource
+						: () => extensionSource,
+				config: spec.config ?? null,
+			};
+		};
+
+		const createHighlightStyle = (spec) => {
+			if (!spec) return null;
+			if (Array.isArray(spec)) return cmLanguage.HighlightStyle.define(spec);
+			return spec;
+		};
+
+		const createTheme = ({
+			styles,
+			dark = false,
+			highlightStyle,
+			extensions = [],
+		} = {}) => {
+			const ext = [];
+
+			if (styles && typeof styles === "object") {
+				ext.push(cmView.EditorView.theme(styles, { dark: !!dark }));
+			}
+
+			const resolvedHighlight = createHighlightStyle(highlightStyle);
+			if (resolvedHighlight) {
+				ext.push(cmLanguage.syntaxHighlighting(resolvedHighlight));
+			}
+
+			if (Array.isArray(extensions)) {
+				ext.push(...extensions);
+			} else if (extensions) {
+				ext.push(extensions);
+			}
+
+			return ext;
+		};
+
+		const editorThemesModule = {
+			/**
+			 * Register a CodeMirror theme from plugin code.
+			 * @param {{
+			 *   id: string,
+			 *   caption?: string,
+			 *   dark?: boolean,
+			 *   getExtension?: Function,
+			 *   extensions?: unknown,
+			 *   config?: object
+			 * }} spec
+			 * `isDark`, `extension`, and `theme` are accepted aliases for compatibility.
+			 * @returns {boolean}
+			 */
+			register: (spec) => {
+				const resolved = normalizeThemeSpec(spec);
+				if (!resolved) return false;
+				return cmThemeRegistry.addTheme(
+					resolved.id,
+					resolved.caption,
+					resolved.isDark,
+					resolved.getExtension,
+					resolved.config,
+				);
+			},
+			unregister: (id) => cmThemeRegistry.removeTheme(id),
+			list: () => cmThemeRegistry.getThemes(),
+			apply: (id) => editorManager?.editor?.setTheme?.(id),
+			get: (id) => cmThemeRegistry.getThemeById(id),
+			getConfig: (id) => cmThemeRegistry.getThemeConfig(id),
+			createTheme,
+			createHighlightStyle,
+			cm: {
+				EditorView: cmView.EditorView,
+				HighlightStyle: cmLanguage.HighlightStyle,
+				syntaxHighlighting: cmLanguage.syntaxHighlighting,
+				tags: lezerHighlight.tags,
+			},
+		};
+
 		const sidebarAppsModule = {
 			add: sidebarApps.add,
 			get: sidebarApps.get,
 			remove: sidebarApps.remove,
 		};
 
+		const lspModule = {
+			...lspApi,
+			clientManager: {
+				setOptions: (options) => lspClientManager.setOptions(options),
+				getActiveClients: () => lspClientManager.getActiveClients(),
+			},
+		};
+
+		const getModeByName = (name) => {
+			const normalized = String(name || "")
+				.trim()
+				.toLowerCase();
+			if (!normalized) return null;
+			return getModesByName()[normalized] || null;
+		};
+
+		const listModes = () => [...getModes()];
+		const listModesByName = () => ({ ...getModesByName() });
+
 		const aceModes = {
 			addMode,
 			removeMode,
+			getModeForPath: (path) => getModeForPath(String(path || "")),
+			getModes: () => listModes(),
+			getModesByName: () => listModesByName(),
+			getMode: (name) => getModeByName(name),
+		};
+
+		// Preferred CodeMirror language registration API for plugins
+		const editorLanguages = {
+			// name: string, extensions: string|Array<string>, caption?: string,
+			// loader?: () => Extension | Promise<Extension>
+			register: (name, extensions, caption, loader) =>
+				addMode(name, extensions, caption, loader),
+			unregister: (name) => removeMode(name),
+			add: (name, extensions, caption, loader) =>
+				addMode(name, extensions, caption, loader),
+			remove: (name) => removeMode(name),
+			list: () => listModes(),
+			listByName: () => listModesByName(),
+			get: (name) => getModeByName(name),
+			getForPath: (path) => getModeForPath(String(path || "")),
 		};
 
 		const intent = {
 			addHandler: addIntentHandler,
 			removeHandler: removeIntentHandler,
+		};
+
+		const terminalTouchSelectionMoreOptions = {
+			add: (option) => TerminalManager.addTouchSelectionMoreOption(option),
+			remove: (id) => TerminalManager.removeTouchSelectionMoreOption(id),
+			list: () => TerminalManager.getTouchSelectionMoreOptions(),
 		};
 
 		const terminalModule = {
@@ -109,6 +293,10 @@ export default class Acode {
 			write: (id, data) => this.#secureTerminalWrite(id, data),
 			clear: (id) => TerminalManager.clearTerminal(id),
 			close: (id) => TerminalManager.closeTerminal(id),
+			moreOptions: terminalTouchSelectionMoreOptions,
+			touchSelection: {
+				moreOptions: terminalTouchSelectionMoreOptions,
+			},
 			themes: {
 				register: (name, theme, pluginId) =>
 					TerminalThemeManager.registerTheme(name, theme, pluginId),
@@ -122,6 +310,18 @@ export default class Acode {
 			},
 		};
 
+		const codemirrorModule = Object.freeze({
+			autocomplete: cmAutocomplete,
+			commands: cmCommands,
+			language: cmLanguage,
+			lezer: lezerHighlight,
+			lint: cmLint,
+			search: cmSearch,
+			state: cmState,
+			view: cmView,
+		});
+
+		this.define("config", config);
 		this.define("Url", Url);
 		this.define("page", Page);
 		this.define("Color", Color);
@@ -130,7 +330,7 @@ export default class Acode {
 		this.define("alert", alert);
 		this.define("select", select);
 		this.define("loader", loader);
-		this.define("dialogBox", box);
+		this.define("dialogBox", dialog);
 		this.define("prompt", prompt);
 		this.define("intent", intent);
 		this.define("fileList", files);
@@ -142,6 +342,9 @@ export default class Acode {
 		this.define("tutorial", tutorial);
 		this.define("aceModes", aceModes);
 		this.define("themes", themesModule);
+		this.define("editorLanguages", editorLanguages);
+		this.define("editorThemes", editorThemesModule);
+		this.define("lsp", lspModule);
 		this.define("settings", appSettings);
 		this.define("sideButton", SideButton);
 		this.define("EditorFile", EditorFile);
@@ -161,8 +364,20 @@ export default class Acode {
 		this.define("selectionMenu", selectionMenu);
 		this.define("sidebarApps", sidebarAppsModule);
 		this.define("terminal", terminalModule);
+		this.define("codemirror", codemirrorModule);
+		this.define("@codemirror/autocomplete", cmAutocomplete);
+		this.define("@codemirror/commands", cmCommands);
+		this.define("@codemirror/language", cmLanguage);
+		this.define("@codemirror/lint", cmLint);
+		this.define("@codemirror/search", cmSearch);
+		this.define("@codemirror/state", cmState);
+		this.define("@codemirror/view", cmView);
+		this.define("@lezer/highlight", lezerHighlight);
 		this.define("createKeyboardEvent", KeyboardEvent);
 		this.define("toInternalUrl", helpers.toInternalUri);
+		this.define("commands", this.#createCommandApi());
+
+		registerLspFormatter(this);
 	}
 
 	/**
@@ -288,116 +503,139 @@ export default class Acode {
 	 */
 	installPlugin(pluginId, installerPluginName) {
 		return new Promise((resolve, reject) => {
-			confirm(
-				strings.install,
-				`Do you want to install plugin '${pluginId}'${installerPluginName ? ` requested by ${installerPluginName}` : ""}?`,
-			)
-				.then((confirmation) => {
-					if (!confirmation) {
-						reject(new Error("User cancelled installation"));
+			fsOperation(Url.join(PLUGIN_DIR, pluginId))
+				.exists()
+				.then((isPluginExists) => {
+					if (isPluginExists) {
+						reject(new Error("Plugin already installed"));
 						return;
 					}
 
-					fsOperation(Url.join(PLUGIN_DIR, pluginId))
-						.exists()
-						.then((isPluginExists) => {
-							if (isPluginExists) {
-								reject(new Error("Plugin already installed"));
-								return;
-							}
+					confirm(
+						strings.install,
+						`Do you want to install plugin '${pluginId}'${installerPluginName ? ` requested by ${installerPluginName}` : ""}?`,
+					).then((confirmation) => {
+						if (!confirmation) {
+							reject(new Error("User cancelled installation"));
+							return;
+						}
 
-							let purchaseToken;
-							let product;
-							const pluginUrl = Url.join(
-								constants.API_BASE,
-								`plugin/${pluginId}`,
-							);
-							fsOperation(pluginUrl)
-								.readFile("json")
-								.catch(() => {
-									reject(new Error("Failed to fetch plugin details"));
-									return null;
-								})
-								.then((remotePlugin) => {
-									if (remotePlugin) {
-										const isPaid = remotePlugin.price > 0;
-										helpers
-											.promisify(iap.getProducts, [remotePlugin.sku])
-											.then((products) => {
-												[product] = products;
-												if (product) {
-													return getPurchase(product.productId);
-												}
-												return null;
-											})
-											.then((purchase) => {
-												purchaseToken = purchase?.purchaseToken;
+						let purchaseToken;
+						let product;
+						const pluginUrl = Url.join(config.API_BASE, `plugin/${pluginId}`);
+						fsOperation(pluginUrl)
+							.readFile("json")
+							.catch(() => {
+								reject(new Error("Failed to fetch plugin details"));
+								return null;
+							})
+							.then((remotePlugin) => {
+								if (remotePlugin) {
+									const isPaid = remotePlugin.price > 0;
+									helpers
+										.promisify(iap.getProducts, [remotePlugin.sku])
+										.then((products) => {
+											[product] = products;
+											if (product) {
+												return getPurchase(product.productId);
+											}
+											return null;
+										})
+										.then((purchase) => {
+											purchaseToken = purchase?.purchaseToken;
 
-												if (isPaid && !purchaseToken) {
-													if (!product) throw new Error("Product not found");
-													return helpers.checkAPIStatus().then((apiStatus) => {
-														if (!apiStatus) {
-															alert(strings.error, strings.api_error);
-															return;
-														}
+											if (isPaid && !purchaseToken) {
+												if (!product) throw new Error("Product not found");
+												return helpers.checkAPIStatus().then((apiStatus) => {
+													if (!apiStatus) {
+														alert(strings.error, strings.api_error);
+														return;
+													}
 
-														iap.setPurchaseUpdatedListener(
-															...purchaseListener(onpurchase, onerror),
-														);
-														return helpers.promisify(
-															iap.purchase,
-															product.productId,
-														);
+													iap.setPurchaseUpdatedListener(
+														...purchaseListener(onpurchase, onerror),
+													);
+													return helpers.promisify(
+														iap.purchase,
+														product.productId,
+													);
+												});
+											}
+										})
+										.then(() => {
+											import("lib/installPlugin").then(
+												({ default: installPlugin }) => {
+													installPlugin(
+														pluginId,
+														remotePlugin.name,
+														purchaseToken,
+													).then(() => {
+														resolve();
 													});
-												}
-											})
-											.then(() => {
-												import("lib/installPlugin").then(
-													({ default: installPlugin }) => {
-														installPlugin(
-															pluginId,
-															remotePlugin.name,
-															purchaseToken,
-														).then(() => {
-															resolve();
-														});
-													},
-												);
-											});
-
-										async function onpurchase(e) {
-											const purchase = await getPurchase(product.productId);
-											await ajax.post(
-												Url.join(constants.API_BASE, "plugin/order"),
-												{
-													data: {
-														id: remotePlugin.id,
-														token: purchase?.purchaseToken,
-														package: BuildInfo.packageName,
-													},
 												},
 											);
-											purchaseToken = purchase?.purchaseToken;
-										}
+										});
 
-										async function onerror(error) {
-											throw error;
-										}
+									async function onpurchase(e) {
+										const purchase = await getPurchase(product.productId);
+										await fetch(Url.join(config.API_BASE, "plugin/order"), {
+											method: "POST",
+											body: JSON.stringify({
+												id: remotePlugin.id,
+												token: purchase?.purchaseToken,
+												package: BuildInfo.packageName,
+											}),
+										});
+										purchaseToken = purchase?.purchaseToken;
 									}
-								});
 
-							async function getPurchase(sku) {
-								const purchases = await helpers.promisify(iap.getPurchases);
-								const purchase = purchases.find((p) =>
-									p.productIds.includes(sku),
-								);
-								return purchase;
-							}
-						});
+									async function onerror(error) {
+										throw error;
+									}
+								}
+							});
+
+						async function getPurchase(sku) {
+							const purchases = await helpers.promisify(iap.getPurchases);
+							const purchase = purchases.find((p) =>
+								p.productIds.includes(sku),
+							);
+							return purchase;
+						}
+					});
 				})
 				.catch((error) => {
 					reject(error);
 				});
+		});
+	}
+
+	[onPluginLoadCallback](pluginId) {
+		if (this.#pluginWatchers[pluginId]) {
+			this.#pluginWatchers[pluginId].resolve();
+			delete this.#pluginWatchers[pluginId];
+		}
+	}
+
+	[onPluginsLoadCompleteCallback]() {
+		for (const pluginId in this.#pluginWatchers) {
+			this.#pluginWatchers[pluginId].reject(
+				new Error(`Plugin '${pluginId}' failed to load.`),
+			);
+		}
+		this.#pluginWatchers = {};
+	}
+
+	waitForPlugin(pluginId) {
+		return new Promise((resolve, reject) => {
+			if (LOADED_PLUGINS.has(pluginId)) {
+				return resolve(true);
+			}
+
+			this.#pluginWatchers[pluginId] = {
+				resolve,
+				reject,
+			};
 		});
 	}
 
@@ -427,6 +665,14 @@ export default class Acode {
 			id,
 			settings.list,
 			settings.cb,
+			undefined,
+			{
+				preserveOrder: true,
+				pageClassName: "detail-settings-page",
+				listClassName: "detail-settings-list",
+				valueInTail: true,
+				groupByDefault: true,
+			},
 		);
 	}
 
@@ -455,10 +701,20 @@ export default class Acode {
 		delete appSettings.uiSettings[`plugin-${id}`];
 	}
 
-	registerFormatter(id, extensions, format) {
+	registerFormatter(id, extensions, format, displayName) {
+		let exts;
+		if (Array.isArray(extensions)) {
+			exts = extensions.filter(Boolean);
+			if (!exts.length) exts = ["*"];
+		} else if (typeof extensions === "string" && extensions) {
+			exts = [extensions];
+		} else {
+			exts = ["*"];
+		}
 		this.#formatter.unshift({
 			id,
-			exts: extensions,
+			name: displayName,
+			exts: exts,
 			format,
 		});
 	}
@@ -478,28 +734,42 @@ export default class Acode {
 
 	async format(selectIfNull = true) {
 		const file = editorManager.activeFile;
-		if (!file?.session) return;
+		if (!file || file.type !== "editor") return false;
 
-		const name = (file.session.getMode().$id || "").split("/").pop();
-		const formatterId = appSettings.value.formatter[name];
+		let resolvedMode = file.currentMode;
+		if (!resolvedMode) {
+			try {
+				resolvedMode = getModeForPath(file.filename)?.name;
+			} catch (_) {
+				resolvedMode = null;
+			}
+		}
+		const modeName = resolvedMode || "text";
+		const formatterMap = appSettings.value.formatter || {};
+		const formatterId = formatterMap[modeName];
 		const formatter = this.#formatter.find(({ id }) => id === formatterId);
 
 		if (!formatter) {
-			if (!selectIfNull) {
-				toast(strings["please select a formatter"]);
-				return;
+			if (formatterId) {
+				delete formatterMap[modeName];
+				await appSettings.update(false);
 			}
-			formatterSettings(name);
-			this.#afterSelectFormatter(name);
-			return;
-		}
 
-		const foldsSnapshot = this.#captureFoldState(file.session);
+			if (selectIfNull) {
+				formatterSettings(modeName);
+				this.#afterSelectFormatter(modeName);
+			} else {
+				toast(strings["please select a formatter"]);
+			}
+			return false;
+		}
 
 		try {
 			await formatter.format();
-		} finally {
-			this.#restoreFoldState(file.session, foldsSnapshot);
+			return true;
+		} catch (error) {
+			helpers.error(error);
+			return false;
 		}
 	}
 
@@ -516,77 +786,6 @@ export default class Acode {
 
 	fsOperation(file) {
 		return fsOperation(file);
-	}
-
-	#captureFoldState(session) {
-		if (!session?.getAllFolds) return null;
-		return this.#serializeFolds(session.getAllFolds());
-	}
-
-	#restoreFoldState(session, folds) {
-		if (!session || !Array.isArray(folds) || !folds.length) return;
-
-		try {
-			const foldObjects = this.#parseSerializableFolds(folds);
-			if (!foldObjects.length) return;
-			session.removeAllFolds?.();
-			session.addFolds?.(foldObjects);
-		} catch (error) {
-			console.warn("Failed to restore folds after formatting:", error);
-		}
-	}
-
-	#serializeFolds(folds) {
-		if (!Array.isArray(folds) || !folds.length) return null;
-
-		return folds
-			.map((fold) => {
-				if (!fold?.range) return null;
-				const { start, end } = fold.range;
-				if (!start || !end) return null;
-
-				return {
-					range: {
-						start: { row: start.row, column: start.column },
-						end: { row: end.row, column: end.column },
-					},
-					placeholder: fold.placeholder,
-					ranges: this.#serializeFolds(fold.ranges || []),
-				};
-			})
-			.filter(Boolean);
-	}
-
-	#parseSerializableFolds(folds) {
-		if (!Array.isArray(folds) || !folds.length) return [];
-
-		return folds
-			.map((fold) => {
-				const { range, placeholder, ranges } = fold;
-				const { start, end } = range || {};
-				if (!start || !end) return null;
-
-				try {
-					const foldInstance = new Fold(
-						new Range(start.row, start.column, end.row, end.column),
-						placeholder,
-					);
-
-					if (Array.isArray(ranges) && ranges.length) {
-						const subFolds = this.#parseSerializableFolds(ranges);
-						if (subFolds.length) {
-							foldInstance.subFolds = subFolds;
-							foldInstance.ranges = subFolds;
-						}
-					}
-
-					return foldInstance;
-				} catch (error) {
-					console.warn("Failed to parse fold:", error);
-					return null;
-				}
-			})
-			.filter(Boolean);
 	}
 
 	newEditorFile(filename, options) {
@@ -736,5 +935,63 @@ export default class Acode {
 	 */
 	unregisterFileHandler(id) {
 		fileTypeHandler.unregisterFileHandler(id);
+	}
+
+	addCommand(descriptor) {
+		const command = registerExternalCommand(descriptor);
+		this.#refreshCommandBindings();
+		return command;
+	}
+
+	removeCommand(name) {
+		if (!name) return;
+		removeExternalCommand(name);
+		this.#refreshCommandBindings();
+	}
+
+	execCommand(name, view, args) {
+		if (!name) return false;
+		const targetView = view || window.editorManager?.editor;
+		return runCommand(name, targetView, args);
+	}
+
+	listCommands() {
+		return listRegisteredCommands();
+	}
+
+	#refreshCommandBindings() {
+		const view = window.editorManager?.editor;
+		if (view) refreshCommandKeymap(view);
+	}
+
+	#createCommandApi() {
+		const commandRegistry = {
+			add: this.addCommand,
+			execute: this.execCommand,
+			remove: this.removeCommand,
+			list: this.listCommands,
+		};
+
+		const addCommand = (descriptor) => {
+			try {
+				return this.addCommand(descriptor);
+			} catch (error) {
+				console.error("Failed to add command", descriptor?.name);
+				throw error;
+			}
+		};
+
+		const removeCommand = (name) => {
+			if (!name) return;
+			this.removeCommand(name);
+		};
+
+		return {
+			addCommand,
+			removeCommand,
+			get registry() {
+				return commandRegistry;
+			},
+		};
 	}
 }

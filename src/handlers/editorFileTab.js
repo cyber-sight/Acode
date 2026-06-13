@@ -1,4 +1,4 @@
-import constants from "lib/constants";
+import config from "lib/config";
 import settings from "lib/settings";
 
 const opts = { passive: false };
@@ -82,7 +82,7 @@ export default function startDrag(e) {
 	}
 
 	if (settings.value.vibrateOnTap) {
-		navigator.vibrate(constants.VIBRATION_TIME);
+		navigator.vibrate(config.VIBRATION_TIME);
 	}
 
 	$tab = e.target;
@@ -208,14 +208,15 @@ function releaseDrag(e) {
 	} else if (
 		$target.tagName === "INPUT" ||
 		$target.tagName === "TEXTAREA" ||
-		$target.classList.contains("ace_text-input") ||
-		$target.closest(".ace_editor")
+		$target.isContentEditable ||
+		$target.closest(".cm-editor")
 	) {
-		// If released on an input area or ace editor
+		// If released on an input area or CodeMirror editor
 		const filePath = editorManager.activeFile.uri;
 		if (filePath) {
-			if ($target.closest(".ace_editor")) {
-				editorManager.editor.insert(filePath);
+			if ($target.closest(".cm-editor")) {
+				const view = editorManager.editor;
+				view.dispatch(view.state.replaceSelection(filePath));
 			} else {
 				$target.value += filePath;
 			}
@@ -282,6 +283,7 @@ function getClientPos(e) {
  * @param {HTMLElement} $parent
  */
 function updateFileList($parent) {
+	const pinnedCount = editorManager.files.filter((file) => file.pinned).length;
 	const children = [...$parent.children];
 	const newFileList = [];
 	for (let el of children) {
@@ -294,6 +296,25 @@ function updateFileList($parent) {
 	}
 
 	editorManager.files = newFileList;
+
+	const draggedFile = newFileList.find((file) => file.tab === $tab);
+	if (draggedFile) {
+		const draggedIndex = newFileList.indexOf(draggedFile);
+		let nextPinnedState;
+
+		if (!draggedFile.pinned && draggedIndex < pinnedCount) {
+			nextPinnedState = true;
+		} else if (draggedFile.pinned && draggedIndex >= pinnedCount) {
+			nextPinnedState = false;
+		}
+
+		if (nextPinnedState !== undefined) {
+			draggedFile.setPinnedState(nextPinnedState, { reorder: false });
+			if (typeof editorManager.normalizePinnedTabOrder === "function") {
+				editorManager.normalizePinnedTabOrder(editorManager.files);
+			}
+		}
+	}
 }
 
 /**
