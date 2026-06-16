@@ -321,7 +321,34 @@ class Acode {
 			view: cmView,
 		});
 
-		this.define("config", config);
+		const configProxy = new Proxy(config, {
+			set(target, prop, value, receiver) {
+				console.warn(
+					`[Security Alert] Attempt to modify read-only config property '${String(prop)}' blocked.`,
+				);
+				return true;
+			},
+			defineProperty(target, prop, descriptor) {
+				console.warn(
+					`[Security Alert] Attempt to define property '${String(prop)}' on read-only config blocked.`,
+				);
+				return true;
+			},
+			deleteProperty(target, prop) {
+				console.warn(
+					`[Security Alert] Attempt to delete property '${String(prop)}' on read-only config blocked.`,
+				);
+				return true;
+			},
+			setPrototypeOf(target, prototype) {
+				console.warn(
+					`[Security Alert] Attempt to change prototype of read-only config blocked.`,
+				);
+				return true;
+			},
+		});
+
+		this.define("config", configProxy);
 		this.define("Url", Url);
 		this.define("page", Page);
 		this.define("Color", Color);
