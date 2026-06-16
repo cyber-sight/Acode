@@ -645,8 +645,8 @@ function create($container, $toggler) {
 	$el.toggle = toggle;
 	$el.onshow = () => {};
 	$el.getWidth = function () {
-		const width = innerWidth * 0.6;
-		return mode === "phone" ? (width >= 300 ? 300 : width) : MIN_WIDTH;
+		const width = innerWidth * 0.7;
+		return mode === "phone" ? (width >= 350 ? 350 : width) : MIN_WIDTH;
 	};
 
 	return $el;
