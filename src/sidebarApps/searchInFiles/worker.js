@@ -3,6 +3,7 @@ import picomatch from "picomatch/posix";
 import { isBinaryFile } from "utils/binaryExtensions";
 
 const resolvers = {};
+const MAX_CONCURRENT_FILE_READS = 2;
 
 self.onmessage = (ev) => {
 	const { action, data, error, id } = ev.data;
@@ -40,29 +41,59 @@ function processFiles(data, mode = "search") {
 	const { test: skip } = Skip(options);
 	const total = files.length;
 	let count = 0;
+	let cursor = 0;
+	let active = 0;
+	let pumpScheduled = false;
 
-	files.forEach(processFile);
+	if (!total) {
+		done(1, mode);
+		return;
+	}
+
+	pump();
+
+	/**
+	 * Starts more file reads without flooding the main thread.
+	 */
+	function pump() {
+		pumpScheduled = false;
+		while (active < MAX_CONCURRENT_FILE_READS && cursor < total) {
+			const file = files[cursor++];
+			active += 1;
+			processFile(file);
+		}
+	}
+
+	function schedulePump() {
+		if (pumpScheduled) return;
+		pumpScheduled = true;
+		Promise.resolve().then(pump);
+	}
+
+	function finishOne() {
+		active -= 1;
+		done(++count / total, mode);
+		schedulePump();
+	}
 
 	/**
 	 * Process a file for search or replace operation.
-	 *
-	 * @param {object} file - The file object to process.
-	 * @param {string} file.url - The URL of the file.
+	 * @param {object} file
 	 */
 	function processFile(file) {
 		if (skip(file)) {
-			done(++count / total, mode);
+			finishOne();
 			return;
 		}
 
 		getFile(file.url, (res, err) => {
 			if (err) {
-				done(++count / total, mode);
-				throw err;
+				finishOne();
+				return;
 			}
 
 			process({ file, content: res, search, replace, options });
-			done(++count / total, mode);
+			finishOne();
 		});
 	}
 }
