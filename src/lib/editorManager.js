@@ -237,6 +237,15 @@ async function EditorManager($header, $body) {
 			}
 		},
 	);
+	const baseExtensionDefaults = {
+		autoIndent: true,
+		codeFolding: true,
+		autoCloseBrackets: true,
+		bracketMatching: true,
+		highlightActiveLine: true,
+		highlightSelectionMatches: true,
+	};
+	const baseExtensionSettings = Object.keys(baseExtensionDefaults);
 
 	// Compartment to swap editor theme dynamically
 	const themeCompartment = new Compartment();
@@ -323,6 +332,10 @@ async function EditorManager($header, $body) {
 	function makeLineNumberExtension() {
 		const { linenumbers = true, relativeLineNumbers = false } =
 			appSettings?.value || {};
+		const activeLineGutter =
+			appSettings?.value?.highlightActiveLine !== false
+				? [highlightActiveLineGutter()]
+				: [];
 		const lineNumberConfig = {
 			domEventHandlers: {
 				click(view, line, event) {
@@ -340,10 +353,7 @@ async function EditorManager($header, $body) {
 				},
 			});
 		if (!relativeLineNumbers)
-			return Prec.highest([
-				lineNumbers(lineNumberConfig),
-				highlightActiveLineGutter(),
-			]);
+			return Prec.highest([lineNumbers(lineNumberConfig), ...activeLineGutter]);
 		return Prec.highest([
 			lineNumbers({
 				...lineNumberConfig,
@@ -357,7 +367,7 @@ async function EditorManager($header, $body) {
 					}
 				},
 			}),
-			highlightActiveLineGutter(),
+			...activeLineGutter,
 		]);
 	}
 
@@ -368,6 +378,47 @@ async function EditorManager($header, $body) {
 			indentExt: indentUnit.of(unit),
 			tabSizeExt: EditorState.tabSize.of(Math.max(1, Number(tabSize) || 2)),
 		};
+	}
+
+	function getBaseExtensionOptions() {
+		const values = appSettings?.value || {};
+		return Object.fromEntries(
+			Object.entries(baseExtensionDefaults).map(([key, defaultValue]) => [
+				key,
+				values[key] ?? defaultValue,
+			]),
+		);
+	}
+
+	function createConfiguredBaseExtensions() {
+		return createBaseExtensions(getBaseExtensionOptions());
+	}
+
+	function getBaseExtensionSignature() {
+		const options = getBaseExtensionOptions();
+		return JSON.stringify(
+			baseExtensionSettings.map((key) => [key, options[key]]),
+		);
+	}
+
+	function applyEditContextSetting() {
+		try {
+			if (appSettings?.value?.useEditContext === false) {
+				// Avoid Chromium Android EditContext scroll jumps when tapping empty
+				// lines. https://issues.chromium.org/issues/484891671
+				EditorView.EDIT_CONTEXT = false;
+			} else if (
+				Object.prototype.hasOwnProperty.call(EditorView, "EDIT_CONTEXT")
+			) {
+				delete EditorView.EDIT_CONTEXT;
+			}
+		} catch (error) {
+			warnRecoverable(
+				"Failed to apply CodeMirror EditContext setting.",
+				error,
+				"edit-context-setting",
+			);
+		}
 	}
 
 	function makeRainbowBracketExtension() {
@@ -858,6 +909,8 @@ async function EditorManager($header, $body) {
 	}
 
 	// Create minimal CodeMirror editor
+	applyEditContextSetting();
+
 	const editorState = EditorState.create({
 		doc: "",
 		extensions: createMainEditorExtensions({
@@ -865,7 +918,7 @@ async function EditorManager($header, $body) {
 			emmetExtensions: createEmmetExtensionSet({
 				syntax: EmmetKnownSyntax.html,
 			}),
-			baseExtensions: createBaseExtensions(),
+			baseExtensions: createConfiguredBaseExtensions(),
 			commandKeymapExtension: getCommandKeymapExtension(),
 			themeExtension: themeCompartment.of(getConfiguredThemeExtension()),
 			pointerCursorVisibilityExtension,
@@ -1225,6 +1278,8 @@ async function EditorManager($header, $body) {
 			syntax: getEmmetSyntaxForFile(file),
 			colorPreview: !!appSettings.value.colorPreview,
 			autoCloseTags: appSettings.value.autoCloseTags !== false,
+			baseExtensions: getBaseExtensionSignature(),
+			useEditContext: appSettings.value.useEditContext !== false,
 		});
 	}
 
@@ -1430,7 +1485,7 @@ async function EditorManager($header, $body) {
 		const baseExtensions = createMainEditorExtensions({
 			// Emmet needs to precede default keymaps so tracker Tab wins over indent
 			emmetExtensions: createEmmetExtensionSet({ syntax }),
-			baseExtensions: createBaseExtensions(),
+			baseExtensions: createConfiguredBaseExtensions(),
 			commandKeymapExtension: getCommandKeymapExtension(),
 			// keep compartment in the state to allow dynamic theme changes later
 			themeExtension: themeCompartment.of(getConfiguredThemeExtension()),
