@@ -103,6 +103,9 @@ async function EditorManager($header, $body) {
 	let lastScrollTop = 0;
 	let lastScrollLeft = 0;
 	let suppressCursorRevealUntil = 0;
+	let scrollbarScrollLockUntil = 0;
+	let scrollbarScrollLockTop = null;
+	let scrollbarScrollLockLeft = null;
 
 	// Debounce timers for CodeMirror change handling
 	let checkTimeout = null;
@@ -185,7 +188,7 @@ async function EditorManager($header, $body) {
 
 	const pointerCursorVisibilityExtension = EditorView.updateListener.of(
 		(update) => {
-			if (!update.selectionSet) return;
+			if (!update.transactions.length) return;
 			const pointerTriggered = update.transactions.some(
 				(tr) =>
 					tr.isUserEvent("pointer") ||
@@ -194,14 +197,17 @@ async function EditorManager($header, $body) {
 					tr.isUserEvent("touch") ||
 					tr.isUserEvent("select.touch"),
 			);
-			if (!pointerTriggered) return;
+			if (!pointerTriggered) {
+				clearScrollbarScrollLock();
+				return;
+			}
+			if (!update.selectionSet) return;
 			requestAnimationFrame(() => {
 				if (isCursorRevealSuppressed()) return;
 				if (!isCursorVisible()) scrollCursorIntoView({ behavior: "instant" });
 			});
 		},
 	);
-
 	const isShiftSelectionActive = (event) => {
 		if (!appSettings.value.shiftClickSelection) return false;
 		return !!event?.shiftKey || quickTools?.$footer?.dataset?.shift != null;
@@ -1155,6 +1161,7 @@ async function EditorManager($header, $body) {
 			if (!scroller) return false;
 
 			if (row === Number.POSITIVE_INFINITY) {
+				clearScrollbarScrollLock();
 				scroller.scrollTop = Math.max(
 					scroller.scrollHeight - scroller.clientHeight,
 					0,
@@ -2196,12 +2203,15 @@ async function EditorManager($header, $body) {
 
 		function syncScrollUi() {
 			scrollSyncRaf = 0;
-			onscrolltop();
-			onscrollleft();
+			editor.requestMeasure({
+				read: () => readScrollMetrics(),
+				write: updateScrollbarsFromMetrics,
+			});
 		}
 
 		function handleEditorScroll() {
 			if (!scroller) return;
+			if (restoreScrollbarScrollLock()) return;
 			if (!isScrolling) {
 				isScrolling = true;
 				if (hasHoverTooltips(editor.state)) {
@@ -2220,6 +2230,15 @@ async function EditorManager($header, $body) {
 		}
 
 		scroller?.addEventListener("scroll", handleEditorScroll, { passive: true });
+		scroller?.addEventListener("pointerdown", clearScrollbarScrollLock, {
+			passive: true,
+		});
+		scroller?.addEventListener("touchstart", clearScrollbarScrollLock, {
+			passive: true,
+		});
+		scroller?.addEventListener("wheel", clearScrollbarScrollLock, {
+			passive: true,
+		});
 		syncScrollUi();
 
 		keyboardHandler.on("keyboardShowStart", () => {
@@ -2328,6 +2347,49 @@ async function EditorManager($header, $body) {
 		return Date.now() < suppressCursorRevealUntil;
 	}
 
+	function lockScrollbarScrollPosition({ top, left }, duration = 1200) {
+		const scroller = editor?.scrollDOM;
+		if (!scroller) return;
+		scrollbarScrollLockUntil = Date.now() + duration;
+		if (typeof top === "number") scrollbarScrollLockTop = top;
+		if (typeof left === "number") scrollbarScrollLockLeft = left;
+	}
+
+	function clearScrollbarScrollLock() {
+		scrollbarScrollLockUntil = 0;
+		scrollbarScrollLockTop = null;
+		scrollbarScrollLockLeft = null;
+	}
+
+	function restoreScrollbarScrollLock() {
+		if (Date.now() >= scrollbarScrollLockUntil) {
+			clearScrollbarScrollLock();
+			return false;
+		}
+
+		const scroller = editor?.scrollDOM;
+		if (!scroller) return false;
+
+		let restored = false;
+		if (
+			typeof scrollbarScrollLockTop === "number" &&
+			Math.abs(scroller.scrollTop - scrollbarScrollLockTop) > 1
+		) {
+			scroller.scrollTop = scrollbarScrollLockTop;
+			lastScrollTop = scroller.scrollTop;
+			restored = true;
+		}
+		if (
+			typeof scrollbarScrollLockLeft === "number" &&
+			Math.abs(scroller.scrollLeft - scrollbarScrollLockLeft) > 1
+		) {
+			scroller.scrollLeft = scrollbarScrollLockLeft;
+			lastScrollLeft = scroller.scrollLeft;
+			restored = true;
+		}
+		return restored;
+	}
+
 	/**
 	 * Checks if the cursor is visible within the CodeMirror viewport.
 	 * @returns {boolean} - True if the cursor is visible, false otherwise.
@@ -2369,13 +2431,15 @@ async function EditorManager($header, $body) {
 		preventScrollbarV = true;
 		scroller.scrollTop = normalized * maxScroll;
 		lastScrollTop = scroller.scrollTop;
+		lockScrollbarScrollPosition({ top: lastScrollTop });
 	}
 
 	/**
 	 * Handles the onscroll event for the vend element.
 	 */
 	function onscrollVend() {
-		suppressCursorReveal();
+		suppressCursorReveal(1200);
+		lockScrollbarScrollPosition({ top: editor?.scrollDOM?.scrollTop }, 1200);
 		preventScrollbarV = false;
 		setVScrollValue();
 	}
@@ -2394,13 +2458,15 @@ async function EditorManager($header, $body) {
 		preventScrollbarH = true;
 		scroller.scrollLeft = normalized * maxScroll;
 		lastScrollLeft = scroller.scrollLeft;
+		lockScrollbarScrollPosition({ left: lastScrollLeft });
 	}
 
 	/**
 	 * Handles the event when the horizontal scrollbar reaches the end.
 	 */
 	function onscrollHEnd() {
-		suppressCursorReveal();
+		suppressCursorReveal(1200);
+		lockScrollbarScrollPosition({ left: editor?.scrollDOM?.scrollLeft }, 1200);
 		preventScrollbarH = false;
 		setHScrollValue();
 	}
@@ -2444,6 +2510,61 @@ async function EditorManager($header, $body) {
 			return;
 		}
 		setHScrollValue();
+		$hScrollbar.render();
+	}
+
+	function readScrollMetrics() {
+		const scroller = editor?.scrollDOM;
+		if (!scroller) return null;
+		return {
+			scrollTop: scroller.scrollTop,
+			scrollLeft: scroller.scrollLeft,
+			scrollHeight: scroller.scrollHeight,
+			scrollWidth: scroller.scrollWidth,
+			clientHeight: scroller.clientHeight,
+			clientWidth: scroller.clientWidth,
+		};
+	}
+
+	function updateScrollbarsFromMetrics(metrics) {
+		if (!metrics) return;
+
+		const maxScrollTop = Math.max(
+			metrics.scrollHeight - metrics.clientHeight,
+			0,
+		);
+		if (maxScrollTop <= 0) {
+			$vScrollbar.hide();
+			lastScrollTop = 0;
+			$vScrollbar.value = 0;
+		} else {
+			if (!preventScrollbarV && metrics.scrollTop !== lastScrollTop) {
+				lastScrollTop = metrics.scrollTop;
+				$vScrollbar.value = clamp01(metrics.scrollTop / maxScrollTop);
+			}
+			$vScrollbar.render();
+		}
+
+		if (appSettings.value.textWrap) {
+			$hScrollbar.hide();
+			return;
+		}
+
+		const maxScrollLeft = Math.max(
+			metrics.scrollWidth - metrics.clientWidth,
+			0,
+		);
+		if (maxScrollLeft <= 0) {
+			$hScrollbar.hide();
+			lastScrollLeft = 0;
+			$hScrollbar.value = 0;
+			return;
+		}
+
+		if (!preventScrollbarH && metrics.scrollLeft !== lastScrollLeft) {
+			lastScrollLeft = metrics.scrollLeft;
+			$hScrollbar.value = clamp01(metrics.scrollLeft / maxScrollLeft);
+		}
 		$hScrollbar.render();
 	}
 
