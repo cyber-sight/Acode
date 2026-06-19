@@ -106,6 +106,9 @@ async function EditorManager($header, $body) {
 	let scrollbarScrollLockUntil = 0;
 	let scrollbarScrollLockTop = null;
 	let scrollbarScrollLockLeft = null;
+	let scrollRestoreFrame = 0;
+	let scrollRestoreNestedFrame = 0;
+	let scrollRestoreTimeout = 0;
 
 	// Debounce timers for CodeMirror change handling
 	let checkTimeout = null;
@@ -1478,12 +1481,7 @@ async function EditorManager($header, $body) {
 				}
 			}
 
-			if (
-				typeof file.lastScrollTop === "number" ||
-				typeof file.lastScrollLeft === "number"
-			) {
-				setScrollPosition(editor, file.lastScrollTop, file.lastScrollLeft);
-			}
+			restoreFileScrollPosition(file);
 			scheduleLspForFile(file);
 			return;
 		}
@@ -1578,15 +1576,69 @@ async function EditorManager($header, $body) {
 			);
 		}
 
-		// Restore last known scroll position if present
-		if (
-			typeof file.lastScrollTop === "number" ||
-			typeof file.lastScrollLeft === "number"
-		) {
-			setScrollPosition(editor, file.lastScrollTop, file.lastScrollLeft);
-		}
+		restoreFileScrollPosition(file);
 
 		scheduleLspForFile(file);
+	}
+
+	function restoreFileScrollPosition(file) {
+		cancelPendingScrollRestore();
+		if (!file || file.type !== "editor") return;
+		const hasTop = typeof file.lastScrollTop === "number";
+		const hasLeft = typeof file.lastScrollLeft === "number";
+		if (!hasTop && !hasLeft) return;
+
+		const fileId = file.id;
+		const top = hasTop ? file.lastScrollTop : undefined;
+		const left = hasLeft ? file.lastScrollLeft : undefined;
+
+		const apply = () => {
+			if (manager.activeFile?.id !== fileId) return;
+			suppressCursorReveal(450);
+			setScrollPosition(editor, top, left);
+
+			const scroller = editor?.scrollDOM;
+			if (scroller) {
+				if (hasTop) lastScrollTop = scroller.scrollTop;
+				if (hasLeft) lastScrollLeft = scroller.scrollLeft;
+				lockScrollbarScrollPosition(
+					{
+						top: hasTop ? scroller.scrollTop : undefined,
+						left: hasLeft ? scroller.scrollLeft : undefined,
+					},
+					450,
+				);
+			}
+		};
+
+		apply();
+		scrollRestoreFrame = requestAnimationFrame(() => {
+			scrollRestoreFrame = 0;
+			apply();
+			scrollRestoreNestedFrame = requestAnimationFrame(() => {
+				scrollRestoreNestedFrame = 0;
+				apply();
+			});
+		});
+		scrollRestoreTimeout = setTimeout(() => {
+			scrollRestoreTimeout = 0;
+			apply();
+		}, 120);
+	}
+
+	function cancelPendingScrollRestore() {
+		if (scrollRestoreFrame) {
+			cancelAnimationFrame(scrollRestoreFrame);
+			scrollRestoreFrame = 0;
+		}
+		if (scrollRestoreNestedFrame) {
+			cancelAnimationFrame(scrollRestoreNestedFrame);
+			scrollRestoreNestedFrame = 0;
+		}
+		if (scrollRestoreTimeout) {
+			clearTimeout(scrollRestoreTimeout);
+			scrollRestoreTimeout = 0;
+		}
 	}
 
 	function getEmmetSyntaxForFile(file) {
