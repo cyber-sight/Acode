@@ -14,9 +14,38 @@ import type {
 	LspRuntimeContext,
 	LspRuntimeProvider,
 	LspServerDefinition,
+	LspRuntimeUriResolutionContext,
 } from "../types";
 
 export const BUILTIN_ALPINE_RUNTIME_ID = "builtin-alpine";
+
+function isUntitled(context: LspRuntimeContext): boolean {
+	return /^untitled:/i.test(
+		String(context.originalDocumentUri || context.uri || ""),
+	);
+}
+
+function cacheDocumentUri(context: LspRuntimeContext): string | null {
+	const cacheFile = context.file?.cacheFile;
+	if (!cacheFile || typeof cacheFile !== "string") return null;
+	const rawPath = cacheFile.replace(/^file:\/\//i, "");
+	const absolutePath = rawPath.startsWith("/") ? rawPath : `/${rawPath}`;
+	let path = absolutePath;
+	try {
+		path = decodeURIComponent(absolutePath);
+	} catch {
+		// Keep the original value and let encodeURI escape any literal percent signs.
+	}
+	return `file://${encodeURI(path).replace(/#/g, "%23")}`;
+}
+
+function canUseRealPath(context: LspRuntimeContext): boolean {
+	return isBuiltinAlpineAccessible({
+		...context,
+		rootUri: context.originalRootUri || context.rootUri,
+		uri: context.originalDocumentUri || context.uri,
+	});
+}
 
 export const builtinAlpineRuntimeProvider: LspRuntimeProvider = {
 	id: BUILTIN_ALPINE_RUNTIME_ID,
@@ -29,9 +58,30 @@ export const builtinAlpineRuntimeProvider: LspRuntimeProvider = {
 	): boolean {
 		return (
 			!!server.launcher &&
-			(context.allowNonTerminalWorkspace === true ||
-				isBuiltinAlpineAccessible(context))
+			(canUseRealPath(context) ||
+				(isUntitled(context) && !!cacheDocumentUri(context)) ||
+				(context.allowNonTerminalWorkspace === true &&
+					!!cacheDocumentUri(context)))
 		);
+	},
+
+	resolveUris(
+		server: LspServerDefinition,
+		context: LspRuntimeUriResolutionContext,
+	) {
+		if (canUseRealPath(context) && !isUntitled(context)) return null;
+
+		const documentUri = cacheDocumentUri(context);
+		if (!documentUri) {
+			throw new Error(
+				`Built-in Alpine cannot resolve a cache URI for ${context.originalDocumentUri}`,
+			);
+		}
+		return {
+			documentUri,
+			rootUri: null,
+			scope: "document",
+		};
 	},
 
 	checkInstallation(server, context) {
