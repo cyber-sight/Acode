@@ -328,13 +328,47 @@ export default function mainSettings() {
 	page.show();
 
 	appSettings.uiSettings["main-settings"] = page;
-	appSettings.uiSettings["app-settings"] = otherSettings();
-	appSettings.uiSettings["file-settings"] = filesSettings();
-	appSettings.uiSettings["backup-restore"] = backupRestore();
-	appSettings.uiSettings["editor-settings"] = editorSettings();
-	appSettings.uiSettings["scroll-settings"] = scrollSettings();
-	appSettings.uiSettings["search-settings"] = searchSettings();
-	appSettings.uiSettings["preview-settings"] = previewSettings();
-	appSettings.uiSettings["terminal-settings"] = terminalSettings();
-	appSettings.uiSettings["lsp-settings"] = lspSettings();
+
+	const lazyPages = {
+		"app-settings": otherSettings,
+		"file-settings": filesSettings,
+		"backup-restore": backupRestore,
+		"editor-settings": editorSettings,
+		"scroll-settings": scrollSettings,
+		"search-settings": searchSettings,
+		"preview-settings": previewSettings,
+		"terminal-settings": terminalSettings,
+		"lsp-settings": lspSettings,
+	};
+
+	const instantiated = {};
+
+	for (const [key, initializer] of Object.entries(lazyPages)) {
+		delete appSettings.uiSettings[key];
+		Object.defineProperty(appSettings.uiSettings, key, {
+			get() {
+				if (!(key in instantiated)) {
+					instantiated[key] = initializer();
+					Object.defineProperty(appSettings.uiSettings, key, {
+						value: instantiated[key],
+						writable: true,
+						configurable: true,
+						enumerable: true,
+					});
+				}
+				return instantiated[key];
+			},
+			set(val) {
+				instantiated[key] = val;
+				Object.defineProperty(appSettings.uiSettings, key, {
+					value: val,
+					writable: true,
+					configurable: true,
+					enumerable: true,
+				});
+			},
+			configurable: true,
+			enumerable: false,
+		});
+	}
 }
