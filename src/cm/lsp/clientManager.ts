@@ -9,7 +9,7 @@ import {
   serverCompletion,
   serverDiagnostics,
 } from "@codemirror/lsp-client";
-import { EditorState, Extension, MapMode } from "@codemirror/state";
+import { EditorState, Extension, Facet, MapMode } from "@codemirror/state";
 import { EditorView, keymap } from "@codemirror/view";
 import lspStatusBar from "components/lspStatusBar";
 import notificationManager from "lib/notificationManager";
@@ -47,6 +47,13 @@ import type {
   Transport,
 } from "./types";
 import AcodeWorkspace from "./workspace";
+
+export const lspCompletionEnabled = Facet.define<boolean, boolean>({
+  // File-level marker used by the autocomplete override path. If any attached
+  // server exposes completion, keep the shared LSP completion source available.
+  // Per-server completion opt-outs do not make this a per-server gate.
+  combine: (values) => values.some(Boolean),
+});
 
 function asArray<T>(value: T | T[] | null | undefined): T[] {
   if (!value) return [];
@@ -354,6 +361,9 @@ export class LspClientManager {
           normalizedUri,
           targetLanguageId,
         );
+        if (server.clientConfig?.builtinExtensions?.completion !== false) {
+          lspExtensions.push(lspCompletionEnabled.of(true));
+        }
         const aliases =
           originalUri && originalUri !== normalizedUri ? [originalUri] : [];
         clientState.attach(normalizedUri, view as EditorView, aliases);
