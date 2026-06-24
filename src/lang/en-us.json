@@ -774,5 +774,18 @@
 	"compact": "Compact",
 	"off": "Off",
 	"quick tools height": "Quick tools height",
-	"quick tools toggler": "Quick tools toggler"
+	"quick tools toggler": "Quick tools toggler",
+	"terminal:block": "Block",
+	"terminal:underline": "Underline",
+	"terminal:bar": "Bar",
+	"terminal:inactive block": "Block",
+	"terminal:inactive underline": "Underline",
+	"terminal:inactive bar": "Bar",
+	"terminal:inactive none": "None",
+	"terminal:normal": "Normal",
+	"terminal:bold": "Bold",
+	"quicktools-trigger:click": "Click",
+	"quicktools-trigger:touch": "Touch",
+	"settings-info-terminal-uninstall": "Are you sure you want to uninstall the terminal?",
+	"terminal:inactive outline": "Outline"
 }

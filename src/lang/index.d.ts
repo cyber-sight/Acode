@@ -778,6 +778,19 @@ declare type LangStrings = {
   "off": string;
   "quick tools height": string;
   "quick tools toggler": string;
+  "terminal:block": string;
+  "terminal:underline": string;
+  "terminal:bar": string;
+  "terminal:inactive block": string;
+  "terminal:inactive underline": string;
+  "terminal:inactive bar": string;
+  "terminal:inactive none": string;
+  "terminal:normal": string;
+  "terminal:bold": string;
+  "quicktools-trigger:click": string;
+  "quicktools-trigger:touch": string;
+  "settings-info-terminal-uninstall": string;
+  "terminal:inactive outline": string;
 };
 
 declare var strings: LangStrings;
