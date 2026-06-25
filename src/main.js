@@ -63,13 +63,13 @@ import themes from "theme/list";
 import { initHighlighting } from "utils/codeHighlight";
 import { getEncoding, initEncodings } from "utils/encodings";
 import helpers from "utils/helpers";
+import { INSTALL_SOURCE_PLAY, isPlayStoreInstall } from "utils/installSource";
 import loadPolyFill from "utils/polyfill";
 import Url from "utils/Url";
 import $_fileMenu from "views/file-menu.hbs";
 import $_menu from "views/menu.hbs";
 import auth, { loginEvents } from "./lib/auth";
 
-const INSTALL_SOURCE_PLAY = "com.android.vending";
 const oldPreventDefault = TouchEvent.prototype.preventDefault;
 const previousVersionCode = Number.parseInt(localStorage.versionCode, 10);
 const logger = new Logger();
@@ -335,7 +335,11 @@ async function onDeviceReady() {
 	await promptUpdateCheckConsent();
 
 	// Check for app updates
-	if (settings.value.checkForAppUpdates && navigator.onLine) {
+	if (
+		!isPlayStoreInstall() &&
+		settings.value.checkForAppUpdates &&
+		navigator.onLine
+	) {
 		cordova.plugin.http.sendRequest(
 			"https://api.github.com/repos/Acode-Foundation/Acode/releases/latest",
 			{
@@ -472,6 +476,16 @@ async function setDebugInfo() {
 
 async function promptUpdateCheckConsent() {
 	try {
+		if (isPlayStoreInstall()) {
+			localStorage.setItem("checkForUpdatesPrompted", "true");
+
+			if (settings.value.checkForAppUpdates) {
+				await settings.update({ checkForAppUpdates: false }, false);
+			}
+
+			return;
+		}
+
 		if (Boolean(localStorage.getItem("checkForUpdatesPrompted"))) return;
 
 		if (settings.value.checkForAppUpdates) {
@@ -479,18 +493,11 @@ async function promptUpdateCheckConsent() {
 			return;
 		}
 
-		const isPlayStore = window.appInstallSource === "com.android.vending";
+		const message = strings["prompt update check consent message"];
+		const shouldEnable = await confirm(strings?.confirm, message);
 
-		if (!isPlayStore) {
-			const message = strings["prompt update check consent message"];
-			const shouldEnable = await confirm(strings?.confirm, message);
-
-			localStorage.setItem("checkForUpdatesPrompted", "true");
-			if (shouldEnable) {
-				await settings.update({ checkForAppUpdates: true }, false);
-			}
-		} else {
-			localStorage.setItem("checkForUpdatesPrompted", "true");
+		localStorage.setItem("checkForUpdatesPrompted", "true");
+		if (shouldEnable) {
 			await settings.update({ checkForAppUpdates: true }, false);
 		}
 	} catch (error) {

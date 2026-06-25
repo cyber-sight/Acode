@@ -15,11 +15,13 @@ import FontManager from "pages/fontManager";
 import QuickToolsSettings from "pages/quickTools";
 import encodings, { getEncoding } from "utils/encodings";
 import helpers from "utils/helpers";
+import { isPlayStoreInstall } from "utils/installSource";
 import Url from "utils/Url";
 
 export default function otherSettings() {
 	const values = appSettings.value;
 	const title = strings["app settings"].capitalize();
+	const installedFromPlayStore = isPlayStoreInstall();
 	const appFontText = strings["app font"] || "App font";
 	const appFontInfo =
 		strings["settings-info-app-font-family"] ||
@@ -290,13 +292,17 @@ export default function otherSettings() {
 			info: strings["settings-info-app-check-files"],
 			category: categories.advanced,
 		},
-		{
-			key: "checkForAppUpdates",
-			text: strings["check for app updates"],
-			checkbox: values.checkForAppUpdates,
-			info: strings["info-checkForAppUpdates"],
-			category: categories.advanced,
-		},
+		...(!installedFromPlayStore
+			? [
+					{
+						key: "checkForAppUpdates",
+						text: strings["check for app updates"],
+						checkbox: values.checkForAppUpdates,
+						info: strings["info-checkForAppUpdates"],
+						category: categories.advanced,
+					},
+				]
+			: []),
 		{
 			key: "console",
 			text: strings.console,
