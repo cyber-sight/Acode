@@ -29,6 +29,18 @@ import run from "./run";
 import saveFile from "./saveFile";
 import appSettings from "./settings";
 
+let mainCSSStyleSheet = null;
+
+function getMainCSSStyleSheet() {
+	if (mainCSSStyleSheet) return mainCSSStyleSheet;
+	for (const sheet of document.styleSheets) {
+		if (sheet.href && sheet.href.endsWith("main.css")) {
+			return sheet;
+		}
+	}
+	return null;
+}
+
 function syncQuickToolsVisibility(file) {
 	const { $toggler } = quickTools;
 	const hideForFile = !!file?.hideQuickTools;
@@ -530,7 +542,43 @@ export default class EditorFile {
 					shadow = container.attachShadow({ mode: "open" });
 
 					// Add base styles to shadow DOM first
-					shadow.appendChild(<link rel="stylesheet" href="build/main.css" />);
+					const sharedSheet = getMainCSSStyleSheet();
+					let adopted = false;
+					if (sharedSheet) {
+						try {
+							shadow.adoptedStyleSheets = [sharedSheet];
+							adopted = true;
+						} catch (e) {
+							console.warn(
+								"Failed to adopt document stylesheet, attempting constructed fallback",
+								e,
+							);
+							if (
+								typeof CSSStyleSheet !== "undefined" &&
+								CSSStyleSheet.prototype.replaceSync
+							) {
+								try {
+									const cssText = Array.from(sharedSheet.cssRules)
+										.map((rule) => rule.cssText)
+										.join("\n");
+									const constructedSheet = new CSSStyleSheet();
+									constructedSheet.replaceSync(cssText);
+									shadow.adoptedStyleSheets = [constructedSheet];
+									adopted = true;
+									mainCSSStyleSheet = constructedSheet;
+								} catch (innerError) {
+									console.warn(
+										"Failed constructed stylesheet fallback",
+										innerError,
+									);
+								}
+							}
+						}
+					}
+
+					if (!adopted) {
+						shadow.appendChild(<link rel="stylesheet" href="build/main.css" />);
+					}
 
 					// Handle custom stylesheets if provided
 					if (options.stylesheets) {
