@@ -4,64 +4,99 @@
 // can serve a freshly compiled version on every reload.
 
 (function boot() {
-	"use strict";
+  "use strict";
 
-	var DEV_MODE = typeof __DEV_MODE__ !== "undefined" && __DEV_MODE__;
-	var DEV_HOST = typeof __DEV_HOST__ !== "undefined" ? __DEV_HOST__ : "";
-	var DEV_PORT = typeof __DEV_PORT__ !== "undefined" ? __DEV_PORT__ : "";
-	var DEV_PROTO = typeof __DEV_PROTO__ !== "undefined" ? __DEV_PROTO__ : "";
-	var DEV_ORIGIN =
-		DEV_HOST && DEV_PORT && DEV_PROTO
-			? DEV_PROTO.concat("://", DEV_HOST, ":", DEV_PORT)
-			: "";
+  var DEV_MODE = typeof __DEV_MODE__ !== "undefined" && __DEV_MODE__;
+  var DEV_HOST = typeof __DEV_HOST__ !== "undefined" ? __DEV_HOST__ : "";
+  var DEV_PORT = typeof __DEV_PORT__ !== "undefined" ? __DEV_PORT__ : "";
+  var DEV_PROTO = typeof __DEV_PROTO__ !== "undefined" ? __DEV_PROTO__ : "";
+  var DEV_ORIGIN =
+    DEV_HOST && DEV_PORT && DEV_PROTO
+      ? DEV_PROTO.concat("://", DEV_HOST, ":", DEV_PORT)
+      : "";
 
-	function loadScript(src) {
-		var script = document.createElement("script");
-		script.src = src;
-		document.head.appendChild(script);
-	}
+  function setBootStatus(message) {
+    console.log("[boot]", message);
 
-	function loadCSS(href) {
-		var link = document.createElement("link");
-		link.rel = "stylesheet";
-		link.href = href;
-		document.head.appendChild(link);
-	}
+    function apply() {
+      if (document.body && document.body.classList.contains("loading")) {
+        document.body.setAttribute("data-small-msg", message);
+      }
+    }
 
-	if (DEV_MODE && DEV_ORIGIN) {
-		// --- Development mode: load everything from the dev server ---
-		loadCSS("".concat(DEV_ORIGIN, "/build/main.css"));
-		loadScript("".concat(DEV_ORIGIN, "/build/main.js"));
+    if (document.body) {
+      apply();
+    } else {
+      document.addEventListener("DOMContentLoaded", apply, { once: true });
+    }
+  }
 
-		// WebSocket reload channel
-		(function connectWS() {
-			var wsProto = DEV_PROTO === "https" ? "wss" : "ws";
-			var ws;
+  function loadScript(src) {
+    var script = document.createElement("script");
+    script.async = false;
+    script.onload = function () {
+      setBootStatus("Loaded ".concat(src));
+    };
+    script.onerror = function () {
+      setBootStatus("Failed to load ".concat(src));
+    };
+    script.src = src;
+    document.head.appendChild(script);
+  }
 
-			try {
-				ws = new WebSocket("".concat(wsProto, "://", DEV_HOST, ":", DEV_PORT));
-			} catch (_e) {
-				setTimeout(connectWS, 1000);
-				return;
-			}
+  function loadCSS(href) {
+    var link = document.createElement("link");
+    link.rel = "stylesheet";
+    link.onerror = function () {
+      setBootStatus("Failed to load ".concat(href));
+    };
+    link.href = href;
+    document.head.appendChild(link);
+  }
 
-			ws.onmessage = function (e) {
-				if (e.data === "reload") {
-					window.location.reload();
-				}
-			};
+  if (DEV_MODE && DEV_ORIGIN) {
+    // --- Development mode: load everything from the dev server ---
+    setBootStatus("Loading dev bundle from ".concat(DEV_ORIGIN));
+    loadCSS("".concat(DEV_ORIGIN, "/build/main.css"));
+    loadScript("".concat(DEV_ORIGIN, "/build/main.js"));
 
-			ws.onclose = function () {
-				setTimeout(connectWS, 1000);
-			};
+    // WebSocket reload channel
+    (function connectWS() {
+      var wsProto = DEV_PROTO === "https" ? "wss" : "ws";
+      var ws;
 
-			ws.onerror = function () {
-				// Will trigger onclose and retry
-			};
-		})();
-	} else {
-		// --- Production / fallback: load local bundle ---
-		loadCSS("./build/main.css");
-		loadScript("./build/main.js");
-	}
+      try {
+        ws = new WebSocket("".concat(wsProto, "://", DEV_HOST, ":", DEV_PORT));
+      } catch (_e) {
+        setBootStatus("Live reload connect failed. Retrying...");
+        setTimeout(connectWS, 1000);
+        return;
+      }
+
+      ws.onopen = function () {
+        setBootStatus("Live reload connected.");
+      };
+
+      ws.onmessage = function (e) {
+        if (e.data === "reload") {
+          window.location.reload();
+        }
+      };
+
+      ws.onclose = function () {
+        setTimeout(connectWS, 1000);
+      };
+
+      ws.onerror = function () {
+        setBootStatus("Live reload error. Retrying...");
+        try {
+          ws.close();
+        } catch (_e) {}
+      };
+    })();
+  } else {
+    // --- Production / fallback: load local bundle ---
+    loadCSS("./build/main.css");
+    loadScript("./build/main.js");
+  }
 })();

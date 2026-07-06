@@ -4,6 +4,13 @@ import openFolder, { addedFolder } from "lib/openFolder";
 import helpers from "utils/helpers";
 import Url from "utils/Url";
 
+function getOpenErrorMessage(prefix, err) {
+	const error =
+		err?.message || err?.localizedDescription || err?.error || err?.code || err;
+	const message = helpers.errorMessage(error);
+	return message ? `${prefix}. ${message}` : prefix;
+}
+
 /**
  * @typedef {"file"|"folder"|"both"} BrowseMode
  * @typedef {{type: 'file' | 'folder', url: String, name: String}} SelectedFile
@@ -47,12 +54,8 @@ FileBrowser.openFile = (res) => {
 
 FileBrowser.openFileError = (err) => {
 	const ERROR = strings.error.toUpperCase();
-	const message = `${strings["unable to open file"]}. ${helpers.errorMessage(err.code)}`;
-	if (err.code) {
-		alert(ERROR, message);
-	} else if (err.code !== 0) {
-		alert(ERROR, strings["unable to open file"]);
-	}
+	if (err?.code === 0) return;
+	alert(ERROR, getOpenErrorMessage(strings["unable to open file"], err));
 };
 
 FileBrowser.openFolder = async (res) => {
@@ -76,12 +79,8 @@ FileBrowser.openFolder = async (res) => {
 
 FileBrowser.openFolderError = (err) => {
 	const ERROR = strings.error.toUpperCase();
-	const message = `${strings["unable to open folder"]}. ${helpers.errorMessage(err.code)}`;
-	if (err.code) {
-		alert(ERROR, message);
-	} else if (err.code !== 0) {
-		alert(ERROR, strings["unable to open folder"]);
-	}
+	if (err?.code === 0) return;
+	alert(ERROR, getOpenErrorMessage(strings["unable to open folder"], err));
 };
 
 FileBrowser.open = (res) => {

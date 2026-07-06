@@ -145,6 +145,88 @@
     [self.commandDelegate sendPluginResult:[CDVPluginResult resultWithStatus:CDVCommandStatus_OK messageAsString:arch] callbackId:command.callbackId];
 }
 
+- (void)getInstaller:(CDVInvokedUrlCommand *)command {
+    [self.commandDelegate sendPluginResult:[CDVPluginResult resultWithStatus:CDVCommandStatus_OK messageAsString:@"app-store"] callbackId:command.callbackId];
+}
+
+- (void)shareText:(CDVInvokedUrlCommand *)command {
+    NSString *text = command.arguments.count > 0 ? command.arguments[0] : @"";
+    UIActivityViewController *controller = [[UIActivityViewController alloc] initWithActivityItems:@[text] applicationActivities:nil];
+    dispatch_async(dispatch_get_main_queue(), ^{
+        [self.viewController presentViewController:controller animated:YES completion:nil];
+    });
+    [self.commandDelegate sendPluginResult:[CDVPluginResult resultWithStatus:CDVCommandStatus_OK] callbackId:command.callbackId];
+}
+
+- (void)getRewardStatus:(CDVInvokedUrlCommand *)command {
+    NSDictionary *status = @{ @"isAdFree": @YES, @"source": @"ios" };
+    [self.commandDelegate sendPluginResult:[CDVPluginResult resultWithStatus:CDVCommandStatus_OK messageAsDictionary:status] callbackId:command.callbackId];
+}
+
+- (void)redeemReward:(CDVInvokedUrlCommand *)command {
+    NSDictionary *status = @{ @"success": @NO, @"message": @"Rewards are not supported on iOS." };
+    [self.commandDelegate sendPluginResult:[CDVPluginResult resultWithStatus:CDVCommandStatus_OK messageAsDictionary:status] callbackId:command.callbackId];
+}
+
+- (void)extractAsset:(CDVInvokedUrlCommand *)command {
+    NSString *assetName = command.arguments.count > 0 ? command.arguments[0] : @"";
+    NSString *destinationPath = command.arguments.count > 1 ? command.arguments[1] : @"";
+    NSString *sourcePath = [[NSBundle mainBundle] pathForResource:assetName ofType:nil];
+
+    if (sourcePath.length == 0 || destinationPath.length == 0) {
+        [self.commandDelegate sendPluginResult:[CDVPluginResult resultWithStatus:CDVCommandStatus_ERROR messageAsString:@"Asset or destination path is missing"] callbackId:command.callbackId];
+        return;
+    }
+
+    NSError *error = nil;
+    NSFileManager *fm = [NSFileManager defaultManager];
+    NSString *parent = [destinationPath stringByDeletingLastPathComponent];
+    if (parent.length > 0) {
+        [fm createDirectoryAtPath:parent withIntermediateDirectories:YES attributes:nil error:nil];
+    }
+    if ([fm fileExistsAtPath:destinationPath]) {
+        [fm removeItemAtPath:destinationPath error:nil];
+    }
+
+    BOOL ok = [fm copyItemAtPath:sourcePath toPath:destinationPath error:&error];
+    if (!ok || error) {
+        [self.commandDelegate sendPluginResult:[CDVPluginResult resultWithStatus:CDVCommandStatus_ERROR messageAsString:error.localizedDescription ?: @"Asset extraction failed"] callbackId:command.callbackId];
+        return;
+    }
+
+    [self.commandDelegate sendPluginResult:[CDVPluginResult resultWithStatus:CDVCommandStatus_OK] callbackId:command.callbackId];
+}
+
+- (void)setNativeContextMenuDisabled:(CDVInvokedUrlCommand *)command {
+    [self.commandDelegate sendPluginResult:[CDVPluginResult resultWithStatus:CDVCommandStatus_OK] callbackId:command.callbackId];
+}
+
+- (void)compareFileText:(CDVInvokedUrlCommand *)command {
+    NSString *fileUri = command.arguments.count > 0 ? command.arguments[0] : @"";
+    NSString *currentText = command.arguments.count > 2 ? command.arguments[2] : @"";
+    NSURL *url = [NSURL URLWithString:fileUri];
+    if (!url || !url.isFileURL) {
+        url = [NSURL fileURLWithPath:fileUri];
+    }
+
+    NSError *error = nil;
+    NSString *fileText = [NSString stringWithContentsOfURL:url encoding:NSUTF8StringEncoding error:&error];
+    if (error || !fileText) {
+        [self.commandDelegate sendPluginResult:[CDVPluginResult resultWithStatus:CDVCommandStatus_ERROR messageAsString:error.localizedDescription ?: @"Unable to read file"] callbackId:command.callbackId];
+        return;
+    }
+
+    int differs = [fileText isEqualToString:currentText] ? 0 : 1;
+    [self.commandDelegate sendPluginResult:[CDVPluginResult resultWithStatus:CDVCommandStatus_OK messageAsInt:differs] callbackId:command.callbackId];
+}
+
+- (void)compareTexts:(CDVInvokedUrlCommand *)command {
+    NSString *text1 = command.arguments.count > 0 ? command.arguments[0] : @"";
+    NSString *text2 = command.arguments.count > 1 ? command.arguments[1] : @"";
+    int differs = [text1 isEqualToString:text2] ? 0 : 1;
+    [self.commandDelegate sendPluginResult:[CDVPluginResult resultWithStatus:CDVCommandStatus_OK messageAsInt:differs] callbackId:command.callbackId];
+}
+
 - (void)clearCache:(CDVInvokedUrlCommand *)command {
     NSURL *cacheURL = [[[NSFileManager defaultManager] URLsForDirectory:NSCachesDirectory inDomains:NSUserDomainMask] firstObject];
     if (!cacheURL) {
@@ -199,6 +281,37 @@
         @"build": info[@"CFBundleVersion"] ?: @"",
         @"name": info[@"CFBundleName"] ?: @""
     };
+    [self.commandDelegate sendPluginResult:[CDVPluginResult resultWithStatus:CDVCommandStatus_OK messageAsDictionary:payload] callbackId:command.callbackId];
+}
+
+- (void)getConfiguration:(CDVInvokedUrlCommand *)command {
+    UIInterfaceOrientation orientation = UIInterfaceOrientationUnknown;
+    UIWindowScene *windowScene = nil;
+
+    for (UIScene *scene in UIApplication.sharedApplication.connectedScenes) {
+        if ([scene isKindOfClass:UIWindowScene.class] && scene.activationState == UISceneActivationStateForegroundActive) {
+            windowScene = (UIWindowScene *)scene;
+            break;
+        }
+    }
+
+    if (windowScene) {
+        orientation = windowScene.interfaceOrientation;
+    }
+
+    NSInteger orientationValue = UIInterfaceOrientationIsLandscape(orientation) ? 2 : 1;
+    NSDictionary *payload = @{
+        @"hardKeyboardHidden": @2,
+        @"navigationHidden": @2,
+        @"keyboardHidden": @1,
+        @"keyboardHeight": @0,
+        @"orientation": @(orientationValue),
+        @"navigation": @0,
+        @"fontScale": @1,
+        @"keyboard": @0,
+        @"locale": NSLocale.currentLocale.localeIdentifier ?: @"en_US"
+    };
+
     [self.commandDelegate sendPluginResult:[CDVPluginResult resultWithStatus:CDVCommandStatus_OK messageAsDictionary:payload] callbackId:command.callbackId];
 }
 
@@ -483,17 +596,16 @@
 }
 
 - (void)getAvailableEncodings:(CDVInvokedUrlCommand *)command {
-    CFStringEncoding *encodings = CFStringGetListOfAvailableEncodings();
+    const CFStringEncoding *encodings = CFStringGetListOfAvailableEncodings();
     NSMutableDictionary *result = [NSMutableDictionary dictionary];
     for (CFIndex i = 0; encodings[i] != kCFStringEncodingInvalidId; i++) {
         CFStringEncoding enc = encodings[i];
-        NSStringEncoding nsEnc = CFStringConvertEncodingToNSStringEncoding(enc);
-        NSString *name = (__bridge_transfer NSString *)CFStringConvertEncodingToIANACharSetName(enc) ?: @"";
+        CFStringRef ianaName = CFStringConvertEncodingToIANACharSetName(enc);
+        NSString *name = ianaName ? (__bridge NSString *)ianaName : @"";
         if (name.length == 0) {
             continue;
         }
         result[name] = @{ @"label": name, @"aliases": @[], @"name": name };
-        (void)nsEnc;
     }
 
     [self.commandDelegate sendPluginResult:[CDVPluginResult resultWithStatus:CDVCommandStatus_OK messageAsDictionary:result] callbackId:command.callbackId];

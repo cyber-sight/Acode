@@ -28,6 +28,9 @@ import {
 import TerminalThemeManager from "./terminalThemeManager";
 import TerminalTouchSelection from "./terminalTouchSelection";
 
+const isIOSTerminal =
+	typeof cordova !== "undefined" && cordova.platformId === "ios";
+
 export default class TerminalComponent {
 	constructor(options = {}) {
 		// Get terminal settings from shared defaults
@@ -64,6 +67,7 @@ export default class TerminalComponent {
 		this.ligaturesAddon = null;
 		this.container = null;
 		this.websocket = null;
+		this.nativeInputDisposable = null;
 		this.pid = null;
 		this.isConnected = false;
 		this.serverMode = options.serverMode !== false; // Default true
@@ -657,6 +661,13 @@ export default class TerminalComponent {
 				);
 			}
 
+			if (isIOSTerminal) {
+				this.pid = await Executor.start("sh", (type, data) => {
+					this.handleNativeTerminalEvent(type, data);
+				});
+				return this.pid;
+			}
+
 			// Start AXS if not running
 			if (!(await Terminal.isAxsRunning())) {
 				const values = appSettings.value;
@@ -744,6 +755,11 @@ export default class TerminalComponent {
 		}
 
 		this.pid = pid;
+
+		if (isIOSTerminal) {
+			await this.connectToNativeSession(pid);
+			return;
+		}
 
 		const wsUrl = `ws://localhost:${this.options.port}/terminals/${pid}`;
 
@@ -840,6 +856,51 @@ export default class TerminalComponent {
 		});
 	}
 
+	async connectToNativeSession(pid) {
+		if (!pid) {
+			pid = await this.createSession();
+		}
+
+		this.pid = pid;
+		this.isConnected = true;
+		this.terminal.unicode.activeVersion = "11";
+
+		if (this.nativeInputDisposable) {
+			this.nativeInputDisposable.dispose();
+		}
+
+		this.nativeInputDisposable = this.terminal.onData((data) => {
+			if (!this.pid || !this.isConnected) return;
+			Executor.write(this.pid, data).catch((error) => {
+				console.error("Failed to write to iSH terminal:", error);
+				this.onError?.(error);
+			});
+		});
+
+		this.onConnect?.();
+		this.terminal.focus();
+		this.fit();
+	}
+
+	handleNativeTerminalEvent(type, data) {
+		switch (type) {
+			case "stdout":
+			case "stderr":
+				this.terminal.write(data || "");
+				break;
+			case "exit":
+				this.isConnected = false;
+				this.onProcessExit?.(data);
+				this.onDisconnect?.();
+				break;
+			default:
+				if (data) {
+					this.terminal.write(data);
+				}
+				break;
+		}
+	}
+
 	/**
 	 * Resize terminal
 	 * @param {number} cols - Number of columns
@@ -847,6 +908,7 @@ export default class TerminalComponent {
 	 */
 	async resizeTerminal(cols, rows) {
 		if (!this.pid || !this.serverMode) return;
+		if (isIOSTerminal) return;
 
 		try {
 			await new Promise((resolve, reject) => {
@@ -1131,6 +1193,21 @@ export default class TerminalComponent {
 	async terminate() {
 		if (this.websocket) {
 			this.websocket.close();
+		}
+
+		if (this.nativeInputDisposable) {
+			this.nativeInputDisposable.dispose();
+			this.nativeInputDisposable = null;
+		}
+
+		if (isIOSTerminal && this.pid && this.serverMode) {
+			try {
+				await Executor.stop(this.pid);
+			} catch (error) {
+				console.error("Failed to terminate iSH terminal:", error);
+			}
+			this.isConnected = false;
+			return;
 		}
 
 		if (this.pid && this.serverMode) {

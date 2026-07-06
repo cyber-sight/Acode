@@ -160,6 +160,8 @@ export default {
 			msg = err;
 		} else if (err instanceof Error) {
 			msg = err.message;
+		} else if (err?.message || err?.localizedDescription || err?.error) {
+			msg = err.message || err.localizedDescription || err.error;
 		} else {
 			msg = strings["an error occurred"];
 		}
@@ -173,7 +175,7 @@ export default {
 	 * @returns {PromiseLike<void>}
 	 */
 	error(err, ...args) {
-		if (err.code === 0) {
+		if (err?.code === 0) {
 			toast(err);
 			return;
 		}

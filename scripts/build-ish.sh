@@ -16,7 +16,6 @@ ISH_DIR="$ROOT_DIR/third_party/ish"
 OUTPUT_DIR="$ISH_DIR/build"
 LINUX_SRC="$ISH_DIR/deps/linux"
 LINUX_BUILD="$LINUX_SRC/build"
-MESON_DEPS="$OUTPUT_DIR/Release-iphoneos/meson/deps"
 AUTOCONF_SOURCE="$LINUX_BUILD/include/config/auto.conf"
 AUTOCONF_HEADER="$LINUX_BUILD/include/generated/autoconf.h"
 
@@ -68,52 +67,126 @@ for f in autoconf.h utsrelease.h bounds.h timeconst.h asm-offsets.h; do
 done
 echo "    All generated headers found."
 
-echo "==> Copying kernel headers for Xcode include paths..."
-mkdir -p "$MESON_DEPS/linux/arch/ish/include/generated"
-mkdir -p "$MESON_DEPS/linux/arch/ish/include/generated/uapi"
-mkdir -p "$MESON_DEPS/linux/arch/x86"
-mkdir -p "$OUTPUT_DIR/Release-iphoneos/meson/deps/arch/x86"
-mkdir -p "$MESON_DEPS/linux/include"
-mkdir -p "$MESON_DEPS/linux/include/generated"
-mkdir -p "$MESON_DEPS/linux/include/generated/uapi"
+copy_kernel_headers() {
+  local build_name="$1"
+  local meson_deps="$OUTPUT_DIR/$build_name/meson/deps"
 
-rm -rf "$MESON_DEPS/linux/arch/ish/include/generated/asm"
-rm -rf "$MESON_DEPS/linux/arch/ish/include/generated/uapi/asm"
-rm -rf "$MESON_DEPS/linux/arch/x86/include"
-rm -rf "$OUTPUT_DIR/Release-iphoneos/meson/deps/arch/x86/include"
-rm -f "$MESON_DEPS/linux/include/generated/autoconf.h"
-rm -f "$MESON_DEPS/linux/include/utsrelease.h"
-rm -f "$MESON_DEPS/linux/include/bounds.h"
-rm -f "$MESON_DEPS/linux/include/timeconst.h"
-rm -f "$MESON_DEPS/linux/include/asm-offsets.h"
-rm -rf "$MESON_DEPS/linux/include/generated/uapi/linux"
+  echo "==> Copying kernel headers for $build_name..."
+  mkdir -p "$meson_deps/linux/arch/ish/include/generated"
+  mkdir -p "$meson_deps/linux/arch/ish/include/generated/uapi"
+  mkdir -p "$meson_deps/linux/arch/x86"
+  mkdir -p "$meson_deps/arch/x86"
+  mkdir -p "$meson_deps/linux/include"
+  mkdir -p "$meson_deps/linux/include/generated"
+  mkdir -p "$meson_deps/linux/include/generated/uapi"
 
-cp -R "$LINUX_BUILD/arch/ish/include/generated/asm" "$MESON_DEPS/linux/arch/ish/include/generated/asm"
-cp -R "$LINUX_BUILD/arch/ish/include/generated/uapi/asm" "$MESON_DEPS/linux/arch/ish/include/generated/uapi/asm"
-cp -R "$LINUX_SRC/arch/x86/include" "$MESON_DEPS/linux/arch/x86/include"
-cp -R "$LINUX_SRC/arch/x86/include" "$OUTPUT_DIR/Release-iphoneos/meson/deps/arch/x86/include"
-cp "$LINUX_BUILD/include/generated/autoconf.h" "$MESON_DEPS/linux/include/generated/autoconf.h"
-cp "$LINUX_BUILD/include/generated/utsrelease.h" "$MESON_DEPS/linux/include/utsrelease.h"
-cp "$LINUX_BUILD/include/generated/bounds.h" "$MESON_DEPS/linux/include/bounds.h"
-cp "$LINUX_BUILD/include/generated/timeconst.h" "$MESON_DEPS/linux/include/timeconst.h"
-cp "$LINUX_BUILD/include/generated/asm-offsets.h" "$MESON_DEPS/linux/include/asm-offsets.h"
-cp -R "$LINUX_BUILD/include/generated/uapi/linux" "$MESON_DEPS/linux/include/generated/uapi/linux"
+  rm -rf "$meson_deps/linux/arch/ish/include/generated/asm"
+  rm -rf "$meson_deps/linux/arch/ish/include/generated/uapi/asm"
+  rm -rf "$meson_deps/linux/arch/x86/include"
+  rm -rf "$meson_deps/arch/x86/include"
+  rm -f "$meson_deps/linux/include/generated/autoconf.h"
+  rm -f "$meson_deps/linux/include/utsrelease.h"
+  rm -f "$meson_deps/linux/include/bounds.h"
+  rm -f "$meson_deps/linux/include/timeconst.h"
+  rm -f "$meson_deps/linux/include/asm-offsets.h"
+  rm -rf "$meson_deps/linux/include/generated/uapi/linux"
 
-echo "==> Building libiSHLinux..."
-xcodebuild \
-  -project "$ISH_DIR/iSH.xcodeproj" \
-  -target libiSHLinux \
-  -configuration Release \
-  -sdk iphoneos \
-  IPHONEOS_DEPLOYMENT_TARGET=16.0 \
-  BUILD_DIR="$OUTPUT_DIR" \
-  build
+  cp -R "$LINUX_BUILD/arch/ish/include/generated/asm" "$meson_deps/linux/arch/ish/include/generated/asm"
+  cp -R "$LINUX_BUILD/arch/ish/include/generated/uapi/asm" "$meson_deps/linux/arch/ish/include/generated/uapi/asm"
+  cp -R "$LINUX_SRC/arch/x86/include" "$meson_deps/linux/arch/x86/include"
+  cp -R "$LINUX_SRC/arch/x86/include" "$meson_deps/arch/x86/include"
+  cp "$LINUX_BUILD/include/generated/autoconf.h" "$meson_deps/linux/include/generated/autoconf.h"
+  cp "$LINUX_BUILD/include/generated/utsrelease.h" "$meson_deps/linux/include/utsrelease.h"
+  cp "$LINUX_BUILD/include/generated/bounds.h" "$meson_deps/linux/include/bounds.h"
+  cp "$LINUX_BUILD/include/generated/timeconst.h" "$meson_deps/linux/include/timeconst.h"
+  cp "$LINUX_BUILD/include/generated/asm-offsets.h" "$meson_deps/linux/include/asm-offsets.h"
+  cp -R "$LINUX_BUILD/include/generated/uapi/linux" "$meson_deps/linux/include/generated/uapi/linux"
+}
 
-LIB_PATH="$OUTPUT_DIR/Release-iphoneos/libiSHLinux.a"
-if [[ -f "$LIB_PATH" ]]; then
-  echo "==> Build succeeded: $LIB_PATH"
-  echo "    Size: $(du -h "$LIB_PATH" | cut -f1)"
-else
-  echo "ERROR: libiSHLinux.a not found after build"
-  exit 1
-fi
+build_linux_user_archive() {
+  local sdk="$1"
+  local target="$2"
+  local build_name="ReleaseLinux-$sdk"
+  local meson_dir="$OUTPUT_DIR/$build_name/meson"
+  local sysroot
+  sysroot="$(xcrun --sdk "$sdk" --show-sdk-path)"
+
+  echo "==> Building liblinux_user.a for $sdk..."
+  (
+    cd "$meson_dir"
+    rm -rf liblinux_user.a.p liblinux_user.a
+    mkdir -p liblinux_user.a.p
+    xcrun --sdk "$sdk" clang \
+      -target "$target" \
+      -isysroot "$sysroot" \
+      -Iliblinux_user.a.p \
+      -I. \
+      -I../../.. \
+      -Ideps/linux/arch/ish/include \
+      -I../../../deps/linux/arch/ish/include \
+      -Ideps/linux/include \
+      -I../../../deps/linux/include \
+      -Ideps \
+      -fdiagnostics-color=always \
+      -Wall \
+      -Wextra \
+      -std=gnu11 \
+      -O0 \
+      -g \
+      -Wimplicit-fallthrough \
+      -Wtautological-constant-in-range-compare \
+      -DLOG_HANDLER_NSLOG=1 \
+      -DENGINE_ASBESTOS=1 \
+      -Wno-switch \
+      -include user.h \
+      -include linux/kconfig.h \
+      -c ../../../linux/emu_asbestos.c \
+      -o liblinux_user.a.p/linux_emu_asbestos.c.o
+    xcrun --sdk "$sdk" libtool -static -o liblinux_user.a liblinux_user.a.p/linux_emu_asbestos.c.o
+  )
+}
+
+build_sdk() {
+  local sdk="$1"
+  local target="$2"
+  local build_name="ReleaseLinux-$sdk"
+  shift 2
+
+  copy_kernel_headers "$build_name"
+
+  echo "==> Building iSH archives for $sdk..."
+  xcodebuild \
+    -project "$ISH_DIR/iSH.xcodeproj" \
+    -target libiSHLinux \
+    -configuration ReleaseLinux \
+    -sdk "$sdk" \
+    IPHONEOS_DEPLOYMENT_TARGET=16.0 \
+    BUILD_DIR="$OUTPUT_DIR" \
+    "$@" \
+    build
+
+  llvm-objcopy --redefine-sym _main=_ish_kernel_main \
+    "$OUTPUT_DIR/$build_name/liblinux.a" \
+    "$OUTPUT_DIR/$build_name/liblinux-acode.a"
+
+  build_linux_user_archive "$sdk" "$target"
+
+  for lib in libiSHLinux.a liblinux-acode.a meson/liblinux_user.a meson/libish_emu.a meson/libfakefs.a; do
+    local lib_path="$OUTPUT_DIR/$build_name/$lib"
+    if [[ ! -f "$lib_path" ]]; then
+      echo "ERROR: $lib_path not found after build"
+      exit 1
+    fi
+  done
+}
+
+build_sdk iphoneos arm64-apple-ios16.0
+build_sdk iphonesimulator arm64-apple-ios16.0-simulator ARCHS=arm64 ONLY_ACTIVE_ARCH=YES EXCLUDED_ARCHS=x86_64
+
+echo "==> iSH builds succeeded:"
+for sdk in iphoneos iphonesimulator; do
+  for lib in libiSHLinux.a liblinux-acode.a; do
+    lib_path="$OUTPUT_DIR/ReleaseLinux-$sdk/$lib"
+    echo "    $lib_path ($(du -h "$lib_path" | cut -f1))"
+  done
+done

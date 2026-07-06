@@ -92,6 +92,7 @@
         <source-file src="src/ios/BackgroundExecutor.m" />
         <header-file src="src/ios/IshBridge.h" />
         <source-file src="src/ios/IshBridge.m" />
+        <source-file src="src/ios/IshTerminalBridge.m" />
         <header-file src="src/ios/IshRootfs.h" />
         <source-file src="src/ios/IshRootfs.c" />
         <header-file src="src/ios/ish/include/LinuxInterop.h" />

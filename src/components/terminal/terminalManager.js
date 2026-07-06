@@ -17,6 +17,8 @@ import TerminalComponent from "./terminal";
 import TerminalTouchSelection from "./terminalTouchSelection";
 
 const TERMINAL_SESSION_STORAGE_KEY = "acodeTerminalSessions";
+const isIOSTerminal =
+	typeof cordova !== "undefined" && cordova.platformId === "ios";
 
 class TerminalManager {
 	constructor() {
@@ -141,6 +143,11 @@ class TerminalManager {
 
 	async getPersistedSessions() {
 		try {
+			if (isIOSTerminal) {
+				this.savePersistedSessions([]);
+				return [];
+			}
+
 			const { sessions, changed } = this.readPersistedSessions();
 			if (!sessions.length) {
 				if (changed) {
@@ -366,7 +373,11 @@ class TerminalManager {
 
 						this.terminals.set(uniqueId, instance);
 
-						if (terminalComponent.serverMode && terminalComponent.pid) {
+						if (
+							terminalComponent.serverMode &&
+							terminalComponent.pid &&
+							!isIOSTerminal
+						) {
 							await this.persistTerminalSession(
 								terminalComponent.pid,
 								terminalName,
