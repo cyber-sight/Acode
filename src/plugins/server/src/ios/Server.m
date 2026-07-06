@@ -1,6 +1,7 @@
 #import "Server.h"
 #import <Cordova/CDVPluginResult.h>
 #import <GCDWebServer/GCDWebServer.h>
+#import <GCDWebServer/GCDWebServerDataRequest.h>
 #import <GCDWebServer/GCDWebServerDataResponse.h>
 #import <GCDWebServer/GCDWebServerFileResponse.h>
 
@@ -52,13 +53,12 @@
         return [weakSelf handleRequest:request serverInstance:instance];
     }];
 
-    NSError *error = nil;
-    if ([instance.server startWithPort:port.unsignedIntegerValue bonjourName:nil error:&error]) {
+    if ([instance.server startWithPort:port.unsignedIntegerValue bonjourName:nil]) {
         self.servers[port] = instance;
         CDVPluginResult *result = [CDVPluginResult resultWithStatus:CDVCommandStatus_OK messageAsString:[NSString stringWithFormat:@"Server started on port %@", port]];
         [self.commandDelegate sendPluginResult:result callbackId:command.callbackId];
     } else {
-        CDVPluginResult *result = [CDVPluginResult resultWithStatus:CDVCommandStatus_ERROR messageAsString:error.localizedDescription ?: @"Failed to start server"];
+        CDVPluginResult *result = [CDVPluginResult resultWithStatus:CDVCommandStatus_ERROR messageAsString:@"Failed to start server"];
         [self.commandDelegate sendPluginResult:result callbackId:command.callbackId];
     }
 }
@@ -172,7 +172,7 @@
         GCDWebServerFileResponse *fileResponse = [GCDWebServerFileResponse responseWithFile:filePath];
         if ([headers isKindOfClass:[NSDictionary class]]) {
             for (NSString *key in headers) {
-                fileResponse.additionalHeaders[key] = headers[key];
+                [fileResponse setValue:headers[key] forAdditionalHeader:key];
             }
         }
         return fileResponse;
@@ -188,7 +188,7 @@
 
     if ([headers isKindOfClass:[NSDictionary class]]) {
         for (NSString *key in headers) {
-            dataResponse.additionalHeaders[key] = headers[key];
+            [dataResponse setValue:headers[key] forAdditionalHeader:key];
         }
     }
 

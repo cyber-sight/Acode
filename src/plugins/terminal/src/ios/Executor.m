@@ -84,8 +84,24 @@ static __weak Executor *sharedExecutor;
 }
 
 - (void)exec:(CDVInvokedUrlCommand *)command {
-    CDVPluginResult *result = [CDVPluginResult resultWithStatus:CDVCommandStatus_ERROR messageAsString:@"Not supported yet on iOS."];
-    [self.commandDelegate sendPluginResult:result callbackId:command.callbackId];
+    NSString *cmd = command.arguments.count > 0 ? command.arguments[0] : @"";
+
+    [[IshBridge shared] startWithCommand:cmd completion:^(NSString *sessionId, NSError * _Nullable error) {
+        if (error) {
+            CDVPluginResult *result = [CDVPluginResult resultWithStatus:CDVCommandStatus_ERROR messageAsString:error.localizedDescription];
+            [self.commandDelegate sendPluginResult:result callbackId:command.callbackId];
+            return;
+        }
+        if (sessionId.length == 0) {
+            CDVPluginResult *result = [CDVPluginResult resultWithStatus:CDVCommandStatus_ERROR messageAsString:@"Failed to start session"];
+            [self.commandDelegate sendPluginResult:result callbackId:command.callbackId];
+            return;
+        }
+        sessionCallbacks[sessionId] = command.callbackId;
+        CDVPluginResult *result = [CDVPluginResult resultWithStatus:CDVCommandStatus_OK messageAsString:sessionId];
+        [result setKeepCallback:@YES];
+        [self.commandDelegate sendPluginResult:result callbackId:command.callbackId];
+    }];
 }
 
 - (void)stopService:(CDVInvokedUrlCommand *)command {
@@ -94,7 +110,8 @@ static __weak Executor *sharedExecutor;
 }
 
 - (void)isRunning:(CDVInvokedUrlCommand *)command {
-    CDVPluginResult *result = [CDVPluginResult resultWithStatus:CDVCommandStatus_OK messageAsBool:NO];
+    BOOL running = sessionCallbacks.count > 0;
+    CDVPluginResult *result = [CDVPluginResult resultWithStatus:CDVCommandStatus_OK messageAsBool:running];
     [self.commandDelegate sendPluginResult:result callbackId:command.callbackId];
 }
 

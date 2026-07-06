@@ -1,5 +1,5 @@
 <?xml version='1.0' encoding='utf-8'?>
-<widget id="com.foxdebug.acode" android-versionCode="975" version="1.12.5"
+<widget id="com.foxdebug.acode" ios-CFBundleIdentifier="com.foxdebug.acodeios" android-versionCode="975" version="1.12.5"
     xmlns="http://www.w3.org/ns/widgets"
     xmlns:android="http://schemas.android.com/apk/res/android"
     xmlns:cdv="http://cordova.apache.org/ns/1.0">
@@ -87,6 +87,15 @@
         <hook type="after_prepare" src="hooks/post-process.js" />
     </platform>
     <platform name="ios">
+        <preference name="deployment-target" value="15.0" />
+        <hook type="after_prepare" src="hooks/ios/fix-deployment-target.js" />
+        <hook type="after_prepare" src="hooks/ios/fix-advanced-http-private-headers.js" />
+        <hook type="after_prepare" src="hooks/ios/fix-ftp-goldraccoon.js" />
+        <hook type="after_prepare" src="hooks/ios/fix-ish-rootfs-c-header.js" />
+        <hook type="after_prepare" src="hooks/ios/fix-terminal-executor-header.js" />
+        <hook type="after_prepare" src="hooks/ios/fix-sftp-ios-stub.js" />
+        <hook type="after_prepare" src="hooks/ios/remove-sftp-nmssh-pod.js" />
+        <hook type="after_prepare" src="hooks/ios/fix-server-gcdwebserver.js" />
         <edit-config file="*-Info.plist" mode="merge" target="NSCameraUsageDescription">
             <string>Camera access is needed for capturing media.</string>
         </edit-config>

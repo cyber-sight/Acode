@@ -33,7 +33,6 @@
 
         <header-file src="src/ios/Sftp.h" />
         <source-file src="src/ios/Sftp.m" />
-        <framework src="NMSSH" type="podspec" />
     </platform>
 
     <framework src="commons-io:commons-io:2.11.0" />
