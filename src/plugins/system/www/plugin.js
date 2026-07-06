@@ -1,5 +1,5 @@
 const isIOS = typeof cordova !== "undefined" && cordova.platformId === "ios";
-const action = (name) => (isIOS ? name.replace(/-([a-z])/g, (_, c) => c.toUpperCase()) : name);
+const nativeAction = (name) => (isIOS ? name.replace(/-([a-z])/g, (_, c) => c.toUpperCase()) : name);
 
 module.exports = {
   isManageExternalStorageDeclared: function (success, error) {
@@ -76,10 +76,10 @@ module.exports = {
     return cordova.exec(success, fail, "System", "clearCache", []);
   },
   getWebviewInfo: function (onSuccess, onFail) {
-    cordova.exec(onSuccess, onFail, 'System', action('get-webkit-info'), []);
+    cordova.exec(onSuccess, onFail, 'System', nativeAction('get-webkit-info'), []);
   },
   isPowerSaveMode: function (onSuccess, onFail) {
-    cordova.exec(onSuccess, onFail, 'System', action('is-powersave-mode'), []);
+    cordova.exec(onSuccess, onFail, 'System', nativeAction('is-powersave-mode'), []);
   },
   fileAction: function (fileUri, filename, action, mimeType, onFail) {
     if (typeof action !== 'string') {
@@ -98,10 +98,10 @@ module.exports = {
     if (!isIOS) {
       action = "android.intent.action." + action;
     }
-    cordova.exec(function () { }, onFail, 'System', action('file-action'), [fileUri, filename, action, mimeType]);
+    cordova.exec(function () { }, onFail, 'System', nativeAction('file-action'), [fileUri, filename, action, mimeType]);
   },
   getAppInfo: function (onSuccess, onFail) {
-    cordova.exec(onSuccess, onFail, 'System', action('get-app-info'), []);
+    cordova.exec(onSuccess, onFail, 'System', nativeAction('get-app-info'), []);
   },
   addShortcut: function (shortcut, onSuccess, onFail) {
     var id, label, description, icon, data;
@@ -111,37 +111,37 @@ module.exports = {
     icon = shortcut.icon;
     data = shortcut.data;
     action = shortcut.action;
-    cordova.exec(onSuccess, onFail, 'System', 'add-shortcut', [id, label, description, icon, action, data]);
+    cordova.exec(onSuccess, onFail, 'System', nativeAction('add-shortcut'), [id, label, description, icon, action, data]);
   },
   removeShortcut: function (id, onSuccess, onFail) {
-    cordova.exec(onSuccess, onFail, 'System', 'remove-shortcut', [id]);
+    cordova.exec(onSuccess, onFail, 'System', nativeAction('remove-shortcut'), [id]);
   },
   pinShortcut: function (id, onSuccess, onFail) {
-    cordova.exec(onSuccess, onFail, 'System', 'pin-shortcut', [id]);
+    cordova.exec(onSuccess, onFail, 'System', nativeAction('pin-shortcut'), [id]);
   },
   pinFileShortcut: function (shortcut, onSuccess, onFail) {
-    cordova.exec(onSuccess, onFail, 'System', 'pin-file-shortcut', [shortcut]);
+    cordova.exec(onSuccess, onFail, 'System', nativeAction('pin-file-shortcut'), [shortcut]);
   },
   manageAllFiles: function (onSuccess, onFail) {
-    cordova.exec(onSuccess, onFail, 'System', 'manage-all-files', []);
+    cordova.exec(onSuccess, onFail, 'System', nativeAction('manage-all-files'), []);
   },
   getAndroidVersion: function (onSuccess, onFail) {
-    cordova.exec(onSuccess, onFail, 'System', 'get-android-version', []);
+    cordova.exec(onSuccess, onFail, 'System', nativeAction('get-android-version'), []);
   },
   isExternalStorageManager: function (onSuccess, onFail) {
-    cordova.exec(onSuccess, onFail, 'System', 'is-external-storage-manager', []);
+    cordova.exec(onSuccess, onFail, 'System', nativeAction('is-external-storage-manager'), []);
   },
   requestPermission: function (permission, onSuccess, onFail) {
-    cordova.exec(onSuccess, onFail, 'System', 'request-permission', [permission]);
+    cordova.exec(onSuccess, onFail, 'System', nativeAction('request-permission'), [permission]);
   },
   requestPermissions: function (permissions, onSuccess, onFail) {
-    cordova.exec(onSuccess, onFail, 'System', 'request-permissions', [permissions]);
+    cordova.exec(onSuccess, onFail, 'System', nativeAction('request-permissions'), [permissions]);
   },
   hasPermission: function (permission, onSuccess, onFail) {
-    cordova.exec(onSuccess, onFail, 'System', 'has-permission', [permission]);
+    cordova.exec(onSuccess, onFail, 'System', nativeAction('has-permission'), [permission]);
   },
   openInBrowser: function (src) {
-    cordova.exec(null, null, 'System', 'open-in-browser', [src]);
+    cordova.exec(null, null, 'System', nativeAction('open-in-browser'), [src]);
   },
   /**
    * Launch an Android application activity.
@@ -166,7 +166,7 @@ module.exports = {
    * );
    */
   launchApp: function (app, className, extras, onSuccess, onFail) {
-    cordova.exec(onSuccess, onFail, 'System', 'launch-app', [app, className, extras]);
+    cordova.exec(onSuccess, onFail, 'System', nativeAction('launch-app'), [app, className, extras]);
   },
   inAppBrowser: function (url, title, showButtons, disableCache) {
     var myInAppBrowser = {
@@ -199,7 +199,7 @@ module.exports = {
         return;
       }
       console.warn('System.inAppBrowser error callback not handled', err);
-    }, 'System', 'in-app-browser', [url, title, !!showButtons, disableCache]);
+    }, 'System', nativeAction('in-app-browser'), [url, title, !!showButtons, disableCache]);
     return myInAppBrowser;
   },
   setUiTheme: function (systemBarColor, theme, onSuccess, onFail) {
@@ -216,28 +216,28 @@ module.exports = {
         onSuccess(out);
       }
 
-    }, onFail, 'System', 'set-ui-theme', [systemBarColor, theme]);
+    }, onFail, 'System', nativeAction('set-ui-theme'), [systemBarColor, theme]);
   },
   setIntentHandler: function (handler, onerror) {
-    cordova.exec(handler, onerror, 'System', 'set-intent-handler', []);
+    cordova.exec(handler, onerror, 'System', nativeAction('set-intent-handler'), []);
   },
   getCordovaIntent: function (onSuccess, onFail) {
-    cordova.exec(onSuccess, onFail, 'System', 'get-cordova-intent', []);
+    cordova.exec(onSuccess, onFail, 'System', nativeAction('get-cordova-intent'), []);
   },
   setInputType: function (type, onSuccess, onFail) {
-    cordova.exec(onSuccess, onFail, 'System', 'set-input-type', [type]);
+    cordova.exec(onSuccess, onFail, 'System', nativeAction('set-input-type'), [type]);
   },
   setNativeContextMenuDisabled: function (disabled, onSuccess, onFail) {
     cordova.exec(
       onSuccess,
       onFail,
       'System',
-      'set-native-context-menu-disabled',
+      nativeAction('set-native-context-menu-disabled'),
       [String(!!disabled)]
     );
   },
   getGlobalSetting: function (key, onSuccess, onFail) {
-    cordova.exec(onSuccess, onFail, 'System', 'get-global-setting', [key]);
+    cordova.exec(onSuccess, onFail, 'System', nativeAction('get-global-setting'), [key]);
   },
   /**
    * Compare file content with provided text in a background thread.
@@ -254,7 +254,7 @@ module.exports = {
         },
         reject,
         'System',
-        'compare-file-text',
+        nativeAction('compare-file-text'),
         [fileUri, encoding, currentText]
       );
     });
@@ -273,7 +273,7 @@ module.exports = {
         },
         reject,
         'System',
-        'compare-texts',
+        nativeAction('compare-texts'),
         [text1, text2]
       );
     });

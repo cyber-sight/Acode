@@ -1,4 +1,5 @@
 const Executor = require("./Executor");
+const isIOS = typeof cordova !== "undefined" && cordova.platformId === "ios";
 
 const Terminal = {
     /**
@@ -9,6 +10,11 @@ const Terminal = {
      * @returns {Promise<boolean>} - Returns true if installation completes with exit code 0, void if not installing
      */
     async startAxs(installing = false, logger = console.log, err_logger = console.error,failsafe = false) {
+        if (isIOS) {
+            logger("iSH terminal environment is provided by the native iOS runtime.");
+            return installing ? true : undefined;
+        }
+
         const filesDir = await new Promise((resolve, reject) => {
             system.getFilesDir(resolve, reject);
         });
@@ -82,6 +88,7 @@ const Terminal = {
      * @returns {Promise<void>}
      */
     async stopAxs() {
+        if (isIOS) return;
         await Executor.execute(`kill -KILL $(cat $PREFIX/pid)`);
     },
 
@@ -90,6 +97,8 @@ const Terminal = {
      * @returns {Promise<boolean>} - `true` if AXS is running, `false` otherwise.
      */
     async isAxsRunning() {
+        if (isIOS) return true;
+
         const filesDir = await new Promise((resolve, reject) => {
             system.getFilesDir(resolve, reject);
         });
@@ -114,6 +123,12 @@ const Terminal = {
      * @returns {Promise<boolean>} - Returns true if installation completes with exit code 0
      */
     async install(logger = console.log, err_logger = console.error) {
+        if (isIOS) {
+            logger("iSH terminal environment is bundled with the iOS app.");
+            this.lastInstallError = "";
+            return true;
+        }
+
         if (!(await this.isSupported())) return false;
 
         const isFdroid = await Executor.execute("echo $FDROID");
@@ -382,6 +397,10 @@ const Terminal = {
      * @returns {Promise<boolean>} - Returns true if all required files and directories exist.
      */
     isInstalled() {
+        if (isIOS) {
+            return Promise.resolve(true);
+        }
+
         return new Promise(async (resolve, reject) => {
             const filesDir = await new Promise((resolve, reject) => {
                 system.getFilesDir(resolve, reject);
@@ -420,6 +439,10 @@ const Terminal = {
      * @returns {Promise<boolean>} - `true` if architecture is supported, otherwise `false`.
      */
     isSupported() {
+        if (isIOS) {
+            return Promise.resolve(true);
+        }
+
         return new Promise((resolve, reject) => {
             system.getArch((arch) => {
                 resolve(["arm64-v8a", "armeabi-v7a", "x86_64"].includes(arch));

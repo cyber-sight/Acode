@@ -8,6 +8,10 @@
 #import "ish/include/LinuxInterop.h"
 #import "ish/include/Terminal.h"
 #define ISH_AVAILABLE 1
+#elif __has_include("LinuxInterop.h")
+#import "LinuxInterop.h"
+#import "Terminal.h"
+#define ISH_AVAILABLE 1
 #else
 #define ISH_AVAILABLE 0
 #endif
@@ -36,7 +40,7 @@
 }
 
 - (void)setEventHandler:(IshEventHandler)handler {
-    self.eventHandler = handler;
+    _eventHandler = [handler copy];
 }
 
 - (void)startWithCommand:(NSString *)command completion:(void (^)(NSString *sessionId, NSError * _Nullable error))completion {
@@ -54,7 +58,8 @@
     NSArray<NSString *> *argv = finalCommand.length > 0 ? @[shell, @"-lc", finalCommand] : @[shell];
 
     const char *exe = shell.UTF8String;
-    const char *envp_arr[] = { "TERM=xterm-256color", NULL };
+    const char *envp_storage[] = { "TERM=xterm-256color", NULL };
+    const char **envp_arr = envp_storage;
 
     NSUInteger argc = argv.count;
     const char **argv_arr = calloc(argc + 1, sizeof(char *));

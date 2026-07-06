@@ -1,4 +1,20 @@
-const oldAlert = window.alert;
+function setBootStatus(message) {
+  console.log("[boot]", message);
+
+  function apply() {
+    if (document.body?.classList.contains("loading")) {
+      document.body.setAttribute("data-small-msg", message);
+    }
+  }
+
+  if (document.body) {
+    apply();
+  } else {
+    document.addEventListener("DOMContentLoaded", apply, { once: true });
+  }
+}
+
+setBootStatus("Loading main bundle...");
 
 import "core-js/stable";
 import "html-tag-js/dist/polyfill";
@@ -69,6 +85,8 @@ import $_fileMenu from "views/file-menu.hbs";
 import $_menu from "views/menu.hbs";
 import auth, { loginEvents } from "./lib/auth";
 
+setBootStatus("Main imports loaded...");
+
 const INSTALL_SOURCE_PLAY = "com.android.vending";
 const oldPreventDefault = TouchEvent.prototype.preventDefault;
 const previousVersionCode = Number.parseInt(localStorage.versionCode, 10);
@@ -90,7 +108,7 @@ TouchEvent.prototype.preventDefault = function () {
   }
 };
 
-oldAlert("In app logs");
+setBootStatus("Waiting for Cordova...");
 
 loadPolyFill.apply(window);
 loginEvents.addListener(onLogin);
@@ -98,12 +116,21 @@ window.addEventListener("resize", windowResize);
 document.addEventListener("pause", pauseHandler);
 document.addEventListener("resume", resumeHandler);
 document.addEventListener("keydown", keyboardHandler);
-document.addEventListener("deviceready", onDeviceReady);
+document.addEventListener("deviceready", () => {
+  try {
+    onDeviceReady();
+  } catch (error) {
+    console.log(error);
+    setBootStatus(`Startup error: ${error.message}`);
+  }
+});
 document.addEventListener("backbutton", backButtonHandler);
 document.addEventListener("menubutton", menuButtonHandler);
 
 async function onDeviceReady() {
+  setBootStatus("Cordova ready. Loading encodings...");
   await initEncodings(); // important to load encodings before anything else
+
 
   const isFreePackage = /(free)$/.test(BuildInfo.packageName);
   const oldResolveURL = window.resolveLocalFileSystemURL;
@@ -141,13 +168,15 @@ async function onDeviceReady() {
     );
   });
 
+  setBootStatus("0");
   let installSource = INSTALL_SOURCE_PLAY;
 
-  try {
-    installSource = await helpers.promisify(system.getInstaller);
-  } catch (error) {
-    console.error(error);
-  }
+  // try {
+  //   installSource = await helpers.promisify(system.getInstaller);
+  // } catch (error) {
+  //   console.error(error);
+  // }
+  setBootStatus("1");
 
   Object.defineProperty(window, "appInstallSource", {
     get() {
@@ -210,13 +239,26 @@ async function onDeviceReady() {
     if (client.height === 0) return false;
     return true;
   })();
+
+  setBootStatus("2");
+
   window.acode = new Acode();
-  await adRewards.init();
+
+  setBootStatus("3");
+
+  if (window.cordova.platformId !== "ios") {
+    await adRewards.init();
+  }
+
   ensureAceCompatApi();
 
-  system.requestPermission("android.permission.READ_EXTERNAL_STORAGE");
-  system.requestPermission("android.permission.WRITE_EXTERNAL_STORAGE");
-  system.requestPermission("android.permission.POST_NOTIFICATIONS");
+  setBootStatus("4");
+
+  if (window.cordova.platformId !== "ios") {
+    system.requestPermission("android.permission.READ_EXTERNAL_STORAGE");
+    system.requestPermission("android.permission.WRITE_EXTERNAL_STORAGE");
+    system.requestPermission("android.permission.POST_NOTIFICATIONS");
+  }
 
   const { versionCode } = BuildInfo;
 
@@ -240,6 +282,7 @@ async function onDeviceReady() {
     console.error(e);
   }
 
+  setBootStatus("Loading settings...");
   acode.setLoadingMessage("Loading settings...");
 
   window.resolveLocalFileSystemURL = function (url, ...args) {
@@ -256,8 +299,10 @@ async function onDeviceReady() {
     }
   }, 1000 * 10);
 
+  setBootStatus("Initializing settings...");
   acode.setLoadingMessage("Loading settings...");
   await settings.init();
+  setBootStatus("Loading themes...");
   themes.init();
   initHighlighting();
 
@@ -266,6 +311,7 @@ async function onDeviceReady() {
 
   registerPrettierFormatter();
 
+  setBootStatus("Loading language...");
   acode.setLoadingMessage("Loading language...");
   await lang.set(settings.value.lang);
 
@@ -279,9 +325,11 @@ async function onDeviceReady() {
   }
 
   try {
+    setBootStatus("Rendering app...");
     await loadApp();
   } catch (error) {
     window.log("error", error);
+    setBootStatus(`Render error: ${error.message}`);
     toast(`Error: ${error.message}`);
   } finally {
     setTimeout(async () => {
@@ -483,6 +531,7 @@ async function promptUpdateCheckConsent() {
 }
 
 async function loadApp() {
+  setBootStatus("Building UI...");
   let $mainMenu;
   let $fileMenu;
   const $editMenuToggler = (
@@ -585,7 +634,10 @@ async function loadApp() {
   editorManager.on("rename-file", onFileUpdate);
   editorManager.on("switch-file", onFileUpdate);
   editorManager.on("file-loaded", onFileUpdate);
-  navigator.app.overrideButton("menubutton", true);
+
+  if (window.cordova.platformId !== "ios") {
+    navigator.app.overrideButton("menubutton", true);
+  }
   system.setIntentHandler(intentHandler, intentHandler.onError);
   system.getCordovaIntent(intentHandler, intentHandler.onError);
   setTimeout(showTutorials, 1000);

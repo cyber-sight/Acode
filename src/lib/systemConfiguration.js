@@ -49,7 +49,14 @@ export const TOUCHSCREEN_UNDEFINED = 0;
  */
 export function getSystemConfiguration() {
 	return new Promise((resolve, reject) => {
-		cordova.exec(resolve, reject, "System", "get-configuration", []);
+		const isIOS = typeof cordova !== "undefined" && cordova.platformId === "ios";
+		cordova.exec(
+			resolve,
+			reject,
+			"System",
+			isIOS ? "getConfiguration" : "get-configuration",
+			[],
+		);
 	});
 }
 

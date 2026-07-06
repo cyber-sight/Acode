@@ -832,15 +832,22 @@ function FileBrowserInclude(mode, info, doesOpenLast = true) {
 
 			if (!url && action === "open" && isDir && !idOpenDoc && !isContextMenu) {
 				loader.hide();
-				util.addPath(name, uuid).then((res) => {
-					const storage = allStorages.find((storage) => storage.uuid === uuid);
-					storage.url = res.uri;
-					storage.name = res.name;
-					name = res.name;
-					updateStorage(storage, false);
-					url = res.uri;
-					folder();
-				});
+				util
+					.addPath(name, uuid)
+					.then((res) => {
+						const storage = allStorages.find(
+							(storage) => storage.uuid === uuid,
+						);
+						storage.url = res.uri;
+						storage.name = res.name;
+						name = res.name;
+						updateStorage(storage, false);
+						url = res.uri;
+						folder();
+					})
+					.catch((err) => {
+						helpers.error(err);
+					});
 				return;
 			}
 
@@ -1212,9 +1219,11 @@ function FileBrowserInclude(mode, info, doesOpenLast = true) {
 
 		async function listAllStorages() {
 			let hasInternalStorage = true;
+			const isAndroid = cordova.platformId === "android";
+			const isIOS = cordova.platformId === "ios";
 			allStorages.length = 0;
 
-			if (ANDROID_SDK_INT === 29) {
+			if (isAndroid && ANDROID_SDK_INT === 29) {
 				const rootDirName = cordova.file.externalRootDirectory;
 				const testDirName = "Acode_Test_file" + helpers.uuid();
 				const testDirFs = fsOperation(Url.join(rootDirName, testDirName));
@@ -1229,11 +1238,15 @@ function FileBrowserInclude(mode, info, doesOpenLast = true) {
 				} finally {
 					testDirFs.delete();
 				}
-			} else if (ANDROID_SDK_INT > 29) {
+			} else if (isAndroid && ANDROID_SDK_INT > 29) {
 				hasInternalStorage = false;
 			}
 
-			if (hasInternalStorage) {
+			if (
+				isAndroid &&
+				hasInternalStorage &&
+				cordova.file.externalRootDirectory
+			) {
 				util.pushFolder(
 					allStorages,
 					"Internal storage",
@@ -1268,7 +1281,7 @@ function FileBrowserInclude(mode, info, doesOpenLast = true) {
 				res.forEach((storage) => {
 					if (storageList.find((s) => s.uuid === storage.uuid)) return;
 					let path;
-					if (storage.path && isStorageManager) {
+					if (storage.path && (window.isStorageManager || isIOS)) {
 						path = "file://" + storage.path;
 					}
 					util.pushFolder(allStorages, storage.name, path || "", {

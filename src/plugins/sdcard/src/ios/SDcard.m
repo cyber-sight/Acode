@@ -11,14 +11,18 @@
 @property (nonatomic, copy) NSString *activityCallbackId;
 @property (nonatomic, copy) NSString *pickerMode;
 @property (nonatomic, strong) NSMutableDictionary<NSString *, dispatch_source_t> *fileObservers;
+@property (nonatomic, strong) NSMutableDictionary<NSString *, NSData *> *securityScopedBookmarks;
 @end
 
 @implementation SDcard
 
 static NSString *const kSeparator = @"::";
+static NSString *const kBookmarkDefaultsKey = @"AcodeSDcardSecurityScopedBookmarks";
 
 - (void)pluginInitialize {
     self.fileObservers = [NSMutableDictionary dictionary];
+    NSDictionary *storedBookmarks = [[NSUserDefaults standardUserDefaults] dictionaryForKey:kBookmarkDefaultsKey];
+    self.securityScopedBookmarks = storedBookmarks ? [storedBookmarks mutableCopy] : [NSMutableDictionary dictionary];
 }
 
 - (void)createDir:(CDVInvokedUrlCommand *)command {
@@ -28,7 +32,10 @@ static NSString *const kSeparator = @"::";
     NSURL *dirURL = [parentURL URLByAppendingPathComponent:name isDirectory:YES];
 
     NSError *error = nil;
-    BOOL ok = [[NSFileManager defaultManager] createDirectoryAtURL:dirURL withIntermediateDirectories:YES attributes:nil error:&error];
+    BOOL ok = [self withSecurityScopeForURL:parentURL error:&error block:^BOOL(NSURL *scopedParentURL, NSError **blockError) {
+        NSURL *scopedDirURL = [scopedParentURL URLByAppendingPathComponent:name isDirectory:YES];
+        return [[NSFileManager defaultManager] createDirectoryAtURL:scopedDirURL withIntermediateDirectories:YES attributes:nil error:blockError];
+    }];
     if (!ok || error) {
         [self sendError:error.localizedDescription ?: @"Unable to create directory" callbackId:command.callbackId];
         return;
@@ -44,9 +51,20 @@ static NSString *const kSeparator = @"::";
     NSURL *parentURL = [self urlFromString:parent];
     NSURL *fileURL = [parentURL URLByAppendingPathComponent:name isDirectory:NO];
 
-    BOOL ok = [[NSFileManager defaultManager] createFileAtPath:fileURL.path contents:[NSData data] attributes:nil];
-    if (!ok) {
-        [self sendError:@"Unable to create file" callbackId:command.callbackId];
+    NSError *error = nil;
+    BOOL ok = [self withSecurityScopeForURL:parentURL error:&error block:^BOOL(NSURL *scopedParentURL, NSError **blockError) {
+        NSURL *scopedFileURL = [scopedParentURL URLByAppendingPathComponent:name isDirectory:NO];
+        if ([[NSFileManager defaultManager] fileExistsAtPath:scopedFileURL.path]) {
+            return YES;
+        }
+        BOOL created = [[NSFileManager defaultManager] createFileAtPath:scopedFileURL.path contents:[NSData data] attributes:nil];
+        if (!created && blockError) {
+            *blockError = [NSError errorWithDomain:@"SDcard" code:1 userInfo:@{NSLocalizedDescriptionKey: @"Unable to create file"}];
+        }
+        return created;
+    }];
+    if (!ok || error) {
+        [self sendError:error.localizedDescription ?: @"Unable to create file" callbackId:command.callbackId];
         return;
     }
 
@@ -115,9 +133,14 @@ static NSString *const kSeparator = @"::";
 - (void)read:(CDVInvokedUrlCommand *)command {
     NSString *path = command.arguments.count > 0 ? command.arguments[0] : @"";
     NSURL *url = [self urlFromString:path];
-    NSData *data = [NSData dataWithContentsOfURL:url];
-    if (!data) {
-        [self sendError:@"File not found" callbackId:command.callbackId];
+    NSError *error = nil;
+    __block NSData *data = nil;
+    BOOL ok = [self withSecurityScopeForURL:url error:&error block:^BOOL(NSURL *scopedURL, NSError **blockError) {
+        data = [NSData dataWithContentsOfURL:scopedURL options:0 error:blockError];
+        return data != nil;
+    }];
+    if (!ok || !data) {
+        [self sendError:error.localizedDescription ?: @"File not found" callbackId:command.callbackId];
         return;
     }
 
@@ -140,7 +163,9 @@ static NSString *const kSeparator = @"::";
     }
 
     NSError *error = nil;
-    BOOL ok = [data writeToURL:url options:NSDataWritingAtomic error:&error];
+    BOOL ok = [self withSecurityScopeForURL:url error:&error block:^BOOL(NSURL *scopedURL, NSError **blockError) {
+        return [data writeToURL:scopedURL options:NSDataWritingAtomic error:blockError];
+    }];
     if (!ok || error) {
         [self sendError:error.localizedDescription ?: @"Write failed" callbackId:command.callbackId];
         return;
@@ -156,7 +181,10 @@ static NSString *const kSeparator = @"::";
     NSURL *destURL = [[url URLByDeletingLastPathComponent] URLByAppendingPathComponent:newName];
 
     NSError *error = nil;
-    BOOL ok = [[NSFileManager defaultManager] moveItemAtURL:url toURL:destURL error:&error];
+    BOOL ok = [self withSecurityScopeForURL:url error:&error block:^BOOL(NSURL *scopedURL, NSError **blockError) {
+        NSURL *scopedDestURL = [[scopedURL URLByDeletingLastPathComponent] URLByAppendingPathComponent:newName];
+        return [[NSFileManager defaultManager] moveItemAtURL:scopedURL toURL:scopedDestURL error:blockError];
+    }];
     if (!ok || error) {
         [self sendError:error.localizedDescription ?: @"Rename failed" callbackId:command.callbackId];
         return;
@@ -169,7 +197,9 @@ static NSString *const kSeparator = @"::";
     NSString *path = command.arguments.count > 0 ? command.arguments[0] : @"";
     NSURL *url = [self urlFromString:path];
     NSError *error = nil;
-    BOOL ok = [[NSFileManager defaultManager] removeItemAtURL:url error:&error];
+    BOOL ok = [self withSecurityScopeForURL:url error:&error block:^BOOL(NSURL *scopedURL, NSError **blockError) {
+        return [[NSFileManager defaultManager] removeItemAtURL:scopedURL error:blockError];
+    }];
     if (!ok || error) {
         [self sendError:error.localizedDescription ?: @"Unable to delete file" callbackId:command.callbackId];
         return;
@@ -185,7 +215,10 @@ static NSString *const kSeparator = @"::";
     NSURL *destURL = [self urlFromString:dest];
 
     NSError *error = nil;
-    BOOL ok = [[NSFileManager defaultManager] copyItemAtURL:srcURL toURL:destURL error:&error];
+    BOOL ok = [self withSecurityScopeForURL:srcURL error:&error block:^BOOL(NSURL *scopedSrcURL, NSError **blockError) {
+        NSURL *scopedDestURL = [self scopedURLForURL:destURL didStartAccessing:nil error:nil];
+        return [[NSFileManager defaultManager] copyItemAtURL:scopedSrcURL toURL:scopedDestURL error:blockError];
+    }];
     if (!ok || error) {
         [self sendError:error.localizedDescription ?: @"Copy failed" callbackId:command.callbackId];
         return;
@@ -202,7 +235,10 @@ static NSString *const kSeparator = @"::";
     NSURL *destURL = [self urlFromString:dest];
 
     NSError *error = nil;
-    BOOL ok = [[NSFileManager defaultManager] moveItemAtURL:srcURL toURL:destURL error:&error];
+    BOOL ok = [self withSecurityScopeForURL:srcURL error:&error block:^BOOL(NSURL *scopedSrcURL, NSError **blockError) {
+        NSURL *scopedDestURL = [self scopedURLForURL:destURL didStartAccessing:nil error:nil];
+        return [[NSFileManager defaultManager] moveItemAtURL:scopedSrcURL toURL:scopedDestURL error:blockError];
+    }];
     if (!ok || error) {
         [self sendError:error.localizedDescription ?: @"Move failed" callbackId:command.callbackId];
         return;
@@ -224,7 +260,12 @@ static NSString *const kSeparator = @"::";
 - (void)exists:(CDVInvokedUrlCommand *)command {
     NSString *path = command.arguments.count > 0 ? command.arguments[0] : @"";
     NSURL *url = [self urlFromString:path];
-    BOOL exists = [[NSFileManager defaultManager] fileExistsAtPath:url.path];
+    NSError *error = nil;
+    __block BOOL exists = NO;
+    [self withSecurityScopeForURL:url error:&error block:^BOOL(NSURL *scopedURL, NSError **blockError) {
+        exists = [[NSFileManager defaultManager] fileExistsAtPath:scopedURL.path];
+        return YES;
+    }];
     NSString *resultString = exists ? @"TRUE" : @"FALSE";
     [self.commandDelegate sendPluginResult:[CDVPluginResult resultWithStatus:CDVCommandStatus_OK messageAsString:resultString] callbackId:command.callbackId];
 }
@@ -246,8 +287,12 @@ static NSString *const kSeparator = @"::";
     }
 
     NSError *error = nil;
-    NSArray<NSURL *> *items = [[NSFileManager defaultManager] contentsOfDirectoryAtURL:dirURL includingPropertiesForKeys:@[NSURLIsDirectoryKey] options:0 error:&error];
-    if (error) {
+    __block NSArray<NSURL *> *items = nil;
+    BOOL ok = [self withSecurityScopeForURL:dirURL error:&error block:^BOOL(NSURL *scopedDirURL, NSError **blockError) {
+        items = [[NSFileManager defaultManager] contentsOfDirectoryAtURL:scopedDirURL includingPropertiesForKeys:@[NSURLIsDirectoryKey] options:0 error:blockError];
+        return items != nil;
+    }];
+    if (!ok || error) {
         [self sendError:error.localizedDescription ?: @"Cannot read directory" callbackId:command.callbackId];
         return;
     }
@@ -276,8 +321,12 @@ static NSString *const kSeparator = @"::";
     NSURL *url = [self urlFromString:path];
 
     NSError *error = nil;
-    NSDictionary *attributes = [[NSFileManager defaultManager] attributesOfItemAtPath:url.path error:&error];
-    if (error || !attributes) {
+    __block NSDictionary *attributes = nil;
+    BOOL ok = [self withSecurityScopeForURL:url error:&error block:^BOOL(NSURL *scopedURL, NSError **blockError) {
+        attributes = [[NSFileManager defaultManager] attributesOfItemAtPath:scopedURL.path error:blockError];
+        return attributes != nil;
+    }];
+    if (!ok || error || !attributes) {
         [self sendError:error.localizedDescription ?: @"Unable to read file" callbackId:command.callbackId];
         return;
     }
@@ -361,6 +410,7 @@ static NSString *const kSeparator = @"::";
     }
 
     if ([self.pickerMode isEqualToString:@"openFolder"]) {
+        [self storeSecurityScopedBookmarkForURL:url];
         CDVPluginResult *result = [CDVPluginResult resultWithStatus:CDVCommandStatus_OK messageAsString:url.absoluteString];
         [self.commandDelegate sendPluginResult:result callbackId:self.activityCallbackId];
         return;
@@ -403,6 +453,76 @@ static NSString *const kSeparator = @"::";
         return url;
     }
     return [NSURL fileURLWithPath:path];
+}
+
+- (void)storeSecurityScopedBookmarkForURL:(NSURL *)url {
+    if (!url) return;
+
+    NSError *error = nil;
+    NSData *bookmark = [url bookmarkDataWithOptions:0 includingResourceValuesForKeys:nil relativeToURL:nil error:&error];
+    if (!bookmark || error) {
+        return;
+    }
+
+    self.securityScopedBookmarks[url.absoluteString] = bookmark;
+    [[NSUserDefaults standardUserDefaults] setObject:self.securityScopedBookmarks forKey:kBookmarkDefaultsKey];
+    [[NSUserDefaults standardUserDefaults] synchronize];
+}
+
+- (NSURL *)scopedURLForURL:(NSURL *)url didStartAccessing:(BOOL *)didStartAccessing error:(NSError **)error {
+    if (didStartAccessing) {
+        *didStartAccessing = NO;
+    }
+    if (!url) return url;
+
+    NSString *urlString = url.absoluteString;
+    NSString *bestKey = nil;
+    for (NSString *key in self.securityScopedBookmarks) {
+        if ([urlString hasPrefix:key] && (!bestKey || key.length > bestKey.length)) {
+            bestKey = key;
+        }
+    }
+
+    if (!bestKey) {
+        return url;
+    }
+
+    NSData *bookmark = self.securityScopedBookmarks[bestKey];
+    BOOL stale = NO;
+    NSURL *rootURL = [NSURL URLByResolvingBookmarkData:bookmark options:0 relativeToURL:nil bookmarkDataIsStale:&stale error:error];
+    if (!rootURL) {
+        return url;
+    }
+
+    if (stale) {
+        [self storeSecurityScopedBookmarkForURL:rootURL];
+    }
+
+    if (didStartAccessing) {
+        BOOL accessed = [rootURL startAccessingSecurityScopedResource];
+        *didStartAccessing = accessed;
+    }
+
+    if ([urlString isEqualToString:bestKey]) {
+        return rootURL;
+    }
+
+    NSString *relative = [urlString substringFromIndex:bestKey.length];
+    if ([relative hasPrefix:@"/"]) {
+        relative = [relative substringFromIndex:1];
+    }
+    return relative.length > 0 ? [rootURL URLByAppendingPathComponent:[relative stringByRemovingPercentEncoding] ?: relative] : rootURL;
+}
+
+- (BOOL)withSecurityScopeForURL:(NSURL *)url error:(NSError **)error block:(BOOL (^)(NSURL *scopedURL, NSError **blockError))block {
+    BOOL didStartAccessing = NO;
+    NSURL *scopedURL = [self scopedURLForURL:url didStartAccessing:&didStartAccessing error:error];
+    BOOL ok = block ? block(scopedURL ?: url, error) : YES;
+    if (didStartAccessing) {
+        NSURL *rootURL = [self scopedURLForURL:url didStartAccessing:nil error:nil];
+        [rootURL stopAccessingSecurityScopedResource];
+    }
+    return ok;
 }
 
 - (NSArray<UTType *> *)utTypesFromMime:(NSString *)mime {

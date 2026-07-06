@@ -25,7 +25,10 @@ export default {
 		system.setInputType(appSettings.value.keyboardMode);
 		appSettings.applyUiZoomSetting();
 		// Keep native context menu enabled globally; editor manager scopes disabling to CodeMirror focus.
-		system.setNativeContextMenuDisabled(false);
+		// 
+		if (window.cordova.platformId !== "ios") {
+			system.setNativeContextMenuDisabled(false);
+		}
 	},
 	afterRender() {
 		const { value: settings } = appSettings;
