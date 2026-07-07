@@ -3,6 +3,49 @@ import { decode, encode } from "utils/encodings";
 import helpers from "utils/helpers";
 import Url from "utils/Url";
 
+function normalizeUrl(url) {
+	return String(url || "")
+		.replace(/\/+$/, "")
+		.replace(/^file:\/\/\/private\/var\//, "file:///var/");
+}
+
+function getIosAppFileRoots() {
+	if (typeof cordova === "undefined" || !cordova.file) return [];
+
+	return [
+		cordova.file.applicationDirectory,
+		cordova.file.applicationStorageDirectory,
+		cordova.file.cacheDirectory,
+		cordova.file.dataDirectory,
+		cordova.file.documentsDirectory,
+		cordova.file.syncedDataDirectory,
+		cordova.file.tempDirectory,
+	]
+		.filter(Boolean)
+		.map(normalizeUrl);
+}
+
+function isIosExternalFileUrl(url) {
+	if (
+		typeof cordova === "undefined" ||
+		cordova.platformId !== "ios" ||
+		!/^file:/.test(url)
+	) {
+		return false;
+	}
+
+	const normalizedUrl = normalizeUrl(url);
+	if (
+		getIosAppFileRoots().some(
+			(root) => normalizedUrl === root || normalizedUrl.startsWith(`${root}/`),
+		)
+	) {
+		return false;
+	}
+
+	return true;
+}
+
 const externalFs = {
 	async readFile(url) {
 		url = await this.formatUri(url);
@@ -162,7 +205,7 @@ const externalFs = {
 	 * @returns
 	 */
 	test(url) {
-		return /^content:/.test(url);
+		return /^content:/.test(url) || isIosExternalFileUrl(url);
 	},
 
 	createFs,

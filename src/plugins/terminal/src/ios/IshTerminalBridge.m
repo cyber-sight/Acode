@@ -23,7 +23,7 @@
 @property (nonatomic, assign) struct linux_tty *linuxTTY;
 @property (nonatomic, assign) BOOL loaded;
 - (int)roomForOutput;
-- (void)setLinuxTTY:(struct linux_tty *)tty;
+- (void)setTty:(struct linux_tty *)tty;
 @end
 
 @implementation Terminal
@@ -88,12 +88,12 @@ static NSMapTable<NSUUID *, Terminal *> *acodeTerminalsByUUID;
 }
 
 - (void)sendInput:(NSData *)input {
-    if (!input.length || self.linuxTTY == NULL) {
+    if (!input.length || _linuxTTY == NULL) {
         return;
     }
 
     NSData *inputRef = [input copy];
-    struct linux_tty *tty = self.linuxTTY;
+    struct linux_tty *tty = _linuxTTY;
     async_do_in_workqueue(^{
         if (tty && tty->ops && tty->ops->send_input) {
             tty->ops->send_input(tty, inputRef.bytes, inputRef.length);
@@ -106,8 +106,8 @@ static NSMapTable<NSUUID *, Terminal *> *acodeTerminalsByUUID;
 }
 
 - (void)destroy {
-    struct linux_tty *tty = self.linuxTTY;
-    self.linuxTTY = NULL;
+    struct linux_tty *tty = _linuxTTY;
+    _linuxTTY = NULL;
     if (tty && tty->ops && tty->ops->hangup) {
         async_do_in_workqueue(^{
             tty->ops->hangup(tty);
@@ -129,9 +129,9 @@ static NSMapTable<NSUUID *, Terminal *> *acodeTerminalsByUUID;
     _enableVoiceOverAnnounce = enableVoiceOverAnnounce;
 }
 
-- (void)setLinuxTTY:(struct linux_tty *)tty {
+- (void)setTty:(struct linux_tty *)tty {
     @synchronized (self) {
-        self.linuxTTY = tty;
+        _linuxTTY = tty;
     }
 }
 
@@ -229,7 +229,7 @@ nsobj_t Terminal_terminalWithType_number(int type, int number) {
 }
 
 void Terminal_setLinuxTTY(nsobj_t _self, struct linux_tty *tty) {
-    [(__bridge Terminal *)_self setLinuxTTY:tty];
+    [(__bridge Terminal *)_self setTty:tty];
 }
 
 int Terminal_sendOutput_length(nsobj_t _self, const char *data, int size) {

@@ -77,7 +77,7 @@ static NSString *const kBookmarkDefaultsKey = @"AcodeSDcardSecurityScopedBookmar
     UIDocumentPickerViewController *picker = nil;
     if (@available(iOS 14.0, *)) {
         NSArray<UTType *> *types = [self utTypesFromMime:mimeType];
-        picker = [[UIDocumentPickerViewController alloc] initForOpeningContentTypes:types asCopy:YES];
+        picker = [[UIDocumentPickerViewController alloc] initForOpeningContentTypes:types asCopy:NO];
     } else {
         NSArray<NSString *> *types = [self legacyDocumentTypesFromMime:mimeType];
         picker = [[UIDocumentPickerViewController alloc] initWithDocumentTypes:types inMode:UIDocumentPickerModeOpen];
@@ -93,7 +93,7 @@ static NSString *const kBookmarkDefaultsKey = @"AcodeSDcardSecurityScopedBookmar
     UIDocumentPickerViewController *picker = nil;
     if (@available(iOS 14.0, *)) {
         NSArray<UTType *> *types = [self utTypesFromMime:mimeType];
-        picker = [[UIDocumentPickerViewController alloc] initForOpeningContentTypes:types asCopy:YES];
+        picker = [[UIDocumentPickerViewController alloc] initForOpeningContentTypes:types asCopy:NO];
     } else {
         NSArray<NSString *> *types = [self legacyDocumentTypesFromMime:mimeType];
         picker = [[UIDocumentPickerViewController alloc] initWithDocumentTypes:types inMode:UIDocumentPickerModeOpen];
@@ -416,7 +416,12 @@ static NSString *const kBookmarkDefaultsKey = @"AcodeSDcardSecurityScopedBookmar
         return;
     }
 
+    [self storeSecurityScopedBookmarkForURL:url];
+    BOOL didStartAccessing = [url startAccessingSecurityScopedResource];
     NSDictionary *attrs = [[NSFileManager defaultManager] attributesOfItemAtPath:url.path error:nil];
+    if (didStartAccessing) {
+        [url stopAccessingSecurityScopedResource];
+    }
     NSDictionary *payload = @{
         @"length": attrs[NSFileSize] ?: @0,
         @"type": @"",
@@ -475,6 +480,19 @@ static NSString *const kBookmarkDefaultsKey = @"AcodeSDcardSecurityScopedBookmar
     }
     if (!url) return url;
 
+    NSURL *scopeRootURL = nil;
+    return [self scopedURLForURL:url scopeRootURL:&scopeRootURL didStartAccessing:didStartAccessing error:error];
+}
+
+- (NSURL *)scopedURLForURL:(NSURL *)url scopeRootURL:(NSURL **)scopeRootURL didStartAccessing:(BOOL *)didStartAccessing error:(NSError **)error {
+    if (didStartAccessing) {
+        *didStartAccessing = NO;
+    }
+    if (scopeRootURL) {
+        *scopeRootURL = nil;
+    }
+    if (!url) return url;
+
     NSString *urlString = url.absoluteString;
     NSString *bestKey = nil;
     for (NSString *key in self.securityScopedBookmarks) {
@@ -498,6 +516,10 @@ static NSString *const kBookmarkDefaultsKey = @"AcodeSDcardSecurityScopedBookmar
         [self storeSecurityScopedBookmarkForURL:rootURL];
     }
 
+    if (scopeRootURL) {
+        *scopeRootURL = rootURL;
+    }
+
     if (didStartAccessing) {
         BOOL accessed = [rootURL startAccessingSecurityScopedResource];
         *didStartAccessing = accessed;
@@ -507,20 +529,35 @@ static NSString *const kBookmarkDefaultsKey = @"AcodeSDcardSecurityScopedBookmar
         return rootURL;
     }
 
+    if (url.isFileURL && rootURL.isFileURL) {
+        NSString *rootPath = [rootURL.path stringByStandardizingPath];
+        NSString *targetPath = [url.path stringByStandardizingPath];
+        if ([targetPath hasPrefix:rootPath]) {
+            NSString *relativePath = [targetPath substringFromIndex:rootPath.length];
+            if ([relativePath hasPrefix:@"/"]) {
+                relativePath = [relativePath substringFromIndex:1];
+            }
+            if (relativePath.length > 0) {
+                return [NSURL fileURLWithPath:[rootPath stringByAppendingPathComponent:relativePath]];
+            }
+        }
+    }
+
     NSString *relative = [urlString substringFromIndex:bestKey.length];
     if ([relative hasPrefix:@"/"]) {
         relative = [relative substringFromIndex:1];
     }
-    return relative.length > 0 ? [rootURL URLByAppendingPathComponent:[relative stringByRemovingPercentEncoding] ?: relative] : rootURL;
+    relative = [relative stringByRemovingPercentEncoding] ?: relative;
+    return relative.length > 0 ? [rootURL URLByAppendingPathComponent:relative] : rootURL;
 }
 
 - (BOOL)withSecurityScopeForURL:(NSURL *)url error:(NSError **)error block:(BOOL (^)(NSURL *scopedURL, NSError **blockError))block {
     BOOL didStartAccessing = NO;
-    NSURL *scopedURL = [self scopedURLForURL:url didStartAccessing:&didStartAccessing error:error];
+    NSURL *scopeRootURL = nil;
+    NSURL *scopedURL = [self scopedURLForURL:url scopeRootURL:&scopeRootURL didStartAccessing:&didStartAccessing error:error];
     BOOL ok = block ? block(scopedURL ?: url, error) : YES;
     if (didStartAccessing) {
-        NSURL *rootURL = [self scopedURLForURL:url didStartAccessing:nil error:nil];
-        [rootURL stopAccessingSecurityScopedResource];
+        [scopeRootURL stopAccessingSecurityScopedResource];
     }
     return ok;
 }
