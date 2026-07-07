@@ -494,7 +494,7 @@ class TerminalManager {
 			.filter(Boolean)
 			.join(" ");
 
-		return message.replace(/^(stdout|stderr)\s+/, "") || "Unknown error";
+		return message.replace(/^(stdout|stderr)[:\s]+/, "") || "Unknown error";
 	}
 
 	/**
