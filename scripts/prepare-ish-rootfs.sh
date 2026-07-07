@@ -2,7 +2,8 @@
 set -euo pipefail
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-DEST="$ROOT_DIR/src/ios/ish-rootfs"
+ISH_DIR="$ROOT_DIR/third_party/ish"
+DEST="$ROOT_DIR/src/plugins/terminal/src/ios/ish-rootfs"
 ARCHIVE="${1:-}"
 
 if [[ -z "$ARCHIVE" ]]; then
@@ -16,8 +17,15 @@ if [[ ! -f "$ARCHIVE" ]]; then
 fi
 
 rm -rf "$DEST"
-mkdir -p "$DEST"
+mkdir -p "$(dirname "$DEST")"
 
-tar -xzf "$ARCHIVE" -C "$DEST"
+if [[ ! -x "$ISH_DIR/build/Release/fakefsify" ]]; then
+  echo "fakefsify not found at $ISH_DIR/build/Release/fakefsify"
+  echo "Build the native iSH helper first:"
+  echo "  cd $ISH_DIR && meson setup build/Release --buildtype=debugoptimized && meson compile -C build/Release fakefsify"
+  exit 1
+fi
 
-echo "Rootfs extracted to $DEST"
+"$ISH_DIR/build/Release/fakefsify" "$ARCHIVE" "$DEST"
+
+echo "Rootfs imported to $DEST"

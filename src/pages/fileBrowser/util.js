@@ -38,17 +38,22 @@ export default {
 						sdcard.getStorageAccessPermission(
 							uuid,
 							(res) => {
+								const uri = typeof res === "string" ? res : res?.uri;
+								const selectedName = typeof res === "object" ? res?.name : "";
 								const $name = tag.get("#name");
-								if (!$name.value && res) {
-									const name = window
-										.decodeURIComponent(res)
-										?.split(":")
-										.pop()
-										?.split("/")
-										.pop();
+								if (!$name.value && uri) {
+									const name =
+										selectedName ||
+										window
+											.decodeURIComponent(uri)
+											.replace(/\/+$/, "")
+											?.split(":")
+											.pop()
+											?.split("/")
+											.pop();
 									$name.value = name ?? "";
 								}
-								this.value = res;
+								this.value = uri;
 							},
 							(err) => {
 								helpers.error(err);

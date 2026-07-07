@@ -5,6 +5,7 @@ const fs = require("fs");
 const path = require("path");
 
 function copyDir(src, dest) {
+  fs.rmSync(dest, { recursive: true, force: true });
   fs.mkdirSync(dest, { recursive: true });
   for (const entry of fs.readdirSync(src)) {
     const srcPath = path.join(src, entry);
@@ -37,9 +38,12 @@ function main() {
   }
 
   const appName = xcodeProject.replace(/\.xcodeproj$/, "");
-  const destRootfs = path.join(iosPath, appName, "ish-rootfs");
-  copyDir(srcRootfs, destRootfs);
-  console.log("iSH rootfs hook: copied rootfs to", destRootfs);
+  const appRootfs = path.join(iosPath, appName, "ish-rootfs");
+  const wwwRootfs = path.join(iosPath, "www", "ish-rootfs");
+
+  copyDir(srcRootfs, appRootfs);
+  copyDir(srcRootfs, wwwRootfs);
+  console.log("iSH rootfs hook: copied rootfs to", appRootfs, "and", wwwRootfs);
 }
 
 main();

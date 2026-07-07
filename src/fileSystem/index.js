@@ -74,8 +74,8 @@ fsOperation.remove = (test) => {
 
 fsOperation.extend(Sftp.test, Sftp.fromUrl);
 fsOperation.extend(Ftp.test, Ftp.fromUrl);
-fsOperation.extend(internalFs.test, (url) => internalFs.createFs(url));
 fsOperation.extend(externalFs.test, (url) => externalFs.createFs(url));
+fsOperation.extend(internalFs.test, (url) => internalFs.createFs(url));
 
 fsOperation.extend(
 	(url) => /^https?:/.test(url),
