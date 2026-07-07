@@ -8,6 +8,32 @@
 
 const exec = require('cordova/exec');
 
+const STREAM_PREFIXES = new Set(["stdout", "stderr", "exit"]);
+
+function parseStreamMessage(message) {
+  if (typeof message !== "string") {
+    return { type: "unknown", data: message };
+  }
+
+  const separatorIndex = message.indexOf(":");
+  if (separatorIndex === -1) {
+    return { type: "unknown", data: message };
+  }
+
+  const type = message.slice(0, separatorIndex);
+  if (!STREAM_PREFIXES.has(type)) {
+    return { type: "unknown", data: message };
+  }
+
+  let data = message.slice(separatorIndex + 1);
+  const duplicatePrefix = `${type}:`;
+  while (data.startsWith(duplicatePrefix)) {
+    data = data.slice(duplicatePrefix.length);
+  }
+
+  return { type, data };
+}
+
 class Executor {
   constructor(BackgroundExecutor = false) {
     this.ExecutorType = BackgroundExecutor ? "BackgroundExecutor" : "Executor";
@@ -69,14 +95,8 @@ class Executor {
             // First message is always the process UUID
             resolve(message);
           } else {
-            const match = message.match(/^([^:]+):(.*)$/);
-            if (match) {
-              const prefix = match[1];         // e.g. "stdout"
-              const content = match[2]; // output
-              onData(prefix, content);
-            } else {
-              onData("unknown", message);
-            }
+            const parsed = parseStreamMessage(message);
+            onData(parsed.type, parsed.data);
           }
         },
         reject,

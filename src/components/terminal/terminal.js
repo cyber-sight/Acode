@@ -883,22 +883,36 @@ export default class TerminalComponent {
 	}
 
 	handleNativeTerminalEvent(type, data) {
+		const output = this.normalizeNativeTerminalOutput(type, data);
 		switch (type) {
 			case "stdout":
 			case "stderr":
-				this.terminal.write(data || "");
+				this.terminal.write(output || "");
 				break;
 			case "exit":
 				this.isConnected = false;
-				this.onProcessExit?.(data);
+				this.onProcessExit?.(output);
 				this.onDisconnect?.();
 				break;
 			default:
-				if (data) {
-					this.terminal.write(data);
+				if (output) {
+					this.terminal.write(output);
 				}
 				break;
 		}
+	}
+
+	normalizeNativeTerminalOutput(type, data) {
+		if (typeof data !== "string") return data;
+
+		const prefix = `${type}:`;
+		if (type !== "stdout" && type !== "stderr") return data;
+
+		let output = data;
+		while (output.startsWith(prefix)) {
+			output = output.slice(prefix.length);
+		}
+		return output;
 	}
 
 	/**
