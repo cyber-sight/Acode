@@ -47,6 +47,7 @@ import toast from "components/toast";
 import tutorial from "components/tutorial";
 import confirm from "dialogs/confirm";
 import intentHandler, { processPendingIntents } from "handlers/intent";
+import initIosContextMenu from "handlers/iosContextMenu";
 import keyboardHandler, { keydownState } from "handlers/keyboard";
 import quickToolsInit from "handlers/quickToolsInit";
 import windowResize from "handlers/windowResize";
@@ -131,7 +132,6 @@ async function onDeviceReady() {
   setBootStatus("Cordova ready. Loading encodings...");
   await initEncodings(); // important to load encodings before anything else
 
-
   const isFreePackage = /(free)$/.test(BuildInfo.packageName);
   const oldResolveURL = window.resolveLocalFileSystemURL;
   const {
@@ -152,6 +152,11 @@ async function onDeviceReady() {
   window.PLUGIN_DIR = Url.join(DATA_STORAGE, "plugins");
   window.KEYBINDING_FILE = Url.join(DATA_STORAGE, ".key-bindings.json");
   window.log = logger.log.bind(logger);
+
+  if (cordova.platformId === "ios") {
+    document.documentElement.classList.toggle("ios", true);
+    app.classList.toggle("ios", true);
+  }
 
   config.HAS_PRO = !isFreePackage;
 
@@ -626,6 +631,7 @@ async function loadApp() {
   //#region Add event listeners
   initModes();
   quickToolsInit();
+  initIosContextMenu();
   sidebarApps.init($sidebar);
   await sidebarApps.loadApps();
   editorManager.onupdate = onEditorUpdate;
@@ -718,7 +724,8 @@ async function loadApp() {
    * @param {MouseEvent} e
    */
   function handleMenu(e) {
-    const $target = e.target;
+    const $target = e.target?.closest?.("[action]");
+    if (!$target) return;
     const action = $target.getAttribute("action");
     const value = $target.getAttribute("value") || undefined;
     if (!action) return;

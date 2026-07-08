@@ -88,6 +88,13 @@
     </platform>
     <platform name="ios">
         <preference name="deployment-target" value="15.0" />
+        <preference name="Fullscreen" value="true" />
+        <preference name="StatusBarHidden" value="false" />
+        <preference name="StatusBarOverlaysWebView" value="false" />
+        <preference name="DisallowOverscroll" value="true" />
+        <preference name="SuppressesIncrementalRendering" value="true" />
+        <preference name="WKWebViewInjectUserScript" value="navigator.keyboard.hideFormAccessoryBar(true);" />
+        <icon src="res/ios/icon.png" />
         <hook type="after_prepare" src="hooks/ios/fix-deployment-target.js" />
         <hook type="after_prepare" src="hooks/ios/fix-advanced-http-private-headers.js" />
         <hook type="after_prepare" src="hooks/ios/fix-ftp-goldraccoon.js" />
@@ -96,6 +103,7 @@
         <hook type="after_prepare" src="hooks/ios/fix-sftp-ios-stub.js" />
         <hook type="after_prepare" src="hooks/ios/remove-sftp-nmssh-pod.js" />
         <hook type="after_prepare" src="hooks/ios/fix-server-gcdwebserver.js" />
+        <hook type="after_prepare" src="hooks/ios/fix-normal-webview-chrome.js" />
         <edit-config file="*-Info.plist" mode="merge" target="NSCameraUsageDescription">
             <string>Camera access is needed for capturing media.</string>
         </edit-config>
@@ -110,6 +118,24 @@
         </edit-config>
         <edit-config file="*-Info.plist" mode="merge" target="NSLocalNetworkUsageDescription">
             <string>Local network access is needed for device-to-device connections.</string>
+        </edit-config>
+        <edit-config file="*-Info.plist" mode="merge" target="NSAppTransportSecurity">
+            <dict>
+                <key>NSAllowsArbitraryLoads</key>
+                <true />
+            </dict>
+        </edit-config>
+        <edit-config file="*-Info.plist" mode="merge" target="UIStatusBarHidden">
+            <false />
+        </edit-config>
+        <edit-config file="*-Info.plist" mode="merge" target="UIViewControllerBasedStatusBarAppearance">
+            <false />
+        </edit-config>
+        <edit-config file="*-Info.plist" mode="merge" target="LSSupportsOpeningDocumentsInPlace">
+            <true />
+        </edit-config>
+        <edit-config file="*-Info.plist" mode="merge" target="UIFileSharingEnabled">
+            <true />
         </edit-config>
     </platform>
     <preference name="AndroidBlacklistSecureSocketProtocols" value="SSLv3,TLSv1" />

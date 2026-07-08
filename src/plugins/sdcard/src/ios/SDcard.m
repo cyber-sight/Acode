@@ -136,7 +136,16 @@ static NSString *const kBookmarkDefaultsKey = @"AcodeSDcardSecurityScopedBookmar
     NSError *error = nil;
     __block NSData *data = nil;
     BOOL ok = [self withSecurityScopeForURL:url error:&error block:^BOOL(NSURL *scopedURL, NSError **blockError) {
-        data = [NSData dataWithContentsOfURL:scopedURL options:0 error:blockError];
+        __block NSData *coordinatedData = nil;
+        __block NSError *readError = nil;
+        NSFileCoordinator *coordinator = [[NSFileCoordinator alloc] initWithFilePresenter:nil];
+        [coordinator coordinateReadingItemAtURL:scopedURL options:0 error:&readError byAccessor:^(NSURL *newURL) {
+            coordinatedData = [NSData dataWithContentsOfURL:newURL options:0 error:&readError];
+        }];
+        if (!coordinatedData && blockError) {
+            *blockError = readError;
+        }
+        data = coordinatedData;
         return data != nil;
     }];
     if (!ok || !data) {
@@ -150,21 +159,37 @@ static NSString *const kBookmarkDefaultsKey = @"AcodeSDcardSecurityScopedBookmar
 
 - (void)write:(CDVInvokedUrlCommand *)command {
     NSString *path = command.arguments.count > 0 ? command.arguments[0] : @"";
-    NSString *content = command.arguments.count > 1 ? command.arguments[1] : @"";
+    id content = command.arguments.count > 1 ? command.arguments[1] : @"";
     BOOL isArrayBuffer = command.arguments.count > 2 ? [command.arguments[2] boolValue] : NO;
 
     NSURL *url = [self urlFromString:path];
     NSData *data = nil;
 
-    if (isArrayBuffer) {
-        data = [[NSData alloc] initWithBase64EncodedString:content options:0];
+    if ([content isKindOfClass:[NSData class]]) {
+        data = (NSData *)content;
+    } else if (isArrayBuffer && [content isKindOfClass:[NSString class]]) {
+        data = [[NSData alloc] initWithBase64EncodedString:(NSString *)content options:0];
     } else {
-        data = [content dataUsingEncoding:NSUTF8StringEncoding];
+        data = [[NSString stringWithFormat:@"%@", content ?: @""] dataUsingEncoding:NSUTF8StringEncoding];
+    }
+
+    if (!data) {
+        [self sendError:@"Write failed" callbackId:command.callbackId];
+        return;
     }
 
     NSError *error = nil;
     BOOL ok = [self withSecurityScopeForURL:url error:&error block:^BOOL(NSURL *scopedURL, NSError **blockError) {
-        return [data writeToURL:scopedURL options:NSDataWritingAtomic error:blockError];
+        __block BOOL wrote = NO;
+        __block NSError *writeError = nil;
+        NSFileCoordinator *coordinator = [[NSFileCoordinator alloc] initWithFilePresenter:nil];
+        [coordinator coordinateWritingItemAtURL:scopedURL options:0 error:&writeError byAccessor:^(NSURL *newURL) {
+            wrote = [data writeToURL:newURL options:0 error:&writeError];
+        }];
+        if (!wrote && blockError) {
+            *blockError = writeError;
+        }
+        return wrote;
     }];
     if (!ok || error) {
         [self sendError:error.localizedDescription ?: @"Write failed" callbackId:command.callbackId];
@@ -399,20 +424,25 @@ static NSString *const kBookmarkDefaultsKey = @"AcodeSDcardSecurityScopedBookmar
 #pragma mark - UIDocumentPickerDelegate
 
 - (void)documentPicker:(UIDocumentPickerViewController *)controller didPickDocumentsAtURLs:(NSArray<NSURL *> *)urls {
-    if (!self.activityCallbackId) {
+    NSString *callbackId = self.activityCallbackId;
+    NSString *pickerMode = self.pickerMode;
+    self.activityCallbackId = nil;
+    self.pickerMode = nil;
+
+    if (!callbackId) {
         return;
     }
 
     NSURL *url = urls.firstObject;
     if (!url) {
-        [self sendError:@"No file selected" callbackId:self.activityCallbackId];
+        [self sendError:@"No file selected" callbackId:callbackId];
         return;
     }
 
-    if ([self.pickerMode isEqualToString:@"openFolder"]) {
+    if ([pickerMode isEqualToString:@"openFolder"]) {
         [self storeSecurityScopedBookmarkForURL:url];
         CDVPluginResult *result = [CDVPluginResult resultWithStatus:CDVCommandStatus_OK messageAsString:url.absoluteString];
-        [self.commandDelegate sendPluginResult:result callbackId:self.activityCallbackId];
+        [self.commandDelegate sendPluginResult:result callbackId:callbackId];
         return;
     }
 
@@ -431,12 +461,15 @@ static NSString *const kBookmarkDefaultsKey = @"AcodeSDcardSecurityScopedBookmar
     };
 
     CDVPluginResult *result = [CDVPluginResult resultWithStatus:CDVCommandStatus_OK messageAsDictionary:payload];
-    [self.commandDelegate sendPluginResult:result callbackId:self.activityCallbackId];
+    [self.commandDelegate sendPluginResult:result callbackId:callbackId];
 }
 
 - (void)documentPickerWasCancelled:(UIDocumentPickerViewController *)controller {
-    if (self.activityCallbackId) {
-        [self sendError:@"Operation cancelled" callbackId:self.activityCallbackId];
+    NSString *callbackId = self.activityCallbackId;
+    self.activityCallbackId = nil;
+    self.pickerMode = nil;
+    if (callbackId) {
+        [self sendError:@"Operation cancelled" callbackId:callbackId];
     }
 }
 
@@ -464,12 +497,20 @@ static NSString *const kBookmarkDefaultsKey = @"AcodeSDcardSecurityScopedBookmar
     if (!url) return;
 
     NSError *error = nil;
-    NSData *bookmark = [url bookmarkDataWithOptions:0 includingResourceValuesForKeys:nil relativeToURL:nil error:&error];
+    BOOL didStartAccessing = [url startAccessingSecurityScopedResource];
+    NSData *bookmark = [url bookmarkDataWithOptions:NSURLBookmarkCreationMinimalBookmark includingResourceValuesForKeys:nil relativeToURL:nil error:&error];
+    if (didStartAccessing) {
+        [url stopAccessingSecurityScopedResource];
+    }
     if (!bookmark || error) {
         return;
     }
 
     self.securityScopedBookmarks[url.absoluteString] = bookmark;
+    NSString *normalizedKey = [self normalizedURLString:url];
+    if (normalizedKey.length > 0) {
+        self.securityScopedBookmarks[normalizedKey] = bookmark;
+    }
     [[NSUserDefaults standardUserDefaults] setObject:self.securityScopedBookmarks forKey:kBookmarkDefaultsKey];
     [[NSUserDefaults standardUserDefaults] synchronize];
 }
@@ -494,9 +535,12 @@ static NSString *const kBookmarkDefaultsKey = @"AcodeSDcardSecurityScopedBookmar
     if (!url) return url;
 
     NSString *urlString = url.absoluteString;
+    NSString *normalizedURLString = [self normalizedURLString:url];
     NSString *bestKey = nil;
     for (NSString *key in self.securityScopedBookmarks) {
-        if ([urlString hasPrefix:key] && (!bestKey || key.length > bestKey.length)) {
+        NSString *normalizedKey = [self normalizedURLString:[NSURL URLWithString:key]];
+        BOOL matches = [urlString hasPrefix:key] || (normalizedKey.length > 0 && [normalizedURLString hasPrefix:normalizedKey]);
+        if (matches && (!bestKey || key.length > bestKey.length)) {
             bestKey = key;
         }
     }
@@ -549,6 +593,18 @@ static NSString *const kBookmarkDefaultsKey = @"AcodeSDcardSecurityScopedBookmar
     }
     relative = [relative stringByRemovingPercentEncoding] ?: relative;
     return relative.length > 0 ? [rootURL URLByAppendingPathComponent:relative] : rootURL;
+}
+
+- (NSString *)normalizedURLString:(NSURL *)url {
+    if (!url) return @"";
+
+    NSString *absoluteString = url.absoluteString ?: @"";
+    if (!url.isFileURL) {
+        return absoluteString;
+    }
+
+    NSString *path = [[url.path stringByStandardizingPath] stringByReplacingOccurrencesOfString:@"/private/var/" withString:@"/var/"];
+    return [[NSURL fileURLWithPath:path isDirectory:NO] absoluteString] ?: absoluteString;
 }
 
 - (BOOL)withSecurityScopeForURL:(NSURL *)url error:(NSError **)error block:(BOOL (^)(NSURL *scopedURL, NSError **blockError))block {

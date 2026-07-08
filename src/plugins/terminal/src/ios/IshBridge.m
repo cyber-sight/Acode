@@ -3,7 +3,11 @@
 #import <objc/message.h>
 #import <sqlite3.h>
 #import <sys/stat.h>
+#include <arpa/inet.h>
+#include <netdb.h>
+#include <resolv.h>
 #include <stdlib.h>
+#include <string.h>
 #import "IshRootfs.h"
 
 #if __has_include("ish/include/LinuxInterop.h")
@@ -196,6 +200,7 @@
         dataIsDir &&
         [fm fileExistsAtPath:rootShell] &&
         [self stampRootfsMetadataAtPath:rootMeta]) {
+        [self writeResolverConfigurationAtRootPath:rootPath];
         NSLog(@"iSH rootfs: existing rootfs validated at %@", rootPath);
         [self logDirectoryContentsAtPath:rootPath label:@"Documents/ish-rootfs existing" maxDepth:2];
         return YES;
@@ -258,9 +263,146 @@
                  dataIsDir &&
                  [fm fileExistsAtPath:rootShell] &&
                  [self stampRootfsMetadataAtPath:rootMeta];
+    if (ready) {
+        [self writeResolverConfigurationAtRootPath:rootPath];
+    }
     NSLog(@"iSH rootfs: copied rootfs ready=%d", ready);
     [self logDirectoryContentsAtPath:rootPath label:@"Documents/ish-rootfs after copy" maxDepth:2];
     return ready;
+}
+
+- (void)writeResolverConfigurationAtRootPath:(NSString *)rootPath {
+    NSString *etcPath = [rootPath stringByAppendingPathComponent:@"data/etc"];
+    NSError *dirError = nil;
+    [[NSFileManager defaultManager] createDirectoryAtPath:etcPath withIntermediateDirectories:YES attributes:nil error:&dirError];
+    if (dirError) {
+        NSLog(@"iSH rootfs: failed creating resolver directory %@: %@", etcPath, dirError);
+        return;
+    }
+
+    NSString *resolvConf = [self resolverConfiguration];
+    NSString *resolvPath = [etcPath stringByAppendingPathComponent:@"resolv.conf"];
+    NSError *writeError = nil;
+    if (![resolvConf writeToFile:resolvPath atomically:YES encoding:NSUTF8StringEncoding error:&writeError]) {
+        NSLog(@"iSH rootfs: failed writing resolver configuration %@: %@", resolvPath, writeError);
+        return;
+    }
+
+    [self ensureFakefsPath:@"/etc/resolv.conf"
+                   forFile:resolvPath
+              withRootPath:rootPath
+                      mode:(S_IFREG | 0644)];
+}
+
+- (NSString *)resolverConfiguration {
+    NSMutableString *resolvConf = [NSMutableString string];
+    struct __res_state res;
+    memset(&res, 0, sizeof(res));
+
+    if (res_ninit(&res) == EXIT_SUCCESS) {
+        if (res.dnsrch[0] != NULL) {
+            [resolvConf appendString:@"search"];
+            for (int i = 0; res.dnsrch[i] != NULL; i++) {
+                [resolvConf appendFormat:@" %s", res.dnsrch[i]];
+            }
+            [resolvConf appendString:@"\n"];
+        }
+
+        union res_sockaddr_union servers[MAXNS];
+        int serversFound = res_getservers(&res, servers, MAXNS);
+        char address[NI_MAXHOST];
+        for (int i = 0; i < serversFound; i++) {
+            union res_sockaddr_union server = servers[i];
+            if (server.sin.sin_len == 0) {
+                continue;
+            }
+
+            int result = getnameinfo((struct sockaddr *)&server.sin,
+                                     server.sin.sin_len,
+                                     address,
+                                     sizeof(address),
+                                     NULL,
+                                     0,
+                                     NI_NUMERICHOST);
+            if (result == 0) {
+                [resolvConf appendFormat:@"nameserver %s\n", address];
+            }
+        }
+
+        res_nclose(&res);
+    }
+
+    if ([resolvConf rangeOfString:@"nameserver "].location == NSNotFound) {
+        [resolvConf appendString:@"nameserver 1.1.1.1\n"];
+        [resolvConf appendString:@"nameserver 8.8.8.8\n"];
+    }
+
+    return resolvConf;
+}
+
+- (void)ensureFakefsPath:(NSString *)fakePath
+                 forFile:(NSString *)filePath
+            withRootPath:(NSString *)rootPath
+                    mode:(uint32_t)mode {
+    NSString *metaPath = [rootPath stringByAppendingPathComponent:@"meta.db"];
+    sqlite3 *db = NULL;
+    if (sqlite3_open_v2(metaPath.fileSystemRepresentation, &db, SQLITE_OPEN_READWRITE, NULL) != SQLITE_OK) {
+        NSLog(@"iSH rootfs: sqlite open failed while registering %@: %s", fakePath, db ? sqlite3_errmsg(db) : "unknown");
+        if (db) sqlite3_close(db);
+        return;
+    }
+
+    sqlite3_exec(db, "begin immediate", NULL, NULL, NULL);
+
+    sqlite3_stmt *stmt = NULL;
+    int64_t inode = 0;
+    const char *pathBytes = fakePath.UTF8String;
+    int pathLength = (int)strlen(pathBytes);
+
+    if (sqlite3_prepare_v2(db, "select inode from paths where path = ?", -1, &stmt, NULL) == SQLITE_OK) {
+        sqlite3_bind_blob(stmt, 1, pathBytes, pathLength, SQLITE_TRANSIENT);
+        if (sqlite3_step(stmt) == SQLITE_ROW) {
+            inode = sqlite3_column_int64(stmt, 0);
+        }
+    }
+    sqlite3_finalize(stmt);
+    stmt = NULL;
+
+    struct {
+        uint32_t mode;
+        uint32_t uid;
+        uint32_t gid;
+        uint32_t rdev;
+    } stat = { mode, 0, 0, 0 };
+
+    if (inode > 0) {
+        if (sqlite3_prepare_v2(db, "update stats set stat = ? where inode = ?", -1, &stmt, NULL) == SQLITE_OK) {
+            sqlite3_bind_blob(stmt, 1, &stat, sizeof(stat), SQLITE_TRANSIENT);
+            sqlite3_bind_int64(stmt, 2, inode);
+            sqlite3_step(stmt);
+        }
+        sqlite3_finalize(stmt);
+    } else {
+        if (sqlite3_prepare_v2(db, "insert into stats (stat) values (?)", -1, &stmt, NULL) == SQLITE_OK) {
+            sqlite3_bind_blob(stmt, 1, &stat, sizeof(stat), SQLITE_TRANSIENT);
+            sqlite3_step(stmt);
+            inode = sqlite3_last_insert_rowid(db);
+        }
+        sqlite3_finalize(stmt);
+        stmt = NULL;
+
+        if (inode > 0 &&
+            sqlite3_prepare_v2(db, "insert or replace into paths (path, inode) values (?, ?)", -1, &stmt, NULL) == SQLITE_OK) {
+            sqlite3_bind_blob(stmt, 1, pathBytes, pathLength, SQLITE_TRANSIENT);
+            sqlite3_bind_int64(stmt, 2, inode);
+            sqlite3_step(stmt);
+        }
+        sqlite3_finalize(stmt);
+    }
+
+    sqlite3_exec(db, "commit", NULL, NULL, NULL);
+    sqlite3_close(db);
+    NSLog(@"iSH rootfs: registered fakefs path %@ -> %@", fakePath, filePath);
 }
 
 - (BOOL)stampRootfsMetadataAtPath:(NSString *)metaPath {

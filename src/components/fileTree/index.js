@@ -210,6 +210,7 @@ export default class FileTree {
 		});
 
 		$title.addEventListener("contextmenu", (e) => {
+			e.preventDefault();
 			e.stopPropagation();
 			this.options.onContextMenu?.("dir", url, name, $title);
 		});
@@ -287,6 +288,7 @@ export default class FileTree {
 		});
 
 		$tile.addEventListener("contextmenu", (e) => {
+			e.preventDefault();
 			e.stopPropagation();
 			this.options.onContextMenu?.("file", url, name, $tile);
 		});

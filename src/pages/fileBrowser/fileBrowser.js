@@ -34,6 +34,14 @@ import _template from "./fileBrowser.hbs";
 import _list from "./list.hbs";
 import util from "./util";
 
+function getTerminalPublicUrl() {
+	if (typeof cordova === "undefined") return "";
+	if (cordova.platformId === "ios") {
+		return Url.join(cordova.file.documentsDirectory, "ish-rootfs/data/home");
+	}
+	return cordova.file.dataDirectory + "public";
+}
+
 /**
  * @typedef {{url: String, name: String}} Location
  */
@@ -170,12 +178,18 @@ function FileBrowserInclude(mode, info, doesOpenLast = true) {
 		 * @type {HTMLButtonElement}
 		 */
 		let $openFolder;
+		const handleClickEvent = (e) => {
+			handleClick(e).catch(helpers.error);
+		};
+		const handleContextMenuEvent = (e) => {
+			handleContextMenu(e).catch(helpers.error);
+		};
 		//#endregion
 
 		actionStack.setMark();
 		$lead.onclick = close;
-		$content.addEventListener("click", handleClick);
-		$content.addEventListener("contextmenu", handleContextMenu, true);
+		$content.addEventListener("click", handleClickEvent);
+		$content.addEventListener("contextmenu", handleContextMenuEvent, true);
 		$page.body = $content;
 		$page.header.append(
 			$search,
@@ -538,8 +552,8 @@ function FileBrowserInclude(mode, info, doesOpenLast = true) {
 			hideAd();
 			actionStack.clearFromMark();
 			actionStack.remove("filebrowser");
-			$content.removeEventListener("click", handleClick);
-			$content.removeEventListener("contextmenu", handleContextMenu);
+			$content.removeEventListener("click", handleClickEvent);
+			$content.removeEventListener("contextmenu", handleContextMenuEvent, true);
 			document.removeEventListener("resume", reload);
 		};
 
@@ -775,17 +789,21 @@ function FileBrowserInclude(mode, info, doesOpenLast = true) {
 		 * @param {MouseEvent} e
 		 * @param {"contextmenu"} [isContextMenu]
 		 */
-		function handleClick(e, isContextMenu) {
+		async function handleClick(e, isContextMenu) {
 			/**
 			 * @type {HTMLElement}
 			 */
-			const $el = e.target;
+			const $target = e.target;
+			if (!($target instanceof HTMLElement)) return;
+			const $el = $target?.closest?.("[action]") || $target;
 
 			if (isSelectionMode) {
-				const checkbox = $el.closest(".tile")?.querySelector(".input-checkbox");
-				if (checkbox && !$el.closest(".selection-header")) {
+				const checkbox = $target
+					.closest(".tile")
+					?.querySelector(".input-checkbox");
+				if (checkbox && !$target.closest(".selection-header")) {
 					checkbox.checked = !checkbox.checked;
-					const url = $el
+					const url = $target
 						.closest(".tile")
 						.querySelector("data-url").textContent;
 					if (checkbox.checked) {
@@ -856,13 +874,13 @@ function FileBrowserInclude(mode, info, doesOpenLast = true) {
 
 			switch (action) {
 				case "navigation":
-					folder();
+					await folder();
 					break;
 				case "contextmenu":
-					contextMenuHandler();
+					await contextMenuHandler();
 					break;
 				case "open":
-					if (isDir) folder();
+					if (isDir) await folder();
 					else if (!$el.hasAttribute("disabled")) file();
 					break;
 				case "open-doc":
@@ -876,7 +894,7 @@ function FileBrowserInclude(mode, info, doesOpenLast = true) {
 					return;
 				}
 
-				if (url === `${cordova.file.dataDirectory}public`) {
+				if (url === getTerminalPublicUrl()) {
 					try {
 						const isInstalled = await Terminal.isInstalled();
 						if (!isInstalled) {
@@ -956,16 +974,21 @@ function FileBrowserInclude(mode, info, doesOpenLast = true) {
 
 			async function contextMenuHandler() {
 				if (appSettings.value.vibrateOnTap) {
-					navigator.vibrate(config.VIBRATION_TIME);
+					navigator.vibrate?.(config.VIBRATION_TIME);
 				}
 				if ($el.getAttribute("open-doc") === "true") return;
 
+				const isRootStorage = currentDir.url === "/" && uuid;
+				const isRemovableStorage =
+					isRootStorage && storageList.some((storage) => storage.uuid === uuid);
 				const deleteText =
 					currentDir.url === "/" ? strings.remove : strings.delete;
-				const options = [
-					["delete", deleteText, "delete"],
-					["rename", strings.rename, "text_format"],
-				];
+				const options = [];
+
+				if (!isRootStorage || isRemovableStorage) {
+					options.push(["delete", deleteText, "delete"]);
+					options.push(["rename", strings.rename, "text_format"]);
+				}
 
 				if (/s?ftp/.test(storageType)) {
 					options.push(["edit", strings.edit, "edit"]);
@@ -980,19 +1003,21 @@ function FileBrowserInclude(mode, info, doesOpenLast = true) {
 					options.push(["copyuri", strings["copy uri"], "copy"]);
 				}
 
+				if (!options.length) return;
+
 				const option = await select(strings["select"], options);
 				switch (option) {
 					case "delete": {
 						let deleteFunction = removeFile;
 						let message = strings["delete entry"].replace("{name}", name);
-						if (uuid) {
+						if (isRemovableStorage) {
 							deleteFunction = removeStorage;
 							message = strings["remove entry"].replace("{name}", name);
 						}
 
 						const confirmation = await confirm(strings.warning, message);
 						if (!confirmation) break;
-						deleteFunction();
+						await deleteFunction();
 						break;
 					}
 
@@ -1004,8 +1029,8 @@ function FileBrowserInclude(mode, info, doesOpenLast = true) {
 						newname = helpers.fixFilename(newname);
 						if (!newname || newname === name) break;
 
-						if (uuid) renameStorage(newname);
-						else renameFile(newname);
+						if (isRemovableStorage) renameStorage(newname);
+						else await renameFile(newname);
 						break;
 					}
 
@@ -1159,11 +1184,12 @@ function FileBrowserInclude(mode, info, doesOpenLast = true) {
 				}
 			}
 
-			function removeStorage() {
+			async function removeStorage() {
 				if (url) {
 					recents.removeFolder(url);
 					recents.removeFile(url);
 				}
+				const keyFiles = [];
 				storageList = storageList.filter((storage) => {
 					if (storage.uuid !== uuid) {
 						return true;
@@ -1175,11 +1201,14 @@ function FileBrowserInclude(mode, info, doesOpenLast = true) {
 							parsedUrl.query["keyFile"] || "",
 						);
 						if (keyFile) {
-							fsOperation(keyFile).delete();
+							keyFiles.push(keyFile);
 						}
 					}
 					return false;
 				});
+				for (const keyFile of keyFiles) {
+					await fsOperation(keyFile).delete();
+				}
 				localStorage.storageList = JSON.stringify(storageList);
 				reload();
 			}
@@ -1213,8 +1242,10 @@ function FileBrowserInclude(mode, info, doesOpenLast = true) {
 			}
 		}
 
-		function handleContextMenu(e) {
-			handleClick(e, true);
+		async function handleContextMenu(e) {
+			e.preventDefault();
+			e.stopPropagation();
+			await handleClick(e, true);
 		}
 
 		async function listAllStorages() {
@@ -1258,7 +1289,7 @@ function FileBrowserInclude(mode, info, doesOpenLast = true) {
 			}
 
 			try {
-				const terminalPublicUrl = cordova.file.dataDirectory + "public";
+				const terminalPublicUrl = getTerminalPublicUrl();
 
 				// Check if this storage is not already in the list
 				const terminalPublicStorageExists = allStorages.find(

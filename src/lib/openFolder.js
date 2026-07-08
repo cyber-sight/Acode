@@ -308,7 +308,7 @@ function collapsed($el, isFile) {
  */
 function handleItems(e) {
 	const mode = e.type;
-	const $target = e.target;
+	const $target = e.target?.closest?.("[data-type]");
 	if (!($target instanceof HTMLElement)) return;
 	const type = $target.dataset.type;
 	if (!type) return;
@@ -318,6 +318,8 @@ function handleItems(e) {
 	if (mode === "click") {
 		handleClick(type, url, name, $target);
 	} else if (mode === "contextmenu") {
+		e.preventDefault();
+		e.stopPropagation();
 		handleContextmenu(type, url, name, $target);
 	}
 }
@@ -331,7 +333,7 @@ function handleItems(e) {
  */
 async function handleContextmenu(type, url, name, $target) {
 	if (appSettings.value.vibrateOnTap) {
-		navigator.vibrate(config.VIBRATION_TIME);
+		navigator.vibrate?.(config.VIBRATION_TIME);
 	}
 	const { clipBoard, $node } = openFolder.find(url);
 	const cancel = `${strings.cancel}${clipBoard ? ` (${strings[clipBoard.action]})` : ""}`;

@@ -92,13 +92,13 @@ export default function init() {
 		$footer.addEventListener("contextmenu", oncontextmenu, true);
 		$footer.addEventListener("wheel", onwheel, { passive: false });
 	} else {
-		$footer.addEventListener("touchstart", touchstart);
+		$footer.addEventListener("touchstart", touchstart, { passive: false });
 		$footer.addEventListener("keydown", touchstart);
 	}
 
 	appSettings.on("update:quickToolsTriggerMode", (value) => {
 		if (value === appSettings.QUICKTOOLS_TRIGGER_MODE_CLICK) {
-			$footer.removeEventListener("touchstart", touchstart);
+			$footer.removeEventListener("touchstart", touchstart, { passive: false });
 			$footer.removeEventListener("keydown", touchstart);
 			$footer.addEventListener("contextmenu", onclick, true);
 			$footer.addEventListener("click", onclick);
@@ -108,7 +108,7 @@ export default function init() {
 			$footer.removeEventListener("click", onclick);
 			$footer.removeEventListener("wheel", onwheel);
 			$footer.addEventListener("keydown", touchstart);
-			$footer.addEventListener("touchstart", touchstart);
+			$footer.addEventListener("touchstart", touchstart, { passive: false });
 		}
 	});
 }
@@ -282,7 +282,7 @@ function touchcancel(e) {
 	document.removeEventListener("touchmove", touchmove);
 	clearTimeout(timeout);
 	clearTimeout(contextmenuTimeout);
-	if (!active) $touchstart.classList.remove("active");
+	if (!active) $touchstart?.classList.remove("active");
 }
 
 /**
@@ -300,7 +300,7 @@ function oncontextmenu(e) {
 	const { editor, activeFile } = editorManager;
 
 	if (isClickMode && appSettings.value.vibrateOnTap) {
-		navigator.vibrate(config.VIBRATION_TIME_LONG);
+		navigator.vibrate?.(config.VIBRATION_TIME_LONG);
 		$el.classList.add("active");
 	}
 

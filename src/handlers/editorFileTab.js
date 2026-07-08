@@ -82,7 +82,7 @@ export default function startDrag(e) {
 	}
 
 	if (settings.value.vibrateOnTap) {
-		navigator.vibrate(config.VIBRATION_TIME);
+		navigator.vibrate?.(config.VIBRATION_TIME);
 	}
 
 	$tab = e.target;

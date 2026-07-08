@@ -6,15 +6,19 @@
 #import <SafariServices/SafariServices.h>
 #import <AVFoundation/AVFoundation.h>
 #import <Photos/Photos.h>
+#import <objc/runtime.h>
 #import <sys/sysctl.h>
 
 @interface System ()
 @property (nonatomic, copy) NSString *intentHandlerCallbackId;
 @property (nonatomic, copy) NSString *lastOpenUrl;
 @property (nonatomic, strong) UIDocumentInteractionController *docController;
+@property (nonatomic, assign) CGFloat keyboardHeight;
 @end
 
 @implementation System
+
+static BOOL acodeKeyboardAccessoryHidden = NO;
 
 - (void)handleOpenURL:(NSNotification *)notification {
     NSURL *url = notification.object;
@@ -32,6 +36,59 @@
 
 - (void)pluginInitialize {
     [[NSNotificationCenter defaultCenter] addObserver:self selector:@selector(handleOpenURL:) name:CDVPluginHandleOpenURLNotification object:nil];
+    [[NSNotificationCenter defaultCenter] addObserver:self selector:@selector(keyboardWillChangeFrame:) name:UIKeyboardWillChangeFrameNotification object:nil];
+    [[NSNotificationCenter defaultCenter] addObserver:self selector:@selector(keyboardWillHide:) name:UIKeyboardWillHideNotification object:nil];
+    [self hideKeyboardAccessoryBar];
+}
+
+- (void)onReset {
+    [super onReset];
+    self.keyboardHeight = 0;
+}
+
+- (void)dispose {
+    [[NSNotificationCenter defaultCenter] removeObserver:self];
+    [super dispose];
+}
+
+- (void)keyboardWillChangeFrame:(NSNotification *)notification {
+    CGRect keyboardFrame = [notification.userInfo[UIKeyboardFrameEndUserInfoKey] CGRectValue];
+    UIWindow *window = self.viewController.view.window ?: UIApplication.sharedApplication.windows.firstObject;
+    if (!window) {
+        self.keyboardHeight = 0;
+        return;
+    }
+
+    CGRect keyboardFrameInWindow = [window convertRect:keyboardFrame fromWindow:nil];
+    CGRect intersection = CGRectIntersection(window.bounds, keyboardFrameInWindow);
+    self.keyboardHeight = CGRectIsNull(intersection) ? 0 : CGRectGetHeight(intersection);
+}
+
+- (void)keyboardWillHide:(NSNotification *)notification {
+    self.keyboardHeight = 0;
+}
+
+- (void)hideKeyboardAccessoryBar {
+    if (acodeKeyboardAccessoryHidden) {
+        return;
+    }
+
+    Class contentViewClass = NSClassFromString(@"WKContentView");
+    if (!contentViewClass) {
+        return;
+    }
+
+    SEL selector = @selector(inputAccessoryView);
+    Method method = class_getInstanceMethod(contentViewClass, selector);
+    if (!method) {
+        return;
+    }
+
+    IMP implementation = imp_implementationWithBlock(^UIView *(id _self) {
+        return nil;
+    });
+    method_setImplementation(method, implementation);
+    acodeKeyboardAccessoryHidden = YES;
 }
 
 - (void)getFilesDir:(CDVInvokedUrlCommand *)command {
@@ -300,11 +357,12 @@
     }
 
     NSInteger orientationValue = UIInterfaceOrientationIsLandscape(orientation) ? 2 : 1;
+    BOOL keyboardVisible = self.keyboardHeight > 0;
     NSDictionary *payload = @{
         @"hardKeyboardHidden": @2,
         @"navigationHidden": @2,
-        @"keyboardHidden": @1,
-        @"keyboardHeight": @0,
+        @"keyboardHidden": keyboardVisible ? @1 : @2,
+        @"keyboardHeight": @(self.keyboardHeight),
         @"orientation": @(orientationValue),
         @"navigation": @0,
         @"fontScale": @1,
@@ -612,10 +670,15 @@
 }
 
 - (void)decode:(CDVInvokedUrlCommand *)command {
-    NSString *content = command.arguments.count > 0 ? command.arguments[0] : @"";
+    id content = command.arguments.count > 0 ? command.arguments[0] : nil;
     NSString *charset = command.arguments.count > 1 ? command.arguments[1] : @"UTF-8";
 
-    NSData *data = [[NSData alloc] initWithBase64EncodedString:content options:0];
+    NSData *data = nil;
+    if ([content isKindOfClass:[NSData class]]) {
+        data = content;
+    } else if ([content isKindOfClass:[NSString class]]) {
+        data = [[NSData alloc] initWithBase64EncodedString:content options:0] ?: [content dataUsingEncoding:NSUTF8StringEncoding];
+    }
     NSStringEncoding encoding = CFStringConvertEncodingToNSStringEncoding(CFStringConvertIANACharSetNameToEncoding((__bridge CFStringRef)charset));
     NSString *decoded = [[NSString alloc] initWithData:data encoding:encoding];
     if (!decoded) {
