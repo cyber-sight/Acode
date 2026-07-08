@@ -45,8 +45,9 @@ export default function Contextmenu(content, options) {
 		onclick(e) {
 			if (options.onclick) options.onclick.call(this, e);
 			if (options.onselect) {
-				const $target = e.target;
-				const { action } = $target.dataset;
+				const $target = e.target?.closest?.("[data-action], [action]");
+				if (!$target) return;
+				const action = $target.dataset.action || $target.getAttribute("action");
 				if (!action) return;
 				hide();
 				options.onselect.call(this, action);

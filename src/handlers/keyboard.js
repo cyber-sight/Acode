@@ -1,7 +1,7 @@
 import { bannerAd } from "lib/startAd";
 import {
-	getSystemConfiguration,
-	HARDKEYBOARDHIDDEN_NO,
+  getSystemConfiguration,
+  HARDKEYBOARDHIDDEN_NO,
 } from "lib/systemConfiguration";
 import KeyboardEvent from "utils/keyboardEvent";
 import windowResize from "./windowResize";
@@ -14,11 +14,11 @@ import windowResize from "./windowResize";
 // Assuming that keyboard height is at least 200px
 let MIN_KEYBOARD_HEIGHT = 100;
 const event = {
-	key: [],
-	keyboardShow: [],
-	keyboardHide: [],
-	keyboardShowStart: [],
-	keyboardHideStart: [],
+  key: [],
+  keyboardShow: [],
+  keyboardHide: [],
+  keyboardShowStart: [],
+  keyboardHideStart: [],
 };
 
 let escKey = false;
@@ -28,25 +28,25 @@ let windowHeight = window.innerHeight;
 let currentWindowHeight = windowHeight;
 
 export const keydownState = {
-	/**
-	 * Get esc key state
-	 * @returns {boolean}
-	 */
-	get esc() {
-		return escKey;
-	},
-	/**
-	 * Set esc key state
-	 * @param {boolean} val
-	 */
-	set esc(val) {
-		escKey = val;
-		if (!val) return;
-		clearTimeout(escResetTimeout);
-		escResetTimeout = setTimeout(() => {
-			escKey = false;
-		}, 500);
-	},
+  /**
+   * Get esc key state
+   * @returns {boolean}
+   */
+  get esc() {
+    return escKey;
+  },
+  /**
+   * Set esc key state
+   * @param {boolean} val
+   */
+  set esc(val) {
+    escKey = val;
+    if (!val) return;
+    clearTimeout(escResetTimeout);
+    escResetTimeout = setTimeout(() => {
+      escKey = false;
+    }, 500);
+  },
 };
 
 /**
@@ -54,32 +54,32 @@ export const keydownState = {
  * @param {KeyboardEvent} e
  */
 export default function keyboardHandler(e) {
-	const $target = e.target;
-	const { key, ctrlKey, shiftKey, altKey, metaKey } = e;
+  const $target = e.target;
+  const { key, ctrlKey, shiftKey, altKey, metaKey } = e;
 
-	if (shouldIgnoreEditorShortcutTarget($target)) {
-		keydownState.esc = key === "Escape";
-		return;
-	}
+  if (shouldIgnoreEditorShortcutTarget($target)) {
+    keydownState.esc = key === "Escape";
+    return;
+  }
 
-	if (!ctrlKey && !shiftKey && !altKey && !metaKey) return;
-	if (["Control", "Alt", "Meta", "Shift"].includes(key)) return;
+  if (!ctrlKey && !shiftKey && !altKey && !metaKey) return;
+  if (["Control", "Alt", "Meta", "Shift"].includes(key)) return;
 
-	const target = editorManager?.editor?.contentDOM;
-	if (!target) return;
+  const target = editorManager?.editor?.contentDOM;
+  if (!target) return;
 
-	// Physical keyboard events already reaching CodeMirror should not be
-	// re-dispatched from the document listener.
-	if ($target === target || (target.contains?.($target) ?? false)) return;
+  // Physical keyboard events already reaching CodeMirror should not be
+  // re-dispatched from the document listener.
+  if ($target === target || (target.contains?.($target) ?? false)) return;
 
-	const event = KeyboardEvent("keydown", {
-		key,
-		ctrlKey,
-		shiftKey,
-		altKey,
-		metaKey,
-	});
-	target?.dispatchEvent?.(event);
+  const event = KeyboardEvent("keydown", {
+    key,
+    ctrlKey,
+    shiftKey,
+    altKey,
+    metaKey,
+  });
+  target?.dispatchEvent?.(event);
 }
 
 /**
@@ -89,70 +89,159 @@ export default function keyboardHandler(e) {
  * @returns {boolean}
  */
 function shouldIgnoreEditorShortcutTarget(target) {
-	if (!(target instanceof Element)) return false;
+  if (!(target instanceof Element)) return false;
 
-	return (
-		target instanceof HTMLInputElement ||
-		target instanceof HTMLTextAreaElement ||
-		target instanceof HTMLSelectElement ||
-		target.isContentEditable ||
-		!!target.closest(".prompt, #palette")
-	);
+  return (
+    target instanceof HTMLInputElement ||
+    target instanceof HTMLTextAreaElement ||
+    target instanceof HTMLSelectElement ||
+    target.isContentEditable ||
+    !!target.closest(".prompt, #palette")
+  );
 }
 
 document.addEventListener("deviceready", () => {
-	document.addEventListener("admob.banner.size", async (event) => {
-		const { height } = event.size;
-		MIN_KEYBOARD_HEIGHT = height + 10;
-	});
+  document.addEventListener("admob.banner.size", async (event) => {
+    const { height } = event.size;
+    MIN_KEYBOARD_HEIGHT = height + 10;
+  });
 
-	windowResize.on("resizeStart", async () => {
-		const { keyboardHeight, hardKeyboardHidden } =
-			await getSystemConfiguration();
-		const externalKeyboard = hardKeyboardHidden === HARDKEYBOARDHIDDEN_NO;
+  windowResize.on("resizeStart", async () => {
+    const { keyboardHeight, hardKeyboardHidden } =
+      await getSystemConfiguration();
+    const externalKeyboard = hardKeyboardHidden === HARDKEYBOARDHIDDEN_NO;
+    const viewportKeyboardHeight = getViewportKeyboardHeight();
 
-		if (currentWindowHeight > window.innerHeight) {
-			// height decreasing
-			softKeyboardHeight =
-				keyboardHeight > MIN_KEYBOARD_HEIGHT ? keyboardHeight : 0;
-			if (!externalKeyboard && softKeyboardHeight) {
-				toggleBannerAd(false);
-				emit("keyboardShowStart");
-			}
-		} else if (currentWindowHeight < window.innerHeight) {
-			// height increasing
-			if (!externalKeyboard && softKeyboardHeight) {
-				toggleBannerAd(true);
-				emit("keyboardHideStart");
-			}
-		}
+    if (currentWindowHeight > window.innerHeight) {
+      // height decreasing
+      softKeyboardHeight =
+        keyboardHeight > MIN_KEYBOARD_HEIGHT
+          ? keyboardHeight
+          : viewportKeyboardHeight;
+      if (!externalKeyboard && softKeyboardHeight) {
+        setKeyboardInset(softKeyboardHeight);
+        toggleBannerAd(false);
+        emit("keyboardShowStart");
+      }
+    } else if (currentWindowHeight < window.innerHeight) {
+      // height increasing
+      if (!externalKeyboard && softKeyboardHeight) {
+        toggleBannerAd(true);
+        emit("keyboardHideStart");
+      }
+    } else if (!externalKeyboard && viewportKeyboardHeight) {
+      softKeyboardHeight = viewportKeyboardHeight;
+      setKeyboardInset(softKeyboardHeight);
+      toggleBannerAd(false);
+      emit("keyboardShowStart");
+    }
 
-		currentWindowHeight = window.innerHeight;
-	});
+    currentWindowHeight = window.innerHeight;
+  });
 
-	windowResize.on("resize", async () => {
-		currentWindowHeight = window.innerHeight;
+  windowResize.on("resize", async () => {
+    currentWindowHeight = window.innerHeight;
 
-		if (currentWindowHeight > windowHeight) {
-			windowHeight = currentWindowHeight;
-		}
+    if (currentWindowHeight > windowHeight) {
+      windowHeight = currentWindowHeight;
+    }
 
-		const { hardKeyboardHidden } = await getSystemConfiguration();
-		const externalKeyboard = hardKeyboardHidden === HARDKEYBOARDHIDDEN_NO;
+    const { hardKeyboardHidden } = await getSystemConfiguration();
+    const externalKeyboard = hardKeyboardHidden === HARDKEYBOARDHIDDEN_NO;
 
-		if (externalKeyboard || !softKeyboardHeight) return;
+    const viewportKeyboardHeight = getViewportKeyboardHeight();
+    if (!externalKeyboard && viewportKeyboardHeight) {
+      softKeyboardHeight = viewportKeyboardHeight;
+      setKeyboardInset(softKeyboardHeight);
+    }
 
-		const keyboardHiddenYes = windowHeight <= window.innerHeight;
+    if (externalKeyboard || !softKeyboardHeight) return;
 
-		if (keyboardHiddenYes) {
-			emit("keyboardHide");
-		} else {
-			emit("keyboardShow");
-		}
+    const keyboardHiddenYes =
+      windowHeight <= window.innerHeight && !viewportKeyboardHeight;
 
-		focusBlurEditor(keyboardHiddenYes);
-	});
+    if (keyboardHiddenYes) {
+      setKeyboardInset(0);
+      emit("keyboardHide");
+    } else {
+      setKeyboardInset(softKeyboardHeight);
+      emit("keyboardShow");
+    }
+
+    focusBlurEditor(keyboardHiddenYes);
+  });
+
+  if (window.visualViewport) {
+    window.visualViewport.addEventListener(
+      "resize",
+      syncVisualViewportKeyboard,
+    );
+    window.visualViewport.addEventListener(
+      "scroll",
+      syncVisualViewportKeyboard,
+    );
+  }
 });
+
+function syncVisualViewportKeyboard() {
+  const keyboardHeight = getViewportKeyboardHeight();
+  if (keyboardHeight) {
+    softKeyboardHeight = keyboardHeight;
+    setKeyboardInset(keyboardHeight);
+    toggleBannerAd(false);
+    emit("keyboardShow");
+    return;
+  }
+
+  if (softKeyboardHeight) {
+    softKeyboardHeight = 0;
+    setKeyboardInset(0);
+    toggleBannerAd(true);
+    emit("keyboardHide");
+  }
+}
+
+function getViewportKeyboardHeight() {
+  if (!isIOSKeyboardPlatform() || !window.visualViewport) return 0;
+  if (!isEditableElementFocused()) return 0;
+
+  const viewport = window.visualViewport;
+  const keyboardHeight = Math.max(
+    0,
+    window.innerHeight - viewport.height - viewport.offsetTop,
+  );
+  return keyboardHeight > MIN_KEYBOARD_HEIGHT ? keyboardHeight : 0;
+}
+
+function isIOSKeyboardPlatform() {
+  return typeof cordova !== "undefined" && cordova.platformId === "ios";
+}
+
+function isEditableElementFocused() {
+  const activeElement = document.activeElement;
+  if (!(activeElement instanceof Element)) return false;
+
+  return (
+    activeElement instanceof HTMLInputElement ||
+    activeElement instanceof HTMLTextAreaElement ||
+    activeElement instanceof HTMLSelectElement ||
+    activeElement.isContentEditable
+  );
+}
+
+function setKeyboardInset(height) {
+  const value = height > 0 ? `${height}px` : "";
+  document.documentElement.style.setProperty(
+    "--keyboard-inset",
+    value || "0px",
+  );
+  const rootElement = globalThis.root;
+  if (height > 0) {
+    rootElement?.setAttribute?.("keyboard-visible", "");
+  } else {
+    rootElement?.removeAttribute?.("keyboard-visible");
+  }
+}
 
 /**
  * Add event listener for keyboard event.
@@ -161,8 +250,8 @@ document.addEventListener("deviceready", () => {
  * @returns
  */
 keyboardHandler.on = (eventName, callback) => {
-	if (!event[eventName]) return;
-	event[eventName].push(callback);
+  if (!event[eventName]) return;
+  event[eventName].push(callback);
 };
 
 /**
@@ -172,8 +261,8 @@ keyboardHandler.on = (eventName, callback) => {
  * @returns
  */
 keyboardHandler.off = (eventName, callback) => {
-	if (!event[eventName]) return;
-	event[eventName] = event[eventName].filter((cb) => cb !== callback);
+  if (!event[eventName]) return;
+  event[eventName] = event[eventName].filter((cb) => cb !== callback);
 };
 
 /**
@@ -182,8 +271,8 @@ keyboardHandler.off = (eventName, callback) => {
  * @returns
  */
 function emit(eventName) {
-	if (!event[eventName]) return;
-	event[eventName].forEach((cb) => cb());
+  if (!event[eventName]) return;
+  event[eventName].forEach((cb) => cb());
 }
 
 /**
@@ -192,9 +281,9 @@ function emit(eventName) {
  * @returns
  */
 function focusBlurEditor(keyboardHidden) {
-	if (keyboardHidden) {
-		document.activeElement?.blur();
-	}
+  if (keyboardHidden) {
+    document.activeElement?.blur();
+  }
 }
 
 /**
@@ -202,15 +291,15 @@ function focusBlurEditor(keyboardHidden) {
  * @param {boolean} keyboardHidden
  */
 function toggleBannerAd(keyboardHidden) {
-	const bannerIsActive = !!bannerAd?.active;
+  const bannerIsActive = !!bannerAd?.active;
 
-	if (
-		!keyboardHidden &&
-		bannerIsActive &&
-		typeof bannerAd?.hide === "function"
-	) {
-		bannerAd.hide();
-	} else if (bannerIsActive && typeof bannerAd?.show === "function") {
-		bannerAd.show();
-	}
+  if (
+    !keyboardHidden &&
+    bannerIsActive &&
+    typeof bannerAd?.hide === "function"
+  ) {
+    bannerAd.hide();
+  } else if (bannerIsActive && typeof bannerAd?.show === "function") {
+    bannerAd.show();
+  }
 }

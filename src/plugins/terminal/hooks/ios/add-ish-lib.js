@@ -76,6 +76,7 @@ function main() {
       "-ObjC",
       ...commonFlags,
       ...libs.flatMap((lib) => ["-force_load", lib]),
+      "-lresolv",
       "-lsqlite3",
       "-lm",
     ];
@@ -93,7 +94,7 @@ function main() {
   }
 
   fs.writeFileSync(pbxprojPath, pbxproj);
-  console.log("iSH hook: linked iSH native archives.");
+  console.log("iSH hook: linked iSH native archives and libresolv.");
 }
 
 main();

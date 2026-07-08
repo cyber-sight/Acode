@@ -631,6 +631,7 @@ export default class TerminalComponent {
 
 		this.boundNativeSelectionMenuHandler = (event) => {
 			if (event.target?.closest?.(".terminal-context-menu")) return;
+			if (IS_IOS && event.isTrusted === false) return;
 			event.preventDefault();
 			event.stopPropagation();
 		};

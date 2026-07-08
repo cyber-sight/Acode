@@ -212,6 +212,166 @@ body {
   }
 }
 
+html.ios,
+body.ios {
+  width: 100%;
+  height: 100%;
+  overflow: hidden;
+  overscroll-behavior: none;
+}
+
+body.ios {
+  -webkit-text-size-adjust: 100%;
+
+  wc-page#root {
+    --header-height: 45px;
+    --open-file-list-height: 30px;
+    --quick-tools-height: 0px;
+    --content-top: var(--header-height);
+    --content-bottom: var(--keyboard-inset, 0px);
+    position: fixed !important;
+    inset: 0;
+    height: 100%;
+    min-height: 100%;
+    overflow: hidden !important;
+    overscroll-behavior: none;
+
+    &[footer-height="1"] {
+      --quick-tools-height: 40px;
+    }
+
+    &[footer-height="2"] {
+      --quick-tools-height: 80px;
+    }
+
+    &[footer-height="3"] {
+      --quick-tools-height: 120px;
+    }
+
+    &.top-bar {
+      --content-top: calc(var(--header-height) + var(--open-file-list-height));
+    }
+
+    &[open-file-list-pos="bottom"] {
+      --content-top: var(--header-height);
+      --content-bottom: calc(
+        var(--keyboard-inset, 0px) + var(--quick-tools-height) + var(--open-file-list-height)
+      );
+    }
+
+    &:not([open-file-list-pos="bottom"]) {
+      --content-bottom: calc(var(--keyboard-inset, 0px) + var(--quick-tools-height));
+    }
+
+    > main,
+    > .main {
+      position: absolute;
+      top: var(--content-top);
+      right: 0;
+      bottom: var(--content-bottom);
+      left: 0;
+      width: 100%;
+      height: auto !important;
+      min-height: 0 !important;
+      margin: 0;
+      overflow: hidden;
+      overscroll-behavior: none;
+    }
+
+    > main:empty,
+    > .main:empty {
+      position: absolute;
+      top: var(--content-top);
+      height: auto !important;
+    }
+
+    > footer {
+      position: absolute;
+      right: 0;
+      bottom: var(--keyboard-inset, 0px);
+      left: 0;
+      transform: none;
+    }
+
+    > #quick-tools {
+      box-sizing: border-box;
+      display: flex;
+      flex-direction: column;
+      height: var(--quick-tools-height);
+      max-height: var(--quick-tools-height);
+      min-height: var(--quick-tools-height);
+      overflow: hidden;
+      overscroll-behavior: contain;
+      background-color: var(--primary-color);
+      opacity: 1;
+      visibility: visible;
+
+      > .button-container {
+        box-sizing: border-box;
+        display: flex;
+        flex: 0 0 40px;
+        height: 40px;
+        min-height: 40px;
+        max-height: 40px;
+        overflow-x: auto;
+        overflow-y: hidden;
+        opacity: 1;
+        visibility: visible;
+        -webkit-overflow-scrolling: touch;
+        touch-action: pan-x;
+
+        > *,
+        button {
+          flex: 0 0 auto;
+          opacity: 1;
+          visibility: visible;
+          touch-action: manipulation;
+        }
+      }
+    }
+
+    &[open-file-list-pos="bottom"] {
+      .open-file-list {
+        bottom: calc(var(--keyboard-inset, 0px) + var(--quick-tools-height));
+      }
+    }
+
+    &:not([footer-height]) {
+      > #quick-tools {
+        display: none;
+        height: 0;
+        min-height: 0;
+        max-height: 0;
+        pointer-events: none;
+      }
+    }
+
+    #quicktools-toggler {
+      position: absolute;
+      top: auto;
+      right: 10px;
+      bottom: calc(var(--keyboard-inset, 0px) + var(--quick-tools-height) + 10px);
+      transform: none;
+    }
+
+    .cm-editor,
+    .ace_editor,
+    .editor-container,
+    .xterm,
+    .terminal-container,
+    .terminal {
+      -webkit-touch-callout: none;
+    }
+
+    .editor-container,
+    .terminal-container {
+      height: 100%;
+      min-height: 0;
+      overflow: hidden;
+    }
+  }
+}
+
 wc-page {
   position: fixed !important;
   top: 0;

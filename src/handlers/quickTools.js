@@ -167,9 +167,7 @@ quickTools.$input.addEventListener("keydown", (e) => {
 appSettings.on("update:quicktoolsItems:after", () => {
 	setTimeout(() => {
 		if (actionStack.has("search-bar")) return;
-		const { $footer, $row1, $row2 } = quickTools;
-		const height = getFooterHeight();
-		$footer.content = [$row1, $row2].slice(0, height);
+		setHeight(getFooterHeight(), false);
 	}, 100);
 });
 
@@ -481,13 +479,10 @@ function toggle() {
 		return;
 	}
 
-	const $footer = quickTools.$footer;
-	const $row1 = quickTools.$row1;
-	const $row2 = quickTools.$row2;
-
-	if (!$footer.contains($row1)) {
-		setHeight();
-	} else if (!$footer.contains($row2)) {
+	const height = getFooterHeight();
+	if (height === 0) {
+		setHeight(1);
+	} else if (height === 1) {
 		setHeight(2);
 	} else {
 		setHeight(0);
@@ -510,30 +505,20 @@ function setHeight(height = 1, save = true) {
 		appSettings.update({ quickTools: height }, false);
 	}
 
-	if (!height) {
-		$row1.remove();
-		$row2.remove();
-		return;
-	}
+	syncFooterRow($footer, $row1, height >= 1, localStorage.quickToolRow1ScrollLeft);
+	syncFooterRow($footer, $row2, height >= 2, localStorage.quickToolRow2ScrollLeft);
+}
 
-	if (height >= 1) {
-		$row1.style.scrollBehavior = "unset";
-		$footer.append($row1);
-		$row1.scrollLeft = Number.parseInt(
-			localStorage.quickToolRow1ScrollLeft,
-			10,
-		);
-		--height;
+function syncFooterRow($footer, $row, shouldShow, savedScrollLeft) {
+	$row.style.scrollBehavior = "unset";
+	if (!$footer.contains($row)) {
+		$footer.append($row);
 	}
+	$row.style.display = shouldShow ? "flex" : "none";
 
-	if (height >= 1) {
-		$row2.style.scrollBehavior = "unset";
-		$footer.append($row2);
-		$row2.scrollLeft = Number.parseInt(
-			localStorage.quickToolRow2ScrollLeft,
-			10,
-		);
-		--height;
+	const scrollLeft = Number.parseInt(savedScrollLeft, 10);
+	if (shouldShow && Number.isFinite(scrollLeft)) {
+		$row.scrollLeft = scrollLeft;
 	}
 }
 

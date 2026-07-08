@@ -21,7 +21,7 @@
 }
 
 html {
-  overflow: auto;
+  overflow: hidden;
 }
 
 html,
@@ -31,7 +31,13 @@ body {
   font-size: 14px;
 }
 
+#root {
+  height: 100%;
+  overflow: hidden;
+}
+
 body {
+  overflow: hidden;
   user-select: none;
   font-family: var(--app-font-family);
   -webkit-tap-highlight-color: transparent;
