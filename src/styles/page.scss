@@ -215,7 +215,9 @@ body {
 html.ios,
 body.ios {
   width: 100%;
-  height: 100%;
+  height: calc(100% - var(--keyboard-inset, 0px));
+  min-height: 0;
+  max-height: calc(100% - var(--keyboard-inset, 0px));
   overflow: hidden;
   overscroll-behavior: none;
 }
@@ -226,13 +228,17 @@ body.ios {
   wc-page#root {
     --header-height: 45px;
     --open-file-list-height: 30px;
+    --content-keyboard-inset: 0px;
     --quick-tools-height: 0px;
     --content-top: var(--header-height);
-    --content-bottom: var(--keyboard-inset, 0px);
+    --content-bottom: var(--content-keyboard-inset, 0px);
     position: fixed !important;
-    inset: 0;
-    height: 100%;
-    min-height: 100%;
+    top: 0;
+    right: 0;
+    bottom: var(--keyboard-inset, 0px);
+    left: 0;
+    height: auto;
+    min-height: 0;
     overflow: hidden !important;
     overscroll-behavior: none;
 
@@ -255,12 +261,12 @@ body.ios {
     &[open-file-list-pos="bottom"] {
       --content-top: var(--header-height);
       --content-bottom: calc(
-        var(--keyboard-inset, 0px) + var(--quick-tools-height) + var(--open-file-list-height)
+        var(--content-keyboard-inset, 0px) + var(--quick-tools-height) + var(--open-file-list-height)
       );
     }
 
     &:not([open-file-list-pos="bottom"]) {
-      --content-bottom: calc(var(--keyboard-inset, 0px) + var(--quick-tools-height));
+      --content-bottom: calc(var(--content-keyboard-inset, 0px) + var(--quick-tools-height));
     }
 
     > main,
@@ -288,13 +294,18 @@ body.ios {
     > footer {
       position: absolute;
       right: 0;
-      bottom: var(--keyboard-inset, 0px);
+      bottom: 0;
       left: 0;
       transform: none;
     }
 
     > #quick-tools {
       box-sizing: border-box;
+      position: absolute;
+      right: 0;
+      bottom: 0;
+      left: 0;
+      z-index: 10000;
       display: flex;
       flex-direction: column;
       height: var(--quick-tools-height);
@@ -332,7 +343,7 @@ body.ios {
 
     &[open-file-list-pos="bottom"] {
       .open-file-list {
-        bottom: calc(var(--keyboard-inset, 0px) + var(--quick-tools-height));
+        bottom: var(--quick-tools-height);
       }
     }
 
@@ -350,7 +361,7 @@ body.ios {
       position: absolute;
       top: auto;
       right: 10px;
-      bottom: calc(var(--keyboard-inset, 0px) + var(--quick-tools-height) + 10px);
+      bottom: calc(var(--quick-tools-height) + 10px);
       transform: none;
     }
 

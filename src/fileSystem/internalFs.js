@@ -108,6 +108,11 @@ const internalFs = {
         filename,
         (fileEntry) => {
           (async () => {
+            if (isIos()) {
+              readFileEntry(fileEntry, resolve, reject);
+              return;
+            }
+
             const url = fileEntry.toInternalURL();
             try {
               const data = await ajax({
@@ -117,14 +122,7 @@ const internalFs = {
 
               resolve({ data });
             } catch (error) {
-              fileEntry.file((file) => {
-                const fileReader = new FileReader();
-                fileReader.onerror = reject;
-                fileReader.readAsArrayBuffer(file);
-                fileReader.onloadend = () => {
-                  resolve({ data: fileReader.result });
-                };
-              }, reject);
+              readFileEntry(fileEntry, resolve, reject);
             }
           })();
         },
@@ -353,6 +351,21 @@ function setMessage(reject) {
     }
     reject(err);
   };
+}
+
+function isIos() {
+  return typeof cordova !== "undefined" && cordova.platformId === "ios";
+}
+
+function readFileEntry(fileEntry, resolve, reject) {
+  fileEntry.file((file) => {
+    const fileReader = new FileReader();
+    fileReader.onerror = reject;
+    fileReader.readAsArrayBuffer(file);
+    fileReader.onloadend = () => {
+      resolve({ data: fileReader.result });
+    };
+  }, reject);
 }
 
 /**
