@@ -46,10 +46,12 @@
       "com.foxdebug.acode.rk.exec.proot": {},
       "cordova-plugin-iap": {},
       "com.foxdebug.acode.rk.customtabs": {},
-      "cordova-plugin-system": {}
+      "cordova-plugin-system": {},
+      "cordova-plugin-ionic-webview": {}
     },
     "platforms": [
-      "android"
+      "android",
+      "ios"
     ]
   },
   "repository": {
@@ -164,6 +166,7 @@
     "autosize": "^6.0.1",
     "codemirror": "^6.0.2",
     "cordova": "13.0.0",
+    "cordova-plugin-ionic-webview": "5.0.1",
     "core-js": "^3.49.0",
     "dayjs": "^1.11.20",
     "dompurify": "^3.4.2",

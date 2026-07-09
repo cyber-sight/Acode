@@ -88,7 +88,10 @@
     </platform>
     <platform name="ios">
         <preference name="deployment-target" value="15.0" />
-        <preference name="Fullscreen" value="true" />
+        <preference name="Hostname" value="localhost" />
+        <preference name="iosScheme" value="ionic" />
+        <preference name="ScrollEnabled" value="true" />
+        <preference name="Fullscreen" value="false" />
         <preference name="StatusBarHidden" value="false" />
         <preference name="StatusBarOverlaysWebView" value="false" />
         <preference name="DisallowOverscroll" value="true" />
@@ -104,6 +107,7 @@
         <hook type="after_prepare" src="hooks/ios/remove-sftp-nmssh-pod.js" />
         <hook type="after_prepare" src="hooks/ios/fix-server-gcdwebserver.js" />
         <hook type="after_prepare" src="hooks/ios/fix-normal-webview-chrome.js" />
+        <hook type="after_prepare" src="hooks/ios/fix-ionic-webview-local-navigation.js" />
         <edit-config file="*-Info.plist" mode="merge" target="NSCameraUsageDescription">
             <string>Camera access is needed for capturing media.</string>
         </edit-config>
