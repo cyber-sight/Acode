@@ -82,6 +82,32 @@ fsOperation.extend(
 	(url) => {
 		return {
 			async readFile(encoding, progress) {
+				if (isIos()) {
+					const response = await fetch(url, {
+						cordovaResponseType: encoding ? "text" : "blob",
+						credentials: "include",
+						headers: {
+							Accept: encoding === "json" ? "application/json" : "application/octet-stream",
+						},
+					});
+
+					if (!response.ok) {
+						throw response;
+					}
+
+					if (encoding === "json") {
+						return response.json();
+					}
+
+					const data = await response.arrayBuffer();
+
+					if (encoding) {
+						return await decode(data, encoding);
+					}
+
+					return data;
+				}
+
 				const data = await ajax.get(url, {
 					responseType: "arraybuffer",
 					contentType: "application/x-www-form-urlencoded",
@@ -104,3 +130,7 @@ fsOperation.extend(
 		};
 	},
 );
+
+function isIos() {
+	return typeof cordova !== "undefined" && cordova.platformId === "ios";
+}
