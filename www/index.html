@@ -5,8 +5,10 @@
 
     <meta
       name="viewport"
-      content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no"
+      content="viewport-fit=cover, width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no"
     />
+
+    <title>Acode</title>
 
     <style>
       html,
@@ -77,10 +79,11 @@
       }
     </style>
 
-    <script src="https://cdn.jsdelivr.net/npm/eruda"></script>
-    <script>
-      eruda.init();
-    </script>
+    <script
+      src="https://cdn.jsdelivr.net/npm/eruda"
+      defer
+      onload="window.eruda && window.eruda.init()"
+    ></script>
 
     <!-- Set theme color BEFORE UI renders -->
     <script>
@@ -181,8 +184,6 @@
     <script src="cordova.js"></script>
 
     <script src="/build/boot.js"></script>
-
-    <title>Acode</title>
   </head>
 
   <body class="loading" data-version="" data-small-msg="">

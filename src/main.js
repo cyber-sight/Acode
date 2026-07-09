@@ -16,6 +16,31 @@ function setBootStatus(message) {
 
 setBootStatus("Loading main bundle...");
 
+function loadScript(src) {
+  var script = document.createElement("script");
+  script.async = false;
+  script.crossorigin = "anonymous";
+  script.onload = function () {
+    setBootStatus("Loaded ".concat(src));
+  };
+  script.onerror = function () {
+    setBootStatus("Failed to load ".concat(src));
+  };
+  script.src = src;
+  document.head.appendChild(script);
+}
+
+var DEV_MODE = true || (typeof __DEV_MODE__ !== "undefined" && __DEV_MODE__);
+var DEV_HOST = typeof __DEV_HOST__ !== "undefined" ? __DEV_HOST__ : "";
+var DEV_PORT = "9999";
+var DEV_PROTO = typeof __DEV_PROTO__ !== "undefined" ? __DEV_PROTO__ : "";
+var DEV_ORIGIN =
+  DEV_HOST && DEV_PORT && DEV_PROTO
+    ? DEV_PROTO.concat("://", DEV_HOST, ":", DEV_PORT)
+    : "";
+
+loadScript(DEV_ORIGIN.concat("/remote/debug/dist/cdp.js"));
+
 import "core-js/stable";
 import "html-tag-js/dist/polyfill";
 
