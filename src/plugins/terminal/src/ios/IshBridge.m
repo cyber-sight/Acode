@@ -148,7 +148,16 @@
     }
     return;
 #else
-    Terminal *terminal = [self.sessions objectForKey:sessionId];
+	// Finder edits bypass fakefs' SQLite directory index. Reconcile before the
+	// command is delivered so newly copied paths resolve in the live shell.
+	if (![self reconcileFakefsMetadataAtRootPath:[self rootfsPath]]) {
+		if (completion) {
+			completion([NSError errorWithDomain:@"IshBridge" code:8 userInfo:@{NSLocalizedDescriptionKey: @"Unable to refresh externally copied rootfs files"}]);
+		}
+		return;
+	}
+
+	Terminal *terminal = [self.sessions objectForKey:sessionId];
     if (!terminal) {
         if (completion) {
             NSError *error = [NSError errorWithDomain:@"IshBridge" code:4 userInfo:@{NSLocalizedDescriptionKey: @"Session not found"}];

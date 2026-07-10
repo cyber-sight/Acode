@@ -24,6 +24,7 @@ import filesSettings from "./filesSettings";
 import formatterSettings from "./formatterSettings";
 import lspSettings from "./lspSettings";
 import previewSettings from "./previewSettings";
+import rootfsSettings from "./rootfsSettings";
 import scrollSettings from "./scrollSettings";
 import searchSettings from "./searchSettings";
 import terminalSettings from "./terminalSettings";
@@ -336,5 +337,6 @@ export default function mainSettings() {
 	appSettings.uiSettings["search-settings"] = searchSettings();
 	appSettings.uiSettings["preview-settings"] = previewSettings();
 	appSettings.uiSettings["terminal-settings"] = terminalSettings();
+	appSettings.uiSettings["rootfs-settings"] = rootfsSettings();
 	appSettings.uiSettings["lsp-settings"] = lspSettings();
 }

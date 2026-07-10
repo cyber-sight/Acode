@@ -15,14 +15,12 @@ export default function rootfsSettings() {
 		localStorage.ishActivePublicHome = path.startsWith("file://") ? path : `file://${path}`;
 	}
 
-	async function createPage() {
-		await refreshPublicHome();
-		const roots = await rootfsManager.list();
+	function createPage(roots = [], error = "") {
 		const items = [
 			{
 				key: "import-archive",
 				text: "Import Rootfs Archive",
-				info: "Import a .tar.gz or .zip root filesystem.",
+				info: "Import a .tar.gz, .tar.xz, or .zip root filesystem.",
 				chevron: true,
 			},
 			{
@@ -31,7 +29,9 @@ export default function rootfsSettings() {
 				info: "Import a local folder containing bin/sh.",
 				chevron: true,
 			},
-			...roots.map((root) => ({
+			...(error
+				? [{ key: "load-error", text: "Root Filesystems Unavailable", info: error }]
+				: roots.map((root) => ({
 				key: `root:${root.id}`,
 				text: root.name,
 				value: root.isActive ? "Next launch" : "",
@@ -39,7 +39,7 @@ export default function rootfsSettings() {
 					? "Bundled root filesystem"
 					: root.importedAt || "Imported root filesystem",
 				chevron: true,
-			})),
+			}))),
 		];
 		return settingsPage("Root Filesystems", items, callback, undefined, {
 			preserveOrder: true,
@@ -52,7 +52,12 @@ export default function rootfsSettings() {
 
 	async function refresh() {
 		page?.hide();
-		page = await createPage();
+		try {
+			await refreshPublicHome();
+			page = createPage(await rootfsManager.list());
+		} catch (error) {
+			page = createPage([], error?.message || "The iOS RootfsManager service is unavailable.");
+		}
 		page.show();
 	}
 
@@ -62,12 +67,12 @@ export default function rootfsSettings() {
 				directory ? "folder" : "file",
 				directory
 					? "Select a local root filesystem folder"
-					: "Select a root filesystem archive (.tar.gz or .zip)",
+					: "Select a root filesystem archive (.tar.gz, .tar.xz, or .zip)",
 				false,
 			);
 			const suggestedName = directory
 				? selected.name
-				: selected.name.replace(/(\.tar\.gz|\.tgz|\.zip)$/i, "");
+				: selected.name.replace(/(\.tar\.gz|\.tgz|\.tar\.xz|\.txz|\.zip)$/i, "");
 			const name = await prompt("Root Filesystem Name", suggestedName, "text", {
 				required: true,
 			});
@@ -124,8 +129,11 @@ export default function rootfsSettings() {
 
 	return {
 		show: async (...args) => {
-			page = await createPage();
+			// Show a page synchronously so native-service failures never look like
+			// a tap that did nothing.
+			page = createPage([{ id: "loading", name: "Loading…", isDefault: true }]);
 			page.show(...args);
+			await refresh();
 		},
 	};
 }
