@@ -811,5 +811,8 @@
 	"hour plural": "{count} órája",
 	"min plural": "{count} perce",
 	"settings-category-builtin-servers": "Built-in servers",
-	"settings-category-plugin-servers": "Plugin servers"
+	"settings-category-plugin-servers": "Plugin servers",
+	"new name": "New name",
+	"enter new name": "Enter new name",
+	"code actions": "Code Actions"
 }

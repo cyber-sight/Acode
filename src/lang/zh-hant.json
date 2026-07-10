@@ -811,5 +811,8 @@
 	"hour plural": "{count} 小時前",
 	"min plural": "{count} 分鐘前",
 	"settings-category-builtin-servers": "內建伺服器",
-	"settings-category-plugin-servers": "插件伺服器"
+	"settings-category-plugin-servers": "插件伺服器",
+	"new name": "New name",
+	"enter new name": "Enter new name",
+	"code actions": "Code Actions"
 }
