@@ -324,11 +324,7 @@ function FileBrowserInclude(mode, info, doesOpenLast = true) {
 						let current = 0;
 
 						// Internal helper to recursively construct folders or empty files
-						const createFileRecursive = async (
-							parent,
-							dir,
-							shouldBeDirAtEnd,
-						) => {
+						const createFileRecursive = async (parent, dir, shouldBeDirAtEnd) => {
 							let wantDirEnd = !!shouldBeDirAtEnd;
 							let parts;
 							if (typeof dir === "string") {
