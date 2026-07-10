@@ -300,6 +300,9 @@ export default {
 
 		files[fileIndex].makeActive();
 	},
+	"next-file-history"() {
+		editorManager.openNextEditorFromHistory?.();
+	},
 	async open(page) {
 		switch (page) {
 			case "settings":
@@ -377,6 +380,9 @@ export default {
 		else --fileIndex;
 
 		files[fileIndex].makeActive();
+	},
+	"prev-file-history"() {
+		editorManager.openPreviousEditorFromHistory?.();
 	},
 	"read-only"() {
 		const file = editorManager.activeFile;
