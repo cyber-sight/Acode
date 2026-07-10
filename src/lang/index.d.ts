@@ -71,6 +71,9 @@ declare type LangStrings = {
   "read only file": string;
   "reload": string;
   "rename": string;
+  "new name": string;
+  "enter new name": string;
+  "code actions": string;
   "replace": string;
   "required": string;
   "run your web app": string;
@@ -397,6 +400,11 @@ declare type LangStrings = {
   "quicktools:exclamation": string;
   "quicktools:alt-key": string;
   "quicktools:meta-key": string;
+  "quicktools:search-prev": string;
+  "quicktools:search-next": string;
+  "quicktools:search-settings": string;
+  "quicktools:search-replace": string;
+  "quicktools:search-replace-all": string;
   "info-quicktoolssettings": string;
   "info-excludefolders": string;
   "missed files": string;
