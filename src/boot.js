@@ -6,7 +6,7 @@
 (function boot() {
   "use strict";
 
-  var DEV_MODE = true || (typeof __DEV_MODE__ !== "undefined" && __DEV_MODE__);
+  var DEV_MODE = false || (typeof __DEV_MODE__ !== "undefined" && __DEV_MODE__);
   var DEV_HOST = typeof __DEV_HOST__ !== "undefined" ? __DEV_HOST__ : "";
   var DEV_PORT = typeof __DEV_PORT__ !== "undefined" ? __DEV_PORT__ : "";
   var DEV_PROTO = typeof __DEV_PROTO__ !== "undefined" ? __DEV_PROTO__ : "";

@@ -102,16 +102,27 @@ export default async function installPlugin(
 
 		if (plugin) {
 			const zip = new JSZip();
-			await zip.loadAsync(plugin);
+			try {
+				await zip.loadAsync(plugin);
+			} catch (error) {
+				throw new Error(
+					`Failed to read plugin archive: ${describeInstallError(error)}`,
+				);
+			}
 
 			if (!zip.files["plugin.json"]) {
 				throw new Error(strings["invalid plugin"]);
 			}
 
 			/** @type {{ dependencies: string[] }} */
-			const pluginJson = JSON.parse(
-				await zip.files["plugin.json"].async("text"),
-			);
+			let pluginJson;
+			try {
+				pluginJson = JSON.parse(await zip.files["plugin.json"].async("text"));
+			} catch (error) {
+				throw new Error(
+					`Failed to parse plugin manifest: ${describeInstallError(error)}`,
+				);
+			}
 
 			/** patch main in manifest */
 			if (!zip.files[pluginJson.main]) {
@@ -132,8 +143,10 @@ export default async function installPlugin(
 				throw new Error(strings["invalid plugin"]);
 			}
 
-			if (!isDependency && pluginJson.dependencies) {
-				const manifests = await resolveDepsManifest(pluginJson.dependencies);
+			const dependencies = normalizeDependencies(pluginJson.dependencies);
+
+			if (!isDependency && dependencies.length) {
+				const manifests = await resolveDepsManifest(dependencies);
 
 				let titleText;
 				if (manifests.length > 1) {
@@ -222,14 +235,18 @@ export default async function installPlugin(
 
 					await fsOperation(fileUrl).writeFile(data);
 				} catch (error) {
-					console.error(`Error processing file ${file}:`, error);
+					throw new Error(
+						`Failed to extract ${file}: ${describeInstallError(error)}`,
+					);
 				}
 			}
 
 			// Process in batches
 			for (let i = 0; i < files.length; i += limit) {
 				const batch = files.slice(i, i + limit);
-				await Promise.allSettled(batch.map(processFile));
+				const results = await Promise.allSettled(batch.map(processFile));
+				const failed = results.find((result) => result.status === "rejected");
+				if (failed) throw failed.reason;
 
 				// Allow UI thread to breathe
 				await new Promise((r) => setTimeout(r, 0));
@@ -280,6 +297,34 @@ export default async function installPlugin(
 			loaderDialog.destroy();
 		}
 	}
+}
+
+function describeInstallError(error) {
+	if (typeof error === "string") return error;
+	if (error instanceof Error) return error.message;
+	if (error?.message) return error.message;
+	if (error?.error) return error.error;
+	if (error?.localizedDescription) return error.localizedDescription;
+	if (error?.status) return `HTTP ${error.status}`;
+	try {
+		return JSON.stringify(error);
+	} catch (_) {
+		return String(error);
+	}
+}
+
+function normalizeDependencies(dependencies) {
+	if (!dependencies) return [];
+	if (Array.isArray(dependencies)) {
+		return dependencies.filter(Boolean);
+	}
+	if (typeof dependencies === "string") {
+		return dependencies
+			.split(",")
+			.map((dependency) => dependency.trim())
+			.filter(Boolean);
+	}
+	return [];
 }
 
 /**
@@ -408,11 +453,10 @@ async function resolveDepsManifest(deps) {
 		const version = await getInstalledPluginVersion(remoteDependency.id);
 		if (remoteDependency?.version === version) continue;
 
-		if (remoteDependency.dependencies) {
-			const manifests = await resolveDepsManifest(
-				remoteDependency.dependencies,
-			);
-			resolved.push(manifests);
+		const dependencies = normalizeDependencies(remoteDependency.dependencies);
+		if (dependencies.length) {
+			const manifests = await resolveDepsManifest(dependencies);
+			resolved.push(...manifests);
 		}
 
 		resolved.push(remoteDependency);

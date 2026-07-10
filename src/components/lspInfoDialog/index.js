@@ -1,6 +1,10 @@
 import "./styles.scss";
 import lspClientManager from "cm/lsp/clientManager";
-import { getServerStats } from "cm/lsp/serverLauncher";
+import {
+	checkServerInstallation,
+	getServerStats,
+	installServer,
+} from "cm/lsp/serverLauncher";
 import serverRegistry from "cm/lsp/serverRegistry";
 import toast from "components/toast";
 import actionStack from "lib/actionStack";
@@ -194,6 +198,49 @@ function getStatusColor(status) {
 	}
 }
 
+function getInstallStatusLabel(result) {
+	if (!result) return "Checking installation...";
+	switch (result.status) {
+		case "present":
+			return result.version ? `Installed (${result.version})` : "Installed";
+		case "missing":
+			return "Not installed";
+		case "failed":
+			return "Installation check failed";
+		default:
+			return "Installation status unavailable";
+	}
+}
+
+function getInstallIcon(result) {
+	if (!result) return "hourglass_empty";
+	switch (result.status) {
+		case "present":
+			return "check_circle";
+		case "missing":
+			return "download";
+		case "failed":
+			return "error_outline";
+		default:
+			return "help_outline";
+	}
+}
+
+function getInstallAction(result) {
+	if (!result) return null;
+	if (result.status === "present" && result.canUpdate) {
+		return { mode: "update", label: "Update", icon: "system_update" };
+	}
+	if ((result.status === "missing" || result.status === "failed") && result.canInstall) {
+		return {
+			mode: "install",
+			label: result.status === "failed" ? "Repair" : "Install",
+			icon: result.status === "failed" ? "build" : "download",
+		};
+	}
+	return null;
+}
+
 function copyLogsToClipboard(serverId, serverLabel) {
 	const logs = getLspLogs(serverId);
 	if (logs.length === 0) {
@@ -333,6 +380,9 @@ function showLspInfoDialog() {
 
 	let currentView = "list";
 	let selectedServer = null;
+	const installStatuses = new Map();
+	let installingServerId = null;
+	let detailsRenderVersion = 0;
 
 	const $mask = <span className="mask" onclick={hide} />;
 	const $dialog = (
@@ -408,8 +458,10 @@ function showLspInfoDialog() {
 			const errorCount = logs.filter((l) => l.level === "error").length;
 
 			const $item = (
-				<li
-					className="lsp-server-item"
+				<li>
+					<button
+						type="button"
+						className="lsp-server-item"
 					onclick={() => {
 						selectedServer = server;
 						currentView = "details";
@@ -428,6 +480,7 @@ function showLspInfoDialog() {
 						<span className="lsp-error-badge">{errorCount}</span>
 					)}
 					<span className="icon keyboard_arrow_right lsp-arrow" />
+					</button>
 				</li>
 			);
 			$list.appendChild($item);
@@ -438,6 +491,7 @@ function showLspInfoDialog() {
 
 	function renderDetails() {
 		if (!selectedServer) return;
+		const renderVersion = ++detailsRenderVersion;
 		$body.innerHTML = "";
 
 		const server = selectedServer;
@@ -465,6 +519,9 @@ function showLspInfoDialog() {
 		}
 
 		const logs = getLspLogs(server.id);
+		const installStatus = installStatuses.get(server.id);
+		const isInstalling = installingServerId === server.id;
+		const installAction = getInstallAction(installStatus);
 
 		const $details = (
 			<div className="lsp-details">
@@ -577,6 +634,43 @@ function showLspInfoDialog() {
 						</div>
 					</div>
 				)}
+
+				<div className="lsp-section lsp-install-section">
+					<div className="lsp-section-label">Installation</div>
+					<div className="lsp-install-row" aria-live="polite">
+						<span className={`icon ${getInstallIcon(installStatus)}`} />
+						<span className="lsp-install-status">
+							{getInstallStatusLabel(installStatus)}
+						</span>
+						{installAction && (
+							<button
+								type="button"
+								className="lsp-install-btn"
+								disabled={isInstalling}
+								aria-busy={isInstalling ? "true" : "false"}
+								onclick={async () => {
+									installingServerId = server.id;
+									renderDetails();
+									try {
+										await installServer(server, installAction.mode);
+										installStatuses.delete(server.id);
+									} catch (error) {
+										addLspLog(server.id, "error", error.message || String(error));
+									} finally {
+										installingServerId = null;
+										renderDetails();
+									}
+								}}
+							>
+								<span className={`icon ${installAction.icon}`} />
+								<span>{installAction.label}</span>
+							</button>
+						)}
+					</div>
+					{installStatus?.message && (
+						<div className="lsp-install-message">{installStatus.message}</div>
+					)}
+				</div>
 			</div>
 		);
 
@@ -669,6 +763,30 @@ function showLspInfoDialog() {
 				if ($uptime) $uptime.textContent = stats.uptimeFormatted;
 				if ($pid) $pid.textContent = stats.pid ? String(stats.pid) : "—";
 			});
+		}
+
+		if (!installStatuses.has(server.id)) {
+			checkServerInstallation(server)
+				.then((result) => {
+					installStatuses.set(server.id, result);
+				})
+				.catch((error) => {
+					installStatuses.set(server.id, {
+						status: "failed",
+						canInstall: false,
+						canUpdate: false,
+						message: error.message || String(error),
+					});
+				})
+				.finally(() => {
+					if (
+						currentView === "details" &&
+						selectedServer?.id === server.id &&
+						renderVersion === detailsRenderVersion
+					) {
+						renderDetails();
+					}
+				});
 		}
 	}
 

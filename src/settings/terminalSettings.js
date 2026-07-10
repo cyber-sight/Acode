@@ -11,6 +11,7 @@ import loader from "dialogs/loader";
 import fonts from "lib/fonts";
 import appSettings from "lib/settings";
 import FileBrowser from "pages/fileBrowser";
+import rootfsSettings from "settings/rootfsSettings";
 import helpers from "utils/helpers";
 
 export default function terminalSettings() {
@@ -217,6 +218,13 @@ export default function terminalSettings() {
 			chevron: true,
 		},
 		{
+			key: "rootfs",
+			text: "Root Filesystems",
+			info: "Import and select iOS terminal root filesystems.",
+			category: categories.maintenance,
+			chevron: true,
+		},
+		{
 			key: "uninstall",
 			text: strings.uninstall,
 			info: strings["info-uninstall"],
@@ -260,6 +268,14 @@ export default function terminalSettings() {
 
 			case "restore":
 				terminalRestore();
+				return;
+
+			case "rootfs":
+				if (typeof cordova === "undefined" || cordova.platformId !== "ios") {
+					toast("Root filesystem management is available on iOS only.");
+					return;
+				}
+				rootfsSettings().show();
 				return;
 
 			case "uninstall":

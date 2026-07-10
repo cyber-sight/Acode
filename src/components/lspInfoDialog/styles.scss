@@ -81,7 +81,7 @@
     border-radius: 6px;
     font-size: 0.75rem;
     font-weight: 500;
-    transition: all 0.12s ease;
+    transition: background-color 0.12s ease, color 0.12s ease;
 
     .icon {
         font-size: 0.9rem;
@@ -108,13 +108,18 @@
 
 .lsp-server-item {
     display: flex;
+    width: 100%;
     align-items: center;
     gap: 12px;
     padding: 14px 12px;
+    border: none;
     border-radius: 6px;
+    background: transparent;
     cursor: pointer;
     transition: background-color 0.12s ease;
     color: var(--popup-text-color);
+    font: inherit;
+    text-align: left;
 
     &:hover {
         background-color: var(--box-shadow-color);
@@ -127,6 +132,14 @@
     &:not(:last-child) {
         border-bottom: 1px solid var(--border-color);
     }
+}
+
+.lsp-server-item:focus-visible,
+.lsp-icon-btn:focus-visible,
+.lsp-action-btn:focus-visible,
+.lsp-install-btn:focus-visible {
+    outline: 2px solid var(--active-color);
+    outline-offset: 2px;
 }
 
 .lsp-arrow {
@@ -208,7 +221,7 @@
     cursor: pointer;
     border-radius: 6px;
     padding: 0;
-    transition: all 0.12s ease;
+    transition: background-color 0.12s ease, opacity 0.12s ease;
     opacity: 0.7;
 
     &:hover {
@@ -267,6 +280,67 @@
     text-transform: uppercase;
     letter-spacing: 0.5px;
     margin-bottom: 8px;
+}
+
+.lsp-install-section {
+    border-top: 1px solid var(--border-color);
+}
+
+.lsp-install-row {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    min-height: 32px;
+    color: var(--popup-text-color);
+
+    > .icon {
+        font-size: 1rem;
+        opacity: 0.7;
+    }
+}
+
+.lsp-install-status {
+    flex: 1;
+    min-width: 0;
+    font-size: 0.78rem;
+}
+
+.lsp-install-btn {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    min-height: 32px;
+    padding: 6px 8px;
+    border: 1px solid var(--border-color);
+    border-radius: 6px;
+    background: transparent;
+    color: var(--popup-text-color);
+    cursor: pointer;
+    font: inherit;
+    font-size: 0.72rem;
+    transition: background-color 0.12s ease, color 0.12s ease;
+
+    .icon {
+        font-size: 0.9rem;
+    }
+
+    &:hover:not(:disabled) {
+        background-color: var(--box-shadow-color);
+    }
+
+    &:disabled {
+        cursor: wait;
+        opacity: 0.55;
+    }
+}
+
+.lsp-install-message {
+    margin-top: 6px;
+    color: var(--popup-text-color);
+    font-size: 0.7rem;
+    line-height: 1.35;
+    opacity: 0.65;
+    overflow-wrap: anywhere;
 }
 
 .lsp-chip-container {

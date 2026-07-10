@@ -1,5 +1,5 @@
 function plugin({ id, install }, onInstall, onUninstall) {
-	import(/* webpackChunkName: "plugins" */ "./plugin").then((res) => {
+	import(/* webpackChunkName: "plugin" */ "./plugin").then((res) => {
 		const Plugin = res.default;
 		Plugin(id, onInstall, onUninstall, install);
 	});
