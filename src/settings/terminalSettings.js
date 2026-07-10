@@ -11,7 +11,6 @@ import loader from "dialogs/loader";
 import fonts from "lib/fonts";
 import appSettings from "lib/settings";
 import FileBrowser from "pages/fileBrowser";
-import rootfsSettings from "settings/rootfsSettings";
 import helpers from "utils/helpers";
 
 export default function terminalSettings() {
@@ -275,7 +274,12 @@ export default function terminalSettings() {
 					toast("Root filesystem management is available on iOS only.");
 					return;
 				}
-				rootfsSettings().show();
+				try {
+					await appSettings.uiSettings["rootfs-settings"].show();
+				} catch (error) {
+					console.error("Unable to open Root Filesystems:", error);
+					toast(error?.message || "Unable to open Root Filesystems.");
+				}
 				return;
 
 			case "uninstall":

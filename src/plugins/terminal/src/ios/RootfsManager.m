@@ -1,6 +1,7 @@
 #import "RootfsManager.h"
 #import <Cordova/CDVPluginResult.h>
 #import "fakefs.h"
+#include <sys/stat.h>
 #include <stdlib.h>
 
 NSString *const AcodeIshDefaultRootId = @"default";
@@ -104,6 +105,28 @@ static void rootfs_progress_callback(void *cookie, double progress, const char *
     [self.commandDelegate sendPluginResult:[CDVPluginResult resultWithStatus:CDVCommandStatus_ERROR messageAsString:error.localizedDescription ?: @"Root filesystem operation failed."] callbackId:command.callbackId];
 }
 
+- (NSURL *)fileURLFromArgument:(NSString *)sourceString error:(NSError **)error {
+    if (sourceString.length == 0) {
+        if (error) *error = [NSError errorWithDomain:@"RootfsManager" code:3 userInfo:@{NSLocalizedDescriptionKey: @"Root filesystem imports require a local file or folder."}];
+        return nil;
+    }
+
+    NSURL *url = [NSURL URLWithString:sourceString];
+    if (url.isFileURL)
+        return url;
+
+    if ([sourceString hasPrefix:@"file://"]) {
+        NSString *path = [sourceString stringByRemovingPercentEncoding] ?: sourceString;
+        path = [path stringByReplacingOccurrencesOfString:@"file://" withString:@"" options:NSAnchoredSearch range:NSMakeRange(0, path.length)];
+        if (![path hasPrefix:@"/"])
+            path = [@"/" stringByAppendingString:path];
+        return [NSURL fileURLWithPath:path];
+    }
+
+    if (error) *error = [NSError errorWithDomain:@"RootfsManager" code:3 userInfo:@{NSLocalizedDescriptionKey: @"Root filesystem imports require a local iOS file or folder."}];
+    return nil;
+}
+
 - (void)list:(CDVInvokedUrlCommand *)command {
     NSMutableArray *roots = [NSMutableArray array];
     NSString *activeRootId = self.activeRootId;
@@ -122,18 +145,73 @@ static void rootfs_progress_callback(void *cookie, double progress, const char *
     [self importCommand:command directory:YES];
 }
 
+- (NSString *)archiveSuffixForURL:(NSURL *)sourceURL {
+    NSString *name = sourceURL.lastPathComponent.lowercaseString;
+    if ([name hasSuffix:@".tar.gz"]) return @".tar.gz";
+    if ([name hasSuffix:@".tgz"]) return @".tgz";
+    if ([name hasSuffix:@".tar.xz"]) return @".tar.xz";
+    if ([name hasSuffix:@".txz"]) return @".txz";
+    if ([name hasSuffix:@".zip"]) return @".zip";
+    return sourceURL.pathExtension.length ? [@"." stringByAppendingString:sourceURL.pathExtension] : @"";
+}
+
+- (BOOL)ensureReadableFileAtURL:(NSURL *)sourceURL error:(NSError **)error {
+    NSNumber *ubiquitous = nil;
+    [sourceURL getResourceValue:&ubiquitous forKey:NSURLIsUbiquitousItemKey error:nil];
+    if (ubiquitous.boolValue) {
+        NSError *downloadError = nil;
+        if (![NSFileManager.defaultManager startDownloadingUbiquitousItemAtURL:sourceURL error:&downloadError] && downloadError) {
+            if (error) *error = downloadError;
+            return NO;
+        }
+    }
+
+    if ([NSFileManager.defaultManager isReadableFileAtPath:sourceURL.path])
+        return YES;
+
+    if (error) *error = [NSError errorWithDomain:@"RootfsManager" code:10 userInfo:@{NSLocalizedDescriptionKey: @"The selected root filesystem archive is not readable. If it is in iCloud, download it locally and try again."}];
+    return NO;
+}
+
+- (NSURL *)stageArchiveAtURL:(NSURL *)sourceURL error:(NSError **)error {
+    NSString *suffix = [self archiveSuffixForURL:sourceURL];
+    NSURL *destinationURL = [NSURL fileURLWithPath:[NSTemporaryDirectory() stringByAppendingPathComponent:[NSUUID.UUID.UUIDString stringByAppendingString:suffix]]];
+    __block NSError *copyError = nil;
+    __block BOOL copied = NO;
+    NSFileCoordinator *coordinator = [NSFileCoordinator new];
+    [coordinator coordinateReadingItemAtURL:sourceURL options:0 error:&copyError byAccessor:^(NSURL *coordinatedURL) {
+        if (![self ensureReadableFileAtURL:coordinatedURL error:&copyError])
+            return;
+        copied = [NSFileManager.defaultManager copyItemAtURL:coordinatedURL toURL:destinationURL error:&copyError];
+    }];
+    if (!copied) {
+        [NSFileManager.defaultManager removeItemAtURL:destinationURL error:nil];
+        NSString *detail = copyError.localizedDescription ?: @"Unable to read the selected root filesystem archive.";
+        if (error) *error = [NSError errorWithDomain:@"RootfsManager" code:10 userInfo:@{NSLocalizedDescriptionKey: [NSString stringWithFormat:@"Unable to stage selected archive: %@", detail]}];
+        return nil;
+    }
+    struct stat stagedStat;
+    if (stat(destinationURL.path.fileSystemRepresentation, &stagedStat) < 0 || stagedStat.st_size == 0) {
+        [NSFileManager.defaultManager removeItemAtURL:destinationURL error:nil];
+        if (error) *error = [NSError errorWithDomain:@"RootfsManager" code:10 userInfo:@{NSLocalizedDescriptionKey: @"Unable to stage selected archive: copied file is empty or unreadable."}];
+        return nil;
+    }
+    return destinationURL;
+}
+
 - (void)importCommand:(CDVInvokedUrlCommand *)command directory:(BOOL)directory {
     NSString *sourceString = command.arguments.count > 0 ? command.arguments[0] : @"";
     NSString *name = command.arguments.count > 1 ? command.arguments[1] : @"";
-    NSURL *sourceURL = [NSURL URLWithString:sourceString];
-    if (!sourceURL.isFileURL) {
-        [self sendError:[NSError errorWithDomain:@"RootfsManager" code:3 userInfo:@{NSLocalizedDescriptionKey: @"Root filesystem imports require a local file or folder."}] command:command];
+    NSError *sourceError = nil;
+    NSURL *sourceURL = [self fileURLFromArgument:sourceString error:&sourceError];
+    if (!sourceURL) {
+        [self sendError:sourceError command:command];
         return;
     }
     if (!directory) {
         NSString *lowercaseName = sourceURL.lastPathComponent.lowercaseString;
-        if (!([lowercaseName hasSuffix:@".tar.gz"] || [lowercaseName hasSuffix:@".tgz"] || [lowercaseName hasSuffix:@".zip"])) {
-            [self sendError:[NSError errorWithDomain:@"RootfsManager" code:9 userInfo:@{NSLocalizedDescriptionKey: @"Select a .tar.gz, .tgz, or .zip root filesystem archive."}] command:command];
+        if (!([lowercaseName hasSuffix:@".tar.gz"] || [lowercaseName hasSuffix:@".tgz"] || [lowercaseName hasSuffix:@".tar.xz"] || [lowercaseName hasSuffix:@".txz"] || [lowercaseName hasSuffix:@".zip"])) {
+            [self sendError:[NSError errorWithDomain:@"RootfsManager" code:9 userInfo:@{NSLocalizedDescriptionKey: @"Select a .tar.gz, .tgz, .tar.xz, .txz, or .zip root filesystem archive."}] command:command];
             return;
         }
     }
@@ -159,12 +237,19 @@ static void rootfs_progress_callback(void *cookie, double progress, const char *
         }
         NSString *rootId = NSUUID.UUID.UUIDString.lowercaseString;
         NSString *stagingPath = [NSTemporaryDirectory() stringByAppendingPathComponent:NSUUID.UUID.UUIDString];
-        [sourceURL startAccessingSecurityScopedResource];
+        BOOL accessingSecurityScope = [sourceURL startAccessingSecurityScopedResource];
+        NSURL *archiveURL = directory ? nil : [self stageArchiveAtURL:sourceURL error:&error];
+        if (!directory && !archiveURL) {
+            if (accessingSecurityScope) [sourceURL stopAccessingSecurityScopedResource];
+            dispatch_async(dispatch_get_main_queue(), ^{ [self sendError:error command:command]; });
+            return;
+        }
         struct fakefsify_error importError = {0};
         BOOL imported = directory
             ? fakefs_import_directory(sourceURL.path.fileSystemRepresentation, stagingPath.fileSystemRepresentation, &importError, (struct progress){NULL, rootfs_progress_callback})
-            : fakefs_import(sourceURL.path.fileSystemRepresentation, stagingPath.fileSystemRepresentation, &importError, (struct progress){NULL, rootfs_progress_callback});
-        [sourceURL stopAccessingSecurityScopedResource];
+            : fakefs_import(archiveURL.path.fileSystemRepresentation, stagingPath.fileSystemRepresentation, &importError, (struct progress){NULL, rootfs_progress_callback});
+        [NSFileManager.defaultManager removeItemAtURL:archiveURL error:nil];
+        if (accessingSecurityScope) [sourceURL stopAccessingSecurityScopedResource];
         if (!imported) {
             NSString *message = importError.message ? [NSString stringWithUTF8String:importError.message] : @"Unable to import the root filesystem.";
             free(importError.message);

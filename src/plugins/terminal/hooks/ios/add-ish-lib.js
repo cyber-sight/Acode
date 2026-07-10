@@ -81,6 +81,7 @@ function main() {
       "-lsqlite3",
       "-lbz2",
       "-liconv",
+      "-llzma",
       "-lz",
       "-lm",
     ];

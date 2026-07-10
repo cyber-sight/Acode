@@ -18,6 +18,16 @@ LINUX_SRC="$ISH_DIR/deps/linux"
 LINUX_BUILD="$LINUX_SRC/build"
 AUTOCONF_SOURCE="$LINUX_BUILD/include/config/auto.conf"
 AUTOCONF_HEADER="$LINUX_BUILD/include/generated/autoconf.h"
+LLVM_OBJCOPY="${LLVM_OBJCOPY:-$(command -v llvm-objcopy || true)}"
+
+if [[ -z "$LLVM_OBJCOPY" && -x /opt/homebrew/opt/llvm/bin/llvm-objcopy ]]; then
+  LLVM_OBJCOPY=/opt/homebrew/opt/llvm/bin/llvm-objcopy
+fi
+
+if [[ -z "$LLVM_OBJCOPY" ]]; then
+  echo "llvm-objcopy not found. Install LLVM (for example: brew install llvm) or set LLVM_OBJCOPY."
+  exit 1
+fi
 
 if [[ ! -d "$ISH_DIR" ]]; then
   echo "iSH source not found at $ISH_DIR"
@@ -146,6 +156,68 @@ build_linux_user_archive() {
   )
 }
 
+# Compile tools/fakefs.c (which provides fakefs_import/fakefs_import_directory)
+# and merge it into libfakefs.a. The meson build only includes fs/fake-db.c,
+# fs/fake-migrate.c, and fs/fake-rebuild.c in libfakefs.a, but the Cordova
+# terminal plugin needs the import functions from tools/fakefs.c.
+build_fakefs_import() {
+  local sdk="$1"
+  local target="$2"
+  local build_name="ReleaseLinux-$sdk"
+  local meson_dir="$OUTPUT_DIR/$build_name/meson"
+  local sysroot
+  sysroot="$(xcrun --sdk "$sdk" --show-sdk-path)"
+
+  echo "==> Building tools/fakefs.c and merging into libfakefs.a for $sdk..."
+  (
+    cd "$meson_dir"
+    # A previous build may already contain these two generated members. Remove
+    # them first so repeated invocations remain linkable.
+    while xcrun --sdk "$sdk" ar -t libfakefs.a | rg -q '^(tools_fakefs\.c\.o|util_fchdir\.c\.o)$'; do
+      xcrun --sdk "$sdk" ar -d libfakefs.a tools_fakefs.c.o util_fchdir.c.o
+    done
+    mkdir -p libfakefs_import.a.p
+    xcrun --sdk "$sdk" clang \
+      -target "$target" \
+      -isysroot "$sysroot" \
+      -Ilibfakefs_import.a.p \
+      -I. \
+      -I../../.. \
+      -I"$ISH_DIR/deps/libarchive/libarchive" \
+      -fdiagnostics-color=always \
+      -Wall \
+      -Wextra \
+      -std=gnu11 \
+      -O0 \
+      -g \
+      -Wimplicit-fallthrough \
+      -DLOG_HANDLER_NSLOG=1 \
+      -Wno-switch \
+      -c ../../../tools/fakefs.c \
+      -o libfakefs_import.a.p/tools_fakefs.c.o
+    xcrun --sdk "$sdk" clang \
+      -target "$target" \
+      -isysroot "$sysroot" \
+      -I. \
+      -I../../.. \
+      -fdiagnostics-color=always \
+      -Wall \
+      -Wextra \
+      -std=gnu11 \
+      -O0 \
+      -g \
+      -DLOG_HANDLER_NSLOG=1 \
+      -c ../../../util/fchdir.c \
+      -o libfakefs_import.a.p/util_fchdir.c.o
+    xcrun --sdk "$sdk" libtool -static -o libfakefs_import.a \
+      libfakefs_import.a.p/tools_fakefs.c.o \
+      libfakefs_import.a.p/util_fchdir.c.o
+    xcrun --sdk "$sdk" libtool -static -o libfakefs-merged.a libfakefs.a libfakefs_import.a
+    mv libfakefs-merged.a libfakefs.a
+    rm -rf libfakefs_import.a libfakefs_import.a.p
+  )
+}
+
 build_sdk() {
   local sdk="$1"
   local target="$2"
@@ -160,7 +232,9 @@ build_sdk() {
     -target libarchive \
     -configuration Release \
     -sdk "$sdk" \
-    IPHONEOS_DEPLOYMENT_TARGET=16.0 \
+    IPHONEOS_DEPLOYMENT_TARGET=15.0 \
+    HEADER_SEARCH_PATHS="$(brew --prefix xz)/include" \
+    GCC_PREPROCESSOR_DEFINITIONS="HAVE_CONFIG_H HAVE_LZMA_H=1" \
     CONFIGURATION_BUILD_DIR="$OUTPUT_DIR/$build_name" \
     "$@" \
     build
@@ -170,16 +244,18 @@ build_sdk() {
     -target libiSHLinux \
     -configuration ReleaseLinux \
     -sdk "$sdk" \
-    IPHONEOS_DEPLOYMENT_TARGET=16.0 \
+    IPHONEOS_DEPLOYMENT_TARGET=15.0 \
     BUILD_DIR="$OUTPUT_DIR" \
     "$@" \
     build
 
-  llvm-objcopy --redefine-sym _main=_ish_kernel_main \
+  "$LLVM_OBJCOPY" --redefine-sym _main=_ish_kernel_main \
     "$OUTPUT_DIR/$build_name/liblinux.a" \
     "$OUTPUT_DIR/$build_name/liblinux-acode.a"
 
   build_linux_user_archive "$sdk" "$target"
+
+  build_fakefs_import "$sdk" "$target"
 
   for lib in libarchive.a libiSHLinux.a liblinux-acode.a meson/liblinux_user.a meson/libish_emu.a meson/libfakefs.a; do
     local lib_path="$OUTPUT_DIR/$build_name/$lib"
@@ -190,8 +266,8 @@ build_sdk() {
   done
 }
 
-build_sdk iphoneos arm64-apple-ios16.0
-build_sdk iphonesimulator arm64-apple-ios16.0-simulator ARCHS=arm64 ONLY_ACTIVE_ARCH=YES EXCLUDED_ARCHS=x86_64
+build_sdk iphoneos arm64-apple-ios15.0
+build_sdk iphonesimulator arm64-apple-ios15.0-simulator ARCHS=arm64 ONLY_ACTIVE_ARCH=YES EXCLUDED_ARCHS=x86_64
 
 echo "==> iSH builds succeeded:"
 for sdk in iphoneos iphonesimulator; do
