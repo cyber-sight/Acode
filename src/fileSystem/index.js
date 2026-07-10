@@ -84,10 +84,13 @@ fsOperation.extend(
 			async readFile(encoding, progress) {
 				if (isIos()) {
 					const response = await fetch(url, {
-						cordovaResponseType: encoding ? "text" : "blob",
+						cordovaResponseType: encoding ? "text" : "arraybuffer",
 						credentials: "include",
 						headers: {
-							Accept: encoding === "json" ? "application/json" : "application/octet-stream",
+							Accept:
+								encoding === "json"
+									? "application/json"
+									: "application/octet-stream",
 						},
 					});
 

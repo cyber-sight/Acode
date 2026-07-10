@@ -1,0 +1,11 @@
+# Baseline tools shipped in the iSH developer rootfs.
+# Keep this compact: language-server-specific toolchains install on demand.
+bash
+ca-certificates
+command-not-found
+curl
+git
+nodejs
+npm
+py3-pip
+python3

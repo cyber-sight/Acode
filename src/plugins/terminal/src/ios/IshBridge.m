@@ -9,6 +9,7 @@
 #include <stdlib.h>
 #include <string.h>
 #import "IshRootfs.h"
+#import "RootfsManager.h"
 
 #if __has_include("ish/include/LinuxInterop.h")
 #import "ish/include/LinuxInterop.h"
@@ -25,6 +26,8 @@
 @interface IshBridge ()
 #if ISH_AVAILABLE
 @property (nonatomic, strong) NSMapTable<NSString *, Terminal *> *sessions;
+@property (nonatomic, strong) NSMutableDictionary<NSNumber *, NSString *> *sessionIdsByPid;
+@property (nonatomic, strong) NSMutableDictionary<NSNumber *, NSNumber *> *pendingExitStatuses;
 #endif
 @property (nonatomic, copy) IshEventHandler eventHandler;
 @property (nonatomic, assign) BOOL kernelStarted;
@@ -39,7 +42,14 @@
         sharedInstance = [[IshBridge alloc] init];
 #if ISH_AVAILABLE
         sharedInstance.sessions = [NSMapTable strongToStrongObjectsMapTable];
+        sharedInstance.sessionIdsByPid = [NSMutableDictionary dictionary];
+        sharedInstance.pendingExitStatuses = [NSMutableDictionary dictionary];
         [sharedInstance setupTerminalHookIfNeeded];
+        linux_set_session_exit_handler(^(int pid, int status) {
+            dispatch_async(dispatch_get_main_queue(), ^{
+                [[IshBridge shared] handleSessionExitForPid:pid status:status];
+            });
+        });
 #endif
     });
     return sharedInstance;
@@ -57,14 +67,28 @@
     }
     return;
 #else
-    [self startKernelIfNeeded];
+    if (![self startKernelIfNeeded]) {
+        NSError *error = [NSError errorWithDomain:@"IshBridge" code:7 userInfo:@{NSLocalizedDescriptionKey: @"The iSH root filesystem could not be initialized"}];
+        dispatch_async(dispatch_get_main_queue(), ^{
+            completion(@"", error);
+        });
+        return;
+    }
 
     NSString *shell = @"/bin/sh";
-    NSString *finalCommand = command.length > 0 ? command : @"";
+    NSString *bootstrap = @"mkdir -p /home/acode /workspace; export HOME=/home/acode USER=acode LOGNAME=acode PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin; ";
+    NSString *finalCommand = command.length > 0 ? [bootstrap stringByAppendingString:command] : @"";
     NSArray<NSString *> *argv = finalCommand.length > 0 ? @[shell, @"-lc", finalCommand] : @[shell];
 
     const char *exe = shell.UTF8String;
-    const char *envp_storage[] = { "TERM=xterm-256color", NULL };
+    const char *envp_storage[] = {
+        "TERM=xterm-256color",
+        "HOME=/home/acode",
+        "USER=acode",
+        "LOGNAME=acode",
+        "PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin",
+        NULL,
+    };
     const char **envp_arr = envp_storage;
 
     NSUInteger argc = argv.count;
@@ -75,11 +99,13 @@
     argv_arr[argc] = NULL;
 
     __block int err = 0;
+    __block int processId = 0;
     __block Terminal *terminal = nil;
 
     sync_do_in_workqueue(^(void (^done)(void)) {
         linux_start_session(exe, argv_arr, envp_arr, ^(int retval, int pid, nsobj_t terminalObj) {
             err = retval;
+            processId = pid;
             if (terminalObj) {
                 terminal = (__bridge Terminal *)terminalObj;
             }
@@ -99,6 +125,15 @@
 
     NSString *sessionId = terminal.uuid.UUIDString ?: [[NSUUID UUID] UUIDString];
     [self.sessions setObject:terminal forKey:sessionId];
+    if (processId > 0) {
+        NSNumber *processKey = @(processId);
+        self.sessionIdsByPid[processKey] = sessionId;
+        NSNumber *pendingStatus = self.pendingExitStatuses[processKey];
+        if (pendingStatus) {
+            [self.pendingExitStatuses removeObjectForKey:processKey];
+            [self handleSessionExitForPid:processId status:pendingStatus.intValue];
+        }
+    }
     dispatch_async(dispatch_get_main_queue(), ^{
         completion(sessionId, nil);
     });
@@ -149,6 +184,8 @@
 
     [terminal destroy];
     [self.sessions removeObjectForKey:sessionId];
+    NSArray<NSNumber *> *processIds = [self.sessionIdsByPid allKeysForObject:sessionId];
+    [self.sessionIdsByPid removeObjectsForKeys:processIds];
     if (completion) {
         completion(nil);
     }
@@ -156,21 +193,39 @@
 }
 
 #if ISH_AVAILABLE
-- (void)startKernelIfNeeded {
-    if (self.kernelStarted) {
-        return;
-    }
-    if (![self ensureRootfsReady]) {
-        NSLog(@"iSH rootfs: ensureRootfsReady returned NO; kernel start skipped");
+- (void)handleSessionExitForPid:(int)pid status:(int)status {
+    NSString *sessionId = self.sessionIdsByPid[@(pid)];
+    if (!sessionId) {
+        self.pendingExitStatuses[@(pid)] = @(status);
         return;
     }
 
+    [self.sessionIdsByPid removeObjectForKey:@(pid)];
+    [self.sessions removeObjectForKey:sessionId];
+
+    IshEventHandler handler = self.eventHandler;
+    if (handler) {
+        int exitCode = (status & 0x7f) == 0 ? (status >> 8) : 128 + (status & 0x7f);
+        handler(sessionId, @"exit", [NSString stringWithFormat:@"%d", exitCode]);
+    }
+}
+
+- (BOOL)startKernelIfNeeded {
+    if (self.kernelStarted) {
+        return [self reconcileFakefsMetadataAtRootPath:[self rootfsPath]];
+    }
+    if (![self ensureRootfsReady]) {
+        NSLog(@"iSH rootfs: initialization failed; kernel start skipped");
+        return NO;
+    }
+
     @try {
-        NSLog(@"iSH rootfs: starting kernel");
         actuate_kernel("");
         self.kernelStarted = YES;
+        return YES;
     } @catch (NSException *exception) {
         NSLog(@"iSH rootfs: kernel start raised exception: %@", exception);
+        return NO;
     }
 }
 
@@ -184,10 +239,6 @@
     IshSetRootPath(rootPath.fileSystemRepresentation);
 
     NSFileManager *fm = [NSFileManager defaultManager];
-    NSString *docsPath = [rootPath stringByDeletingLastPathComponent];
-    NSLog(@"iSH rootfs: documents path=%@", docsPath);
-    [self logDirectoryContentsAtPath:docsPath label:@"Documents" maxDepth:2];
-
     BOOL isDir = NO;
     NSString *rootMeta = [rootPath stringByAppendingPathComponent:@"meta.db"];
     NSString *rootData = [rootPath stringByAppendingPathComponent:@"data"];
@@ -201,13 +252,15 @@
         [fm fileExistsAtPath:rootShell] &&
         [self stampRootfsMetadataAtPath:rootMeta]) {
         [self writeResolverConfigurationAtRootPath:rootPath];
-        NSLog(@"iSH rootfs: existing rootfs validated at %@", rootPath);
-        [self logDirectoryContentsAtPath:rootPath label:@"Documents/ish-rootfs existing" maxDepth:2];
-        return YES;
+        return [self reconcileFakefsMetadataAtRootPath:rootPath];
     }
 
-    NSLog(@"iSH rootfs: existing rootfs missing or invalid at %@", rootPath);
-    [self logDirectoryContentsAtPath:rootPath label:@"Documents/ish-rootfs before copy" maxDepth:2];
+    // Imported roots are immutable after their staged import succeeds. Only
+    // bootstrap the bundled default root when it has not been initialized yet.
+    if (!AcodeIshIsDefaultRootActive()) {
+        NSLog(@"iSH rootfs: selected imported root is missing or invalid");
+        return NO;
+    }
 
     NSString *bundleRoot = [[NSBundle mainBundle] pathForResource:@"ish-rootfs" ofType:nil];
     if (!bundleRoot) {
@@ -217,9 +270,6 @@
         NSLog(@"iSH rootfs: bundled ish-rootfs not found");
         return NO;
     }
-
-    NSLog(@"iSH rootfs: copying bundled rootfs from %@", bundleRoot);
-    [self logDirectoryContentsAtPath:bundleRoot label:@"Bundle/ish-rootfs" maxDepth:2];
 
     NSError *error = nil;
     if ([fm fileExistsAtPath:rootPath]) {
@@ -265,9 +315,11 @@
                  [self stampRootfsMetadataAtPath:rootMeta];
     if (ready) {
         [self writeResolverConfigurationAtRootPath:rootPath];
+        ready = [self reconcileFakefsMetadataAtRootPath:rootPath];
     }
-    NSLog(@"iSH rootfs: copied rootfs ready=%d", ready);
-    [self logDirectoryContentsAtPath:rootPath label:@"Documents/ish-rootfs after copy" maxDepth:2];
+    if (!ready) {
+        NSLog(@"iSH rootfs: copied rootfs validation failed");
+    }
     return ready;
 }
 
@@ -405,6 +457,140 @@
     NSLog(@"iSH rootfs: registered fakefs path %@ -> %@", fakePath, filePath);
 }
 
+- (BOOL)reconcileFakefsMetadataAtRootPath:(NSString *)rootPath {
+    NSString *metaPath = [rootPath stringByAppendingPathComponent:@"meta.db"];
+    NSString *dataPath = [rootPath stringByAppendingPathComponent:@"data"];
+    sqlite3 *db = NULL;
+    if (sqlite3_open_v2(metaPath.fileSystemRepresentation, &db, SQLITE_OPEN_READWRITE, NULL) != SQLITE_OK) {
+        NSLog(@"iSH rootfs: sqlite open failed while reconciling metadata: %s", db ? sqlite3_errmsg(db) : "unknown");
+        if (db) sqlite3_close(db);
+        return NO;
+    }
+
+    sqlite3_stmt *findPath = NULL;
+    sqlite3_stmt *insertStat = NULL;
+    sqlite3_stmt *insertPath = NULL;
+    sqlite3_stmt *storedPaths = NULL;
+    sqlite3_stmt *deletePath = NULL;
+    BOOL success = sqlite3_exec(db, "begin immediate", NULL, NULL, NULL) == SQLITE_OK;
+    if (success) {
+        success = sqlite3_prepare_v2(db, "select 1 from paths where path = ? limit 1", -1, &findPath, NULL) == SQLITE_OK &&
+                  sqlite3_prepare_v2(db, "insert into stats (stat) values (?)", -1, &insertStat, NULL) == SQLITE_OK &&
+                  sqlite3_prepare_v2(db, "insert into paths (path, inode) values (?, ?)", -1, &insertPath, NULL) == SQLITE_OK &&
+                  sqlite3_prepare_v2(db, "select path from paths", -1, &storedPaths, NULL) == SQLITE_OK &&
+                  sqlite3_prepare_v2(db, "delete from paths where path = ?", -1, &deletePath, NULL) == SQLITE_OK;
+    }
+
+    NSUInteger registeredPaths = 0;
+    NSUInteger removedPaths = 0;
+    if (success) {
+        NSFileManager *fm = [NSFileManager defaultManager];
+        // fakefs uses meta.db as the directory index. Remove records that no
+        // longer have a backing path before registering newly copied files.
+        while (sqlite3_step(storedPaths) == SQLITE_ROW) {
+            const void *pathBytes = sqlite3_column_blob(storedPaths, 0);
+            int pathLength = sqlite3_column_bytes(storedPaths, 0);
+            NSString *fakePath = [[NSString alloc] initWithBytes:pathBytes length:pathLength encoding:NSUTF8StringEncoding];
+            if (!fakePath) {
+                success = NO;
+                break;
+            }
+            NSString *relativePath = [fakePath hasPrefix:@"/"] ? [fakePath substringFromIndex:1] : fakePath;
+            NSString *hostPath = relativePath.length ? [dataPath stringByAppendingPathComponent:relativePath] : dataPath;
+            struct stat fileStat;
+            if (lstat(hostPath.fileSystemRepresentation, &fileStat) == 0) {
+                continue;
+            }
+            if (errno != ENOENT && errno != ENOTDIR) {
+                success = NO;
+                break;
+            }
+            sqlite3_bind_blob(deletePath, 1, pathBytes, pathLength, SQLITE_TRANSIENT);
+            if (sqlite3_step(deletePath) != SQLITE_DONE) {
+                success = NO;
+                break;
+            }
+            sqlite3_reset(deletePath);
+            sqlite3_clear_bindings(deletePath);
+            removedPaths++;
+        }
+        if (sqlite3_errcode(db) != SQLITE_OK && sqlite3_errcode(db) != SQLITE_DONE) {
+            success = NO;
+        }
+
+        NSDirectoryEnumerator<NSString *> *enumerator = [fm enumeratorAtPath:dataPath];
+        for (NSString *relativePath in enumerator) {
+            if (!success) break;
+            NSString *hostPath = [dataPath stringByAppendingPathComponent:relativePath];
+            struct stat fileStat;
+            if (lstat(hostPath.fileSystemRepresentation, &fileStat) != 0) {
+                continue;
+            }
+
+            NSString *fakePath = [@"/" stringByAppendingString:relativePath];
+            const char *pathBytes = fakePath.UTF8String;
+            sqlite3_bind_blob(findPath, 1, pathBytes, (int)strlen(pathBytes), SQLITE_TRANSIENT);
+            int findResult = sqlite3_step(findPath);
+            sqlite3_reset(findPath);
+            sqlite3_clear_bindings(findPath);
+            if (findResult == SQLITE_ROW) {
+                continue;
+            }
+            if (findResult != SQLITE_DONE) {
+                success = NO;
+                break;
+            }
+
+            struct {
+                uint32_t mode;
+                uint32_t uid;
+                uint32_t gid;
+                uint32_t rdev;
+            } statRecord = { (uint32_t)fileStat.st_mode, 0, 0, (uint32_t)fileStat.st_rdev };
+            sqlite3_bind_blob(insertStat, 1, &statRecord, sizeof(statRecord), SQLITE_TRANSIENT);
+            if (sqlite3_step(insertStat) != SQLITE_DONE) {
+                success = NO;
+                break;
+            }
+            sqlite3_reset(insertStat);
+            sqlite3_clear_bindings(insertStat);
+
+            sqlite3_bind_blob(insertPath, 1, pathBytes, (int)strlen(pathBytes), SQLITE_TRANSIENT);
+            sqlite3_bind_int64(insertPath, 2, sqlite3_last_insert_rowid(db));
+            if (sqlite3_step(insertPath) != SQLITE_DONE) {
+                success = NO;
+                break;
+            }
+            sqlite3_reset(insertPath);
+            sqlite3_clear_bindings(insertPath);
+            registeredPaths++;
+        }
+    }
+
+    sqlite3_finalize(findPath);
+    sqlite3_finalize(insertStat);
+    sqlite3_finalize(insertPath);
+    sqlite3_finalize(storedPaths);
+    sqlite3_finalize(deletePath);
+    if (success) {
+        success = sqlite3_exec(db, "delete from stats where not exists (select 1 from paths where inode = stats.inode)", NULL, NULL, NULL) == SQLITE_OK;
+    }
+    sqlite3_exec(db, success ? "commit" : "rollback", NULL, NULL, NULL);
+    sqlite3_close(db);
+
+    if (!success) {
+        NSLog(@"iSH rootfs: metadata reconciliation failed");
+        return NO;
+    }
+    if (registeredPaths > 0) {
+        NSLog(@"iSH rootfs: registered %lu externally copied path(s)", (unsigned long)registeredPaths);
+    }
+    if (removedPaths > 0) {
+        NSLog(@"iSH rootfs: removed %lu stale metadata path(s)", (unsigned long)removedPaths);
+    }
+    return YES;
+}
+
 - (BOOL)stampRootfsMetadataAtPath:(NSString *)metaPath {
     struct stat metaStat;
     if (stat(metaPath.fileSystemRepresentation, &metaStat) != 0) {
@@ -434,65 +620,8 @@
     return rc == SQLITE_DONE;
 }
 
-- (void)logDirectoryContentsAtPath:(NSString *)path label:(NSString *)label maxDepth:(NSUInteger)maxDepth {
-    NSFileManager *fm = [NSFileManager defaultManager];
-    BOOL isDir = NO;
-    if (![fm fileExistsAtPath:path isDirectory:&isDir]) {
-        NSLog(@"iSH rootfs: %@ missing at %@", label, path);
-        return;
-    }
-    if (!isDir) {
-        NSDictionary<NSFileAttributeKey, id> *attrs = [fm attributesOfItemAtPath:path error:nil];
-        NSLog(@"iSH rootfs: %@ file %@ size=%@ inode=%@", label, path, attrs[NSFileSize], attrs[NSFileSystemFileNumber]);
-        return;
-    }
-
-    NSLog(@"iSH rootfs: listing %@ at %@", label, path);
-    [self logDirectoryContentsAtPath:path basePath:path depth:0 maxDepth:maxDepth];
-}
-
-- (void)logDirectoryContentsAtPath:(NSString *)path basePath:(NSString *)basePath depth:(NSUInteger)depth maxDepth:(NSUInteger)maxDepth {
-    if (depth > maxDepth) {
-        return;
-    }
-
-    NSFileManager *fm = [NSFileManager defaultManager];
-    NSError *error = nil;
-    NSArray<NSString *> *entries = [[fm contentsOfDirectoryAtPath:path error:&error] sortedArrayUsingSelector:@selector(compare:)];
-    if (!entries) {
-        NSLog(@"iSH rootfs: failed listing %@: %@", path, error);
-        return;
-    }
-
-    for (NSString *entry in entries) {
-        NSString *entryPath = [path stringByAppendingPathComponent:entry];
-        NSString *relativePath = [entryPath substringFromIndex:basePath.length];
-        if ([relativePath hasPrefix:@"/"]) {
-            relativePath = [relativePath substringFromIndex:1];
-        }
-
-        BOOL isDir = NO;
-        [fm fileExistsAtPath:entryPath isDirectory:&isDir];
-        NSDictionary<NSFileAttributeKey, id> *attrs = [fm attributesOfItemAtPath:entryPath error:nil];
-        NSLog(@"iSH rootfs:   %@%@ type=%@ size=%@ inode=%@",
-              relativePath,
-              isDir ? @"/" : @"",
-              attrs[NSFileType],
-              attrs[NSFileSize],
-              attrs[NSFileSystemFileNumber]);
-
-        if (isDir && depth < maxDepth) {
-            [self logDirectoryContentsAtPath:entryPath basePath:basePath depth:depth + 1 maxDepth:maxDepth];
-        }
-    }
-}
-
 - (NSString *)rootfsPath {
-    NSString *docs = NSSearchPathForDirectoriesInDomains(NSDocumentDirectory, NSUserDomainMask, YES).firstObject;
-    if (!docs) {
-        return @"";
-    }
-    return [docs stringByAppendingPathComponent:@"ish-rootfs"];
+    return AcodeIshActiveRootPath();
 }
 
 - (void)setupTerminalHookIfNeeded {
@@ -531,7 +660,10 @@
     IshEventHandler handler = [IshBridge shared].eventHandler;
     if (sessionId && handler) {
         NSData *data = [NSData dataWithBytes:buf length:len];
-        NSString *output = [[NSString alloc] initWithData:data encoding:NSISOLatin1StringEncoding] ?: @"";
+        NSString *output = [[NSString alloc] initWithData:data encoding:NSUTF8StringEncoding];
+        if (!output) {
+            output = [[NSString alloc] initWithData:data encoding:NSISOLatin1StringEncoding] ?: @"";
+        }
         handler(sessionId, @"stdout", output);
     }
     return result;

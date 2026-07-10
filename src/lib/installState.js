@@ -2,6 +2,7 @@ import fsOperation from "fileSystem";
 import Url from "utils/Url";
 
 const INSTALL_STATE_STORAGE = Url.join(DATA_STORAGE, ".install-state");
+const NATIVE_CHECKSUM_TIMEOUT_MS = 1500;
 
 export default class InstallState {
 	/** @type Record<string, string> */
@@ -31,10 +32,6 @@ export default class InstallState {
 					raw = await fsOperation(state.storeUrl).readFile("utf-8");
 					state.store = JSON.parse(raw);
 				} catch (err) {
-					console.error(
-						"InstallState: Failed to parse state file, deleting:",
-						err,
-					);
 					// Delete corrupted state file to avoid parse errors such as 'Unexpected end of JSON'
 					state.store = {};
 					try {
@@ -62,7 +59,7 @@ export default class InstallState {
 
 			return state;
 		} catch (e) {
-			console.error(e);
+			throw e;
 		}
 	}
 
@@ -81,12 +78,7 @@ export default class InstallState {
 				? await checksumText(content)
 				: await checksum(content);
 		this.updatedStore[url] = update;
-
-		if (current === update) {
-			return false;
-		} else {
-			return true;
-		}
+		return current !== update;
 	}
 
 	/**
@@ -95,11 +87,7 @@ export default class InstallState {
 	 * @returns
 	 */
 	exists(url) {
-		if (typeof this.store[url.toLowerCase()] !== "undefined") {
-			return true;
-		} else {
-			return false;
-		}
+		return typeof this.store[url.toLowerCase()] !== "undefined";
 	}
 
 	async save() {
@@ -125,10 +113,6 @@ export default class InstallState {
 				try {
 					await fsOperation(this.storeUrl).delete();
 				} catch (delErr) {
-					console.error(
-						"InstallState: Failed to delete state file during clear:",
-						delErr,
-					);
 					// As a fallback, overwrite with a valid empty JSON
 					await fsOperation(this.storeUrl).writeFile("{}");
 				}
@@ -159,13 +143,46 @@ async function checksum(data) {
  * @returns
  */
 async function checksumText(text) {
+	if (typeof cordova === "undefined" || cordova.platformId === "ios") {
+		return checksumTextInJs(text);
+	}
+
 	return new Promise((resolve, reject) => {
+		let settled = false;
+		const timeout = setTimeout(async () => {
+			if (settled) return;
+			settled = true;
+			try {
+				resolve(await checksumTextInJs(text));
+			} catch (error) {
+				reject(error);
+			}
+		}, NATIVE_CHECKSUM_TIMEOUT_MS);
+
 		cordova.exec(
-			(hash) => resolve(hash),
-			(error) => reject(error),
+			(hash) => {
+				if (settled) return;
+				settled = true;
+				clearTimeout(timeout);
+				resolve(hash);
+			},
+			async (error) => {
+				if (settled) return;
+				settled = true;
+				clearTimeout(timeout);
+				try {
+					resolve(await checksumTextInJs(text));
+				} catch (fallbackError) {
+					reject(fallbackError);
+				}
+			},
 			"System",
 			"checksumText",
 			[text],
 		);
 	});
+}
+
+async function checksumTextInJs(text) {
+	return checksum(new TextEncoder().encode(text || ""));
 }

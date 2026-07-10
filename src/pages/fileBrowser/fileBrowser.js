@@ -37,6 +37,7 @@ import util from "./util";
 function getTerminalPublicUrl() {
 	if (typeof cordova === "undefined") return "";
 	if (cordova.platformId === "ios") {
+		if (localStorage.ishActivePublicHome) return localStorage.ishActivePublicHome;
 		return Url.join(cordova.file.documentsDirectory, "ish-rootfs/data/home");
 	}
 	return cordova.file.dataDirectory + "public";

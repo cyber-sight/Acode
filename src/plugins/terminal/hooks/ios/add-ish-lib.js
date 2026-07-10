@@ -22,6 +22,7 @@ function main() {
     "iphonesimulator*": path.join(buildRoot, "ReleaseLinux-iphonesimulator"),
   };
   const libNames = [
+    "libarchive.a",
     "libiSHLinux.a",
     "liblinux-acode.a",
     path.join("meson", "liblinux_user.a"),
@@ -78,6 +79,9 @@ function main() {
       ...libs.flatMap((lib) => ["-force_load", lib]),
       "-lresolv",
       "-lsqlite3",
+      "-lbz2",
+      "-liconv",
+      "-lz",
       "-lm",
     ];
     const value = `(\n${flags.map((flag) => `\t\t\t\t\t${quotePbx(flag)},`).join("\n")}\n\t\t\t\t)`;

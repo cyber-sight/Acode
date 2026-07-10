@@ -11,6 +11,10 @@
         <clobbers target="window.Executor" />
     </js-module>
 
+    <js-module name="RootfsManager" src="www/RootfsManager.js">
+        <clobbers target="window.RootfsManager" />
+    </js-module>
+
     <platform name="android">
 
         <framework src="org.java-websocket:Java-WebSocket:1.6.0" />
@@ -84,6 +88,9 @@
             <feature name="BackgroundExecutor">
                 <param name="ios-package" value="BackgroundExecutor" />
             </feature>
+            <feature name="RootfsManager">
+                <param name="ios-package" value="RootfsManager" />
+            </feature>
         </config-file>
 
         <header-file src="src/ios/Executor.h" />
@@ -95,8 +102,11 @@
         <source-file src="src/ios/IshTerminalBridge.m" />
         <header-file src="src/ios/IshRootfs.h" />
         <source-file src="src/ios/IshRootfs.c" />
+        <header-file src="src/ios/RootfsManager.h" />
+        <source-file src="src/ios/RootfsManager.m" />
         <header-file src="src/ios/ish/include/LinuxInterop.h" />
         <header-file src="src/ios/ish/include/Terminal.h" />
+        <header-file src="src/ios/ish/include/fakefs.h" />
         <framework src="libresolv.tbd" />
         <hook type="after_prepare" src="hooks/ios/add-ish-lib.js" />
         <hook type="after_prepare" src="hooks/ios/add-ish-rootfs.js" />

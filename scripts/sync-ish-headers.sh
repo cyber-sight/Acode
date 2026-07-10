@@ -9,4 +9,4 @@ mkdir -p "$DEST_DIR"
 
 cp "$ISH_DIR/app/LinuxInterop.h" "$DEST_DIR/"
 cp "$ISH_DIR/app/Terminal.h" "$DEST_DIR/"
-
+cp "$ISH_DIR/tools/fakefs.h" "$DEST_DIR/"

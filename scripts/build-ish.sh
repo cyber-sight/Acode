@@ -156,6 +156,16 @@ build_sdk() {
 
   echo "==> Building iSH archives for $sdk..."
   xcodebuild \
+    -project "$ISH_DIR/deps/libarchive.xcodeproj" \
+    -target libarchive \
+    -configuration Release \
+    -sdk "$sdk" \
+    IPHONEOS_DEPLOYMENT_TARGET=16.0 \
+    CONFIGURATION_BUILD_DIR="$OUTPUT_DIR/$build_name" \
+    "$@" \
+    build
+
+  xcodebuild \
     -project "$ISH_DIR/iSH.xcodeproj" \
     -target libiSHLinux \
     -configuration ReleaseLinux \
@@ -171,7 +181,7 @@ build_sdk() {
 
   build_linux_user_archive "$sdk" "$target"
 
-  for lib in libiSHLinux.a liblinux-acode.a meson/liblinux_user.a meson/libish_emu.a meson/libfakefs.a; do
+  for lib in libarchive.a libiSHLinux.a liblinux-acode.a meson/liblinux_user.a meson/libish_emu.a meson/libfakefs.a; do
     local lib_path="$OUTPUT_DIR/$build_name/$lib"
     if [[ ! -f "$lib_path" ]]; then
       echo "ERROR: $lib_path not found after build"

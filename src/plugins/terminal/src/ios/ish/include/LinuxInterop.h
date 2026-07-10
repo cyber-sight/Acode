@@ -62,6 +62,10 @@ const void *NSData_bytes(nsobj_t data);
 typedef void (^StartSessionDoneBlock)(int retval, int pid, nsobj_t terminal);
 void linux_start_session(const char *exe, const char *const *argv, const char *const *envp, StartSessionDoneBlock done);
 
+// Invoked when an iSH process group started through this runtime exits.
+typedef void (^LinuxSessionExitBlock)(int pid, int status);
+void linux_set_session_exit_handler(LinuxSessionExitBlock handler);
+
 void linux_sethostname(const char *hostname);
 
 ssize_t linux_read_file(const char *path, char *buf, size_t size);
