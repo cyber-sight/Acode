@@ -1,8 +1,10 @@
 #import "RootfsManager.h"
 #import <Cordova/CDVPluginResult.h>
 #import "fakefs.h"
+#import <sqlite3.h>
 #include <sys/stat.h>
 #include <stdlib.h>
+#include <string.h>
 
 NSString *const AcodeIshDefaultRootId = @"default";
 static NSString *const AcodeIshRootsKey = @"AcodeIshRoots";
@@ -32,6 +34,87 @@ NSString *AcodeIshActiveRootPath(void) {
 BOOL AcodeIshIsDefaultRootActive(void) {
     NSString *rootId = [NSUserDefaults.standardUserDefaults stringForKey:AcodeIshActiveRootKey];
     return rootId.length == 0 || [rootId isEqualToString:AcodeIshDefaultRootId];
+}
+
+static BOOL RootfsLookupPath(sqlite3 *db, NSString *fakePath, uint32_t *mode) {
+    sqlite3_stmt *stmt = NULL;
+    BOOL found = NO;
+    const char *pathBytes = fakePath.UTF8String;
+    int pathLength = (int)strlen(pathBytes);
+    const char *sql = "SELECT s.stat FROM paths p JOIN stats s ON s.inode = p.inode "
+                      "WHERE p.path = ?1 OR CAST(p.path AS BLOB) = ?1 LIMIT 1";
+    if (sqlite3_prepare_v2(db, sql, -1, &stmt, NULL) == SQLITE_OK) {
+        sqlite3_bind_blob(stmt, 1, pathBytes, pathLength, SQLITE_TRANSIENT);
+        if (sqlite3_step(stmt) == SQLITE_ROW) {
+            const void *statBytes = sqlite3_column_blob(stmt, 0);
+            int statLength = sqlite3_column_bytes(stmt, 0);
+            if (statLength >= (int)sizeof(uint32_t)) {
+                if (mode) memcpy(mode, statBytes, sizeof(uint32_t));
+                found = YES;
+            }
+        }
+    }
+    sqlite3_finalize(stmt);
+    return found;
+}
+
+BOOL AcodeIshRootfsContainsPath(NSString *rootPath, NSString *fakePath) {
+    NSString *metaPath = [rootPath stringByAppendingPathComponent:@"meta.db"];
+    sqlite3 *db = NULL;
+    if (sqlite3_open_v2(metaPath.fileSystemRepresentation, &db, SQLITE_OPEN_READONLY, NULL) != SQLITE_OK) {
+        NSLog(@"[rootfs] unable to open metadata for %@: %s", fakePath, db ? sqlite3_errmsg(db) : "unknown");
+        if (db) sqlite3_close(db);
+        return NO;
+    }
+
+    BOOL found = NO;
+    NSString *candidate = [fakePath stringByStandardizingPath];
+    for (NSUInteger depth = 0; depth < 16 && !found; depth++) {
+        if (RootfsLookupPath(db, candidate, NULL)) {
+            found = YES;
+            break;
+        }
+
+        NSArray<NSString *> *components = candidate.pathComponents;
+        BOOL resolvedSymlink = NO;
+        NSString *prefix = @"/";
+        for (NSUInteger index = 0; index + 1 < components.count; index++) {
+            NSString *component = components[index];
+            if ([component isEqualToString:@"/"] || component.length == 0)
+                continue;
+            prefix = [prefix stringByAppendingPathComponent:component];
+
+            uint32_t mode = 0;
+            if (!RootfsLookupPath(db, prefix, &mode) || !S_ISLNK(mode))
+                continue;
+
+            NSString *backingPath = [[rootPath stringByAppendingPathComponent:@"data"]
+                                     stringByAppendingPathComponent:[prefix substringFromIndex:1]];
+            NSData *targetData = [NSData dataWithContentsOfFile:backingPath];
+            NSString *target = targetData ? [[NSString alloc] initWithData:targetData encoding:NSUTF8StringEncoding] : nil;
+            if (target.length == 0)
+                break;
+
+            NSString *resolved = [target hasPrefix:@"/"]
+                ? target
+                : [[prefix stringByDeletingLastPathComponent] stringByAppendingPathComponent:target];
+            for (NSUInteger remainder = index + 1; remainder < components.count; remainder++) {
+                resolved = [resolved stringByAppendingPathComponent:components[remainder]];
+            }
+            candidate = [resolved stringByStandardizingPath];
+            if (![candidate hasPrefix:@"/"])
+                candidate = [@"/" stringByAppendingString:candidate];
+            resolvedSymlink = YES;
+            break;
+        }
+        if (!resolvedSymlink)
+            break;
+    }
+
+    if (found && ![candidate isEqualToString:fakePath])
+        NSLog(@"[rootfs] resolved virtual path %@ -> %@", fakePath, candidate);
+    sqlite3_close(db);
+    return found;
 }
 
 static NSDictionary *RootDictionary(NSString *rootId, NSString *name, BOOL isDefault, BOOL isActive, NSString *importedAt) {
@@ -92,13 +175,49 @@ static void rootfs_progress_callback(void *cookie, double progress, const char *
 - (BOOL)validateRootAtPath:(NSString *)path error:(NSError **)error {
     NSFileManager *fm = NSFileManager.defaultManager;
     BOOL dataIsDirectory = NO;
-    BOOL valid = [fm fileExistsAtPath:[path stringByAppendingPathComponent:@"meta.db"]] &&
-        [fm fileExistsAtPath:[path stringByAppendingPathComponent:@"data"] isDirectory:&dataIsDirectory] &&
-        dataIsDirectory &&
-        [fm isExecutableFileAtPath:[path stringByAppendingPathComponent:@"data/bin/sh"]];
-    if (!valid && error)
-        *error = [NSError errorWithDomain:@"RootfsManager" code:2 userInfo:@{NSLocalizedDescriptionKey: @"The selected source is not a complete root filesystem (missing bin/sh)."}];
-    return valid;
+
+    BOOL hasMetaDb = [fm fileExistsAtPath:[path stringByAppendingPathComponent:@"meta.db"]];
+    BOOL hasDataDir = [fm fileExistsAtPath:[path stringByAppendingPathComponent:@"data"] isDirectory:&dataIsDirectory];
+    BOOL dataIsDir = dataIsDirectory;
+    BOOL hasBinSh = hasMetaDb && AcodeIshRootfsContainsPath(path, @"/bin/sh");
+
+    NSLog(@"[rootfs] validateRootAtPath: %@", path);
+    NSLog(@"[rootfs]   meta.db exists:      %d", hasMetaDb);
+    NSLog(@"[rootfs]   data exists + isDir: %d / %d", hasDataDir, dataIsDir);
+    NSLog(@"[rootfs]   virtual /bin/sh exists: %d", hasBinSh);
+
+    if (!hasMetaDb || !hasDataDir || !dataIsDir || !hasBinSh) {
+        // List what's actually in the data dir to help debug
+        NSString *dataPath = [path stringByAppendingPathComponent:@"data"];
+        NSArray *contents = [fm contentsOfDirectoryAtPath:dataPath error:nil];
+        if (contents) {
+            NSLog(@"[rootfs]   contents of data/: %@", contents);
+            // Check for bin/sh at alternative paths
+            BOOL alt1 = [fm fileExistsAtPath:[path stringByAppendingPathComponent:@"data/bin"]];
+            BOOL alt2 = [fm fileExistsAtPath:[path stringByAppendingPathComponent:@"bin"]];
+            BOOL alt3 = [fm fileExistsAtPath:[path stringByAppendingPathComponent:@"bin/sh"]];
+            NSLog(@"[rootfs]   alt checks — data/bin: %d  bin/: %d  bin/sh: %d", alt1, alt2, alt3);
+        } else {
+            NSLog(@"[rootfs]   data/ directory does not exist or is empty");
+            // List top-level contents of staging path instead
+            NSArray *topContents = [fm contentsOfDirectoryAtPath:path error:nil];
+            if (topContents) {
+                NSLog(@"[rootfs]   contents of staging root: %@", topContents);
+            }
+        }
+
+        if (error) {
+            NSString *detail = @"missing components";
+            if (!hasMetaDb) detail = @"meta.db not found";
+            else if (!hasDataDir || !dataIsDir) detail = @"data/ directory not found";
+            else if (!hasBinSh) detail = @"virtual /bin/sh not found in meta.db";
+            *error = [NSError errorWithDomain:@"RootfsManager" code:2
+                                     userInfo:@{NSLocalizedDescriptionKey:
+                                                   [NSString stringWithFormat:@"The selected source is not a complete root filesystem (%@).", detail]}];
+        }
+        return NO;
+    }
+    return YES;
 }
 
 - (void)sendError:(NSError *)error command:(CDVInvokedUrlCommand *)command {
@@ -106,23 +225,29 @@ static void rootfs_progress_callback(void *cookie, double progress, const char *
 }
 
 - (NSURL *)fileURLFromArgument:(NSString *)sourceString error:(NSError **)error {
+    NSLog(@"[rootfs] fileURLFromArgument received: %@", sourceString);
     if (sourceString.length == 0) {
         if (error) *error = [NSError errorWithDomain:@"RootfsManager" code:3 userInfo:@{NSLocalizedDescriptionKey: @"Root filesystem imports require a local file or folder."}];
         return nil;
     }
 
     NSURL *url = [NSURL URLWithString:sourceString];
-    if (url.isFileURL)
+    if (url.isFileURL) {
+        NSLog(@"[rootfs]   parsed as file URL, path=%@", url.path);
         return url;
+    }
 
     if ([sourceString hasPrefix:@"file://"]) {
         NSString *path = [sourceString stringByRemovingPercentEncoding] ?: sourceString;
         path = [path stringByReplacingOccurrencesOfString:@"file://" withString:@"" options:NSAnchoredSearch range:NSMakeRange(0, path.length)];
         if (![path hasPrefix:@"/"])
             path = [@"/" stringByAppendingString:path];
-        return [NSURL fileURLWithPath:path];
+        NSURL *result = [NSURL fileURLWithPath:path];
+        NSLog(@"[rootfs]   reconstructed file URL, path=%@", result.path);
+        return result;
     }
 
+    NSLog(@"[rootfs]   FAILED: not a file URL, scheme=%@", url.scheme ?: @"(nil)");
     if (error) *error = [NSError errorWithDomain:@"RootfsManager" code:3 userInfo:@{NSLocalizedDescriptionKey: @"Root filesystem imports require a local iOS file or folder."}];
     return nil;
 }
@@ -244,25 +369,53 @@ static void rootfs_progress_callback(void *cookie, double progress, const char *
             dispatch_async(dispatch_get_main_queue(), ^{ [self sendError:error command:command]; });
             return;
         }
+
+        NSLog(@"[rootfs] Import %@:", directory ? @"directory" : @"archive");
+        NSLog(@"[rootfs]   source: %@", sourceURL.path);
+        NSLog(@"[rootfs]   staging: %@", stagingPath);
+        NSLog(@"[rootfs]   name: %@", name);
+        if (directory) {
+            // List source dir contents so we can see what's there
+            NSArray *srcContents = [fm contentsOfDirectoryAtPath:sourceURL.path error:nil];
+            NSLog(@"[rootfs]   source contents: %@", srcContents ?: @"(unreadable)");
+            BOOL srcBinSh = [fm fileExistsAtPath:[sourceURL.path stringByAppendingPathComponent:@"bin/sh"]];
+            NSLog(@"[rootfs]   source bin/sh exists: %d", srcBinSh);
+        }
+
         struct fakefsify_error importError = {0};
         BOOL imported = directory
             ? fakefs_import_directory(sourceURL.path.fileSystemRepresentation, stagingPath.fileSystemRepresentation, &importError, (struct progress){NULL, rootfs_progress_callback})
             : fakefs_import(archiveURL.path.fileSystemRepresentation, stagingPath.fileSystemRepresentation, &importError, (struct progress){NULL, rootfs_progress_callback});
         [NSFileManager.defaultManager removeItemAtURL:archiveURL error:nil];
         if (accessingSecurityScope) [sourceURL stopAccessingSecurityScopedResource];
+
+        NSLog(@"[rootfs] fakefs_import returned: %d", imported);
         if (!imported) {
             NSString *message = importError.message ? [NSString stringWithUTF8String:importError.message] : @"Unable to import the root filesystem.";
+            NSLog(@"[rootfs]   import error: %@ (type=%d, code=%d)", message, importError.type, importError.code);
             free(importError.message);
             [fm removeItemAtPath:stagingPath error:nil];
             NSError *importNSError = [NSError errorWithDomain:@"RootfsManager" code:5 userInfo:@{NSLocalizedDescriptionKey: message}];
             dispatch_async(dispatch_get_main_queue(), ^{ [self sendError:importNSError command:command]; });
             return;
         }
+
+        // List staging dir contents after import to verify structure
+        NSString *dataDir = [stagingPath stringByAppendingPathComponent:@"data"];
+        NSArray *dataContents = [fm contentsOfDirectoryAtPath:dataDir error:nil];
+        NSLog(@"[rootfs]   staging data/ contents: %@", dataContents ?: @"(empty or missing)");
+        // Walk deeper for bin/
+        NSString *binDir = [dataDir stringByAppendingPathComponent:@"bin"];
+        NSArray *binContents = [fm contentsOfDirectoryAtPath:binDir error:nil];
+        NSLog(@"[rootfs]   staging data/bin/ contents: %@", binContents ?: @"(empty or missing)");
+
         if (![self validateRootAtPath:stagingPath error:&error]) {
+            NSLog(@"[rootfs]   VALIDATION FAILED: %@", error.localizedDescription);
             [fm removeItemAtPath:stagingPath error:nil];
             dispatch_async(dispatch_get_main_queue(), ^{ [self sendError:error command:command]; });
             return;
         }
+        NSLog(@"[rootfs]   validation passed");
         NSString *destination = RootPathForId(rootId);
         if (![fm moveItemAtPath:stagingPath toPath:destination error:&error]) {
             [fm removeItemAtPath:stagingPath error:nil];

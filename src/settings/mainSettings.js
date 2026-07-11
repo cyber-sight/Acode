@@ -72,6 +72,14 @@ export default function mainSettings() {
 			chevron: true,
 		},
 		{
+			key: "rootfs-settings",
+			text: "Root Filesystems",
+			icon: "folder",
+			info: "Manage terminal root filesystems.",
+			category: categories.core,
+			chevron: true,
+		},
+		{
 			key: "formatter",
 			text: strings.formatter,
 			icon: "spellcheck",
@@ -215,6 +223,7 @@ export default function mainSettings() {
 			case "preview-settings":
 			case "terminal-settings":
 			case "lsp-settings":
+			case "rootfs-settings":
 				appSettings.uiSettings[key].show();
 				break;
 

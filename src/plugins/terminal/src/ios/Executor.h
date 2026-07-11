@@ -3,6 +3,7 @@
 @interface Executor : CDVPlugin
 - (void)start:(CDVInvokedUrlCommand *)command;
 - (void)write:(CDVInvokedUrlCommand *)command;
+- (void)resize:(CDVInvokedUrlCommand *)command;
 - (void)stop:(CDVInvokedUrlCommand *)command;
 - (void)exec:(CDVInvokedUrlCommand *)command;
 - (void)stopService:(CDVInvokedUrlCommand *)command;

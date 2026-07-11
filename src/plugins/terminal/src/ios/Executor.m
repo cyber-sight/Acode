@@ -121,6 +121,19 @@ static __weak Executor *sharedExecutor;
     }];
 }
 
+- (void)resize:(CDVInvokedUrlCommand *)command {
+	NSString *sessionId = command.arguments.count > 0 ? command.arguments[0] : @"";
+	NSInteger columns = command.arguments.count > 1 ? [command.arguments[1] integerValue] : 0;
+	NSInteger rows = command.arguments.count > 2 ? [command.arguments[2] integerValue] : 0;
+
+	[[IshBridge shared] resizeSession:sessionId columns:columns rows:rows completion:^(NSError * _Nullable error) {
+		CDVPluginResult *result = error
+			? [CDVPluginResult resultWithStatus:CDVCommandStatus_ERROR messageAsString:error.localizedDescription]
+			: [CDVPluginResult resultWithStatus:CDVCommandStatus_OK];
+		[self.commandDelegate sendPluginResult:result callbackId:command.callbackId];
+	}];
+}
+
 - (void)stop:(CDVInvokedUrlCommand *)command {
     NSString *sessionId = command.arguments.count > 0 ? command.arguments[0] : @"";
 

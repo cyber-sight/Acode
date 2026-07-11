@@ -4,10 +4,12 @@
 #import <sqlite3.h>
 #import <sys/stat.h>
 #include <arpa/inet.h>
+#include <fcntl.h>
 #include <netdb.h>
 #include <resolv.h>
 #include <stdlib.h>
 #include <string.h>
+#include <unistd.h>
 #import "IshRootfs.h"
 #import "RootfsManager.h"
 
@@ -21,6 +23,12 @@
 #define ISH_AVAILABLE 1
 #else
 #define ISH_AVAILABLE 0
+#endif
+
+#if ISH_AVAILABLE
+@interface Terminal (AcodeResize)
+- (void)resizeToColumns:(int)columns rows:(int)rows;
+@end
 #endif
 
 @interface IshBridge ()
@@ -148,16 +156,7 @@
     }
     return;
 #else
-	// Finder edits bypass fakefs' SQLite directory index. Reconcile before the
-	// command is delivered so newly copied paths resolve in the live shell.
-	if (![self reconcileFakefsMetadataAtRootPath:[self rootfsPath]]) {
-		if (completion) {
-			completion([NSError errorWithDomain:@"IshBridge" code:8 userInfo:@{NSLocalizedDescriptionKey: @"Unable to refresh externally copied rootfs files"}]);
-		}
-		return;
-	}
-
-	Terminal *terminal = [self.sessions objectForKey:sessionId];
+    Terminal *terminal = [self.sessions objectForKey:sessionId];
     if (!terminal) {
         if (completion) {
             NSError *error = [NSError errorWithDomain:@"IshBridge" code:4 userInfo:@{NSLocalizedDescriptionKey: @"Session not found"}];
@@ -171,6 +170,32 @@
     if (completion) {
         completion(nil);
     }
+#endif
+}
+
+- (void)resizeSession:(NSString *)sessionId columns:(NSInteger)columns rows:(NSInteger)rows completion:(void (^)(NSError * _Nullable error))completion {
+#if !ISH_AVAILABLE
+	if (completion) {
+		completion([NSError errorWithDomain:@"IshBridge" code:9 userInfo:@{NSLocalizedDescriptionKey: @"iSH sources not available in build"}]);
+	}
+#else
+	Terminal *terminal = [self.sessions objectForKey:sessionId];
+	if (!terminal) {
+		if (completion) {
+			completion([NSError errorWithDomain:@"IshBridge" code:10 userInfo:@{NSLocalizedDescriptionKey: @"Session not found"}]);
+		}
+		return;
+	}
+
+	if (columns < 2 || columns > 1000 || rows < 1 || rows > 1000) {
+		if (completion) {
+			completion([NSError errorWithDomain:@"IshBridge" code:11 userInfo:@{NSLocalizedDescriptionKey: @"Invalid terminal dimensions"}]);
+		}
+		return;
+	}
+
+	[terminal resizeToColumns:(int)columns rows:(int)rows];
+	if (completion) completion(nil);
 #endif
 }
 
@@ -221,7 +246,7 @@
 
 - (BOOL)startKernelIfNeeded {
     if (self.kernelStarted) {
-        return [self reconcileFakefsMetadataAtRootPath:[self rootfsPath]];
+        return YES;
     }
     if (![self ensureRootfsReady]) {
         NSLog(@"iSH rootfs: initialization failed; kernel start skipped");
@@ -251,14 +276,21 @@
     BOOL isDir = NO;
     NSString *rootMeta = [rootPath stringByAppendingPathComponent:@"meta.db"];
     NSString *rootData = [rootPath stringByAppendingPathComponent:@"data"];
-    NSString *rootShell = [rootData stringByAppendingPathComponent:@"bin/sh"];
     BOOL dataIsDir = NO;
-    if ([fm fileExistsAtPath:rootPath isDirectory:&isDir] &&
-        isDir &&
-        [fm fileExistsAtPath:rootMeta] &&
-        [fm fileExistsAtPath:rootData isDirectory:&dataIsDir] &&
-        dataIsDir &&
-        [fm fileExistsAtPath:rootShell] &&
+    BOOL hasRootDirectory = [fm fileExistsAtPath:rootPath isDirectory:&isDir] && isDir;
+    BOOL hasMetaDb = [fm fileExistsAtPath:rootMeta];
+    BOOL hasDataDirectory = [fm fileExistsAtPath:rootData isDirectory:&dataIsDir] && dataIsDir;
+
+    // iSH stores Linux symlinks as regular backing files plus metadata. Repair
+    // older folder imports before checking /bin/sh, since merged-/usr roots
+    // commonly expose /bin as a native host symlink to /usr/bin.
+    if (hasRootDirectory && hasMetaDb && hasDataDirectory &&
+        ![self materializeFakefsSymlinksAtRootPath:rootPath]) {
+        return NO;
+    }
+
+    BOOL hasShell = hasMetaDb && AcodeIshRootfsContainsPath(rootPath, @"/bin/sh");
+    if (hasRootDirectory && hasMetaDb && hasDataDirectory && hasShell &&
         [self stampRootfsMetadataAtPath:rootMeta]) {
         [self writeResolverConfigurationAtRootPath:rootPath];
         return [self reconcileFakefsMetadataAtRootPath:rootPath];
@@ -267,7 +299,8 @@
     // Imported roots are immutable after their staged import succeeds. Only
     // bootstrap the bundled default root when it has not been initialized yet.
     if (!AcodeIshIsDefaultRootActive()) {
-        NSLog(@"iSH rootfs: selected imported root is missing or invalid");
+        NSLog(@"iSH rootfs: selected imported root is missing or invalid (root=%d meta=%d data=%d shell=%d)",
+              hasRootDirectory, hasMetaDb, hasDataDirectory, hasShell);
         return NO;
     }
 
@@ -320,7 +353,7 @@
     BOOL ready = [fm fileExistsAtPath:rootMeta] &&
                  [fm fileExistsAtPath:rootData isDirectory:&dataIsDir] &&
                  dataIsDir &&
-                 [fm fileExistsAtPath:rootShell] &&
+                 AcodeIshRootfsContainsPath(rootPath, @"/bin/sh") &&
                  [self stampRootfsMetadataAtPath:rootMeta];
     if (ready) {
         [self writeResolverConfigurationAtRootPath:rootPath];
@@ -330,6 +363,95 @@
         NSLog(@"iSH rootfs: copied rootfs validation failed");
     }
     return ready;
+}
+
+- (BOOL)materializeFakefsSymlinksAtRootPath:(NSString *)rootPath {
+    NSString *metaPath = [rootPath stringByAppendingPathComponent:@"meta.db"];
+    NSString *dataPath = [rootPath stringByAppendingPathComponent:@"data"];
+    sqlite3 *db = NULL;
+    if (sqlite3_open_v2(metaPath.fileSystemRepresentation, &db, SQLITE_OPEN_READONLY, NULL) != SQLITE_OK) {
+        NSLog(@"iSH rootfs: unable to inspect fakefs symlinks: %s", db ? sqlite3_errmsg(db) : "unknown");
+        if (db) sqlite3_close(db);
+        return NO;
+    }
+
+    sqlite3_stmt *stmt = NULL;
+    NSMutableArray<NSString *> *symlinkPaths = [NSMutableArray array];
+    BOOL success = sqlite3_prepare_v2(db, "SELECT p.path, s.stat FROM paths p JOIN stats s ON s.inode = p.inode", -1, &stmt, NULL) == SQLITE_OK;
+    while (success && sqlite3_step(stmt) == SQLITE_ROW) {
+        const void *pathBytes = sqlite3_column_blob(stmt, 0);
+        int pathLength = sqlite3_column_bytes(stmt, 0);
+        const void *statBytes = sqlite3_column_blob(stmt, 1);
+        int statLength = sqlite3_column_bytes(stmt, 1);
+        if (statLength < (int)sizeof(uint32_t)) {
+            success = NO;
+            break;
+        }
+        uint32_t mode = 0;
+        memcpy(&mode, statBytes, sizeof(mode));
+        if (!S_ISLNK(mode))
+            continue;
+        NSString *fakePath = [[NSString alloc] initWithBytes:pathBytes length:pathLength encoding:NSUTF8StringEncoding];
+        if (!fakePath || [fakePath containsString:@".."] || ![fakePath hasPrefix:@"/"]) {
+            success = NO;
+            break;
+        }
+        [symlinkPaths addObject:fakePath];
+    }
+    if (sqlite3_errcode(db) != SQLITE_OK && sqlite3_errcode(db) != SQLITE_DONE)
+        success = NO;
+    sqlite3_finalize(stmt);
+    sqlite3_close(db);
+    if (!success) {
+        NSLog(@"iSH rootfs: invalid metadata while inspecting symlinks");
+        return NO;
+    }
+
+    NSUInteger repaired = 0;
+    for (NSString *fakePath in symlinkPaths) {
+        NSString *hostPath = [dataPath stringByAppendingPathComponent:[fakePath substringFromIndex:1]];
+        struct stat hostStat;
+        if (lstat(hostPath.fileSystemRepresentation, &hostStat) < 0) {
+            NSLog(@"iSH rootfs: fakefs symlink backing path is missing: %@", fakePath);
+            return NO;
+        }
+        if (!S_ISLNK(hostStat.st_mode))
+            continue;
+
+        char target[PATH_MAX];
+        ssize_t targetLength = readlink(hostPath.fileSystemRepresentation, target, sizeof(target));
+        if (targetLength < 0 || targetLength >= (ssize_t)sizeof(target)) {
+            NSLog(@"iSH rootfs: unable to read symlink backing path %@", fakePath);
+            return NO;
+        }
+
+        NSString *temporaryPath = [hostPath stringByAppendingFormat:@".acode-link-%@", NSUUID.UUID.UUIDString];
+        int fd = open(temporaryPath.fileSystemRepresentation, O_WRONLY | O_CREAT | O_EXCL, 0666);
+        if (fd < 0) {
+            NSLog(@"iSH rootfs: unable to stage symlink repair for %@: %s", fakePath, strerror(errno));
+            return NO;
+        }
+        ssize_t offset = 0;
+        while (offset < targetLength) {
+            ssize_t written = write(fd, target + offset, (size_t)(targetLength - offset));
+            if (written < 0) {
+                close(fd);
+                unlink(temporaryPath.fileSystemRepresentation);
+                NSLog(@"iSH rootfs: unable to materialize symlink %@: %s", fakePath, strerror(errno));
+                return NO;
+            }
+            offset += written;
+        }
+        if (close(fd) < 0 || rename(temporaryPath.fileSystemRepresentation, hostPath.fileSystemRepresentation) < 0) {
+            unlink(temporaryPath.fileSystemRepresentation);
+            NSLog(@"iSH rootfs: unable to replace symlink backing path %@: %s", fakePath, strerror(errno));
+            return NO;
+        }
+        repaired++;
+    }
+    if (repaired > 0)
+        NSLog(@"iSH rootfs: materialized %lu imported symlink backing file(s)", (unsigned long)repaired);
+    return YES;
 }
 
 - (void)writeResolverConfigurationAtRootPath:(NSString *)rootPath {
@@ -492,6 +614,10 @@
 
     NSUInteger registeredPaths = 0;
     NSUInteger removedPaths = 0;
+    __block NSUInteger enumeratedFiles = 0;
+    __block NSUInteger alreadyExists = 0;
+    __block NSUInteger insertedFiles = 0;
+    __block BOOL foundSh = NO;
     if (success) {
         NSFileManager *fm = [NSFileManager defaultManager];
         // fakefs uses meta.db as the directory index. Remove records that no
@@ -514,7 +640,10 @@
                 success = NO;
                 break;
             }
-            sqlite3_bind_blob(deletePath, 1, pathBytes, pathLength, SQLITE_TRANSIENT);
+            // BLOB bind — deletePath must match the kernel's BLOB-stored paths.
+            // TEXT != BLOB in SQLite equality, so using bind_text would
+            // silently fail to delete paths stored as BLOB by fakefs_import.
+            sqlite3_bind_blob(deletePath, 1, fakePath.UTF8String, (int)strlen(fakePath.UTF8String), SQLITE_TRANSIENT);
             if (sqlite3_step(deletePath) != SQLITE_DONE) {
                 success = NO;
                 break;
@@ -530,6 +659,7 @@
         NSDirectoryEnumerator<NSString *> *enumerator = [fm enumeratorAtPath:dataPath];
         for (NSString *relativePath in enumerator) {
             if (!success) break;
+            enumeratedFiles++;
             NSString *hostPath = [dataPath stringByAppendingPathComponent:relativePath];
             struct stat fileStat;
             if (lstat(hostPath.fileSystemRepresentation, &fileStat) != 0) {
@@ -537,18 +667,24 @@
             }
 
             NSString *fakePath = [@"/" stringByAppendingString:relativePath];
+            if ([fakePath isEqualToString:@"/bin/sh"]) foundSh = YES;
             const char *pathBytes = fakePath.UTF8String;
+            // MUST bind as BLOB — the kernel's bind_path() uses
+            // sqlite3_bind_blob and fakefs_import stores paths as BLOB.
+            // TEXT != BLOB in SQLite equality even with identical bytes.
             sqlite3_bind_blob(findPath, 1, pathBytes, (int)strlen(pathBytes), SQLITE_TRANSIENT);
             int findResult = sqlite3_step(findPath);
             sqlite3_reset(findPath);
             sqlite3_clear_bindings(findPath);
             if (findResult == SQLITE_ROW) {
+                alreadyExists++;
                 continue;
             }
             if (findResult != SQLITE_DONE) {
                 success = NO;
                 break;
             }
+            insertedFiles++;
 
             struct {
                 uint32_t mode;
@@ -574,6 +710,72 @@
             sqlite3_clear_bindings(insertPath);
             registeredPaths++;
         }
+
+        // NSDirectoryEnumerator does NOT descend into symlinked directories.
+        // On merged-usr Debian systems, /bin, /sbin, /lib → /usr/{bin,sbin,lib}.
+        // Manually walk symlinked directories so symlink-based paths like /bin/sh
+        // are registered, not just /usr/bin/sh.
+        NSArray *topLevel = [fm contentsOfDirectoryAtPath:dataPath error:nil];
+        for (NSString *entry in topLevel) {
+            if (!success) break;
+            NSString *entryPath = [dataPath stringByAppendingPathComponent:entry];
+            NSDictionary *attrs = [fm attributesOfItemAtPath:entryPath error:nil];
+            if (attrs[NSFileType] != NSFileTypeSymbolicLink) continue;
+            NSString *linkTarget = [fm destinationOfSymbolicLinkAtPath:entryPath error:nil];
+            if (!linkTarget) continue;
+
+            // Resolve relative symlinks (e.g. "usr/bin") against dataPath
+            NSString *resolved = [linkTarget hasPrefix:@"/"] ? linkTarget : [[entryPath stringByDeletingLastPathComponent] stringByAppendingPathComponent:linkTarget];
+            resolved = [resolved stringByStandardizingPath];
+            BOOL isDir = NO;
+            if (![fm fileExistsAtPath:resolved isDirectory:&isDir] || !isDir) continue;
+
+            NSArray *children = [fm contentsOfDirectoryAtPath:resolved error:nil];
+            for (NSString *child in children) {
+                if (!success) break;
+                NSString *childPath = [resolved stringByAppendingPathComponent:child];
+                struct stat childStat;
+                if (lstat(childPath.fileSystemRepresentation, &childStat) != 0) continue;
+                if (S_ISDIR(childStat.st_mode)) continue; // skip subdirs, only register files
+
+                NSString *fakePath = [@"/" stringByAppendingPathComponent:entry];
+                fakePath = [fakePath stringByAppendingPathComponent:child];
+                if ([fakePath isEqualToString:@"/bin/sh"]) foundSh = YES;
+                const char *regPathBytes = fakePath.UTF8String;
+
+                sqlite3_bind_blob(findPath, 1, regPathBytes, (int)strlen(regPathBytes), SQLITE_TRANSIENT);
+                int findResult = sqlite3_step(findPath);
+                sqlite3_reset(findPath);
+                sqlite3_clear_bindings(findPath);
+                if (findResult == SQLITE_ROW) {
+                    alreadyExists++;
+                    continue;
+                }
+                if (findResult != SQLITE_DONE) {
+                    continue; // no break — less critical
+                }
+                insertedFiles++;
+
+                struct {
+                    uint32_t mode;
+                    uint32_t uid;
+                    uint32_t gid;
+                    uint32_t rdev;
+                } regStat = { (uint32_t)childStat.st_mode, 0, 0, (uint32_t)childStat.st_rdev };
+                sqlite3_bind_blob(insertStat, 1, &regStat, sizeof(regStat), SQLITE_TRANSIENT);
+                if (sqlite3_step(insertStat) != SQLITE_DONE) continue;
+                sqlite3_reset(insertStat);
+                sqlite3_clear_bindings(insertStat);
+
+                sqlite3_bind_blob(insertPath, 1, regPathBytes, (int)strlen(regPathBytes), SQLITE_TRANSIENT);
+                sqlite3_bind_int64(insertPath, 2, sqlite3_last_insert_rowid(db));
+                if (sqlite3_step(insertPath) == SQLITE_DONE) {
+                    registeredPaths++;
+                }
+                sqlite3_reset(insertPath);
+                sqlite3_clear_bindings(insertPath);
+            }
+        }
     }
 
     sqlite3_finalize(findPath);
@@ -588,14 +790,11 @@
     sqlite3_close(db);
 
     if (!success) {
-        NSLog(@"iSH rootfs: metadata reconciliation failed");
+        NSLog(@"iSH rootfs: metadata reconciliation failed (enumerated=%lu existing=%lu inserted=%lu foundSh=%d)", (unsigned long)enumeratedFiles, (unsigned long)alreadyExists, (unsigned long)insertedFiles, foundSh);
         return NO;
     }
-    if (registeredPaths > 0) {
-        NSLog(@"iSH rootfs: registered %lu externally copied path(s)", (unsigned long)registeredPaths);
-    }
-    if (removedPaths > 0) {
-        NSLog(@"iSH rootfs: removed %lu stale metadata path(s)", (unsigned long)removedPaths);
+    if (registeredPaths > 0 || insertedFiles > 0) {
+        NSLog(@"iSH rootfs: reconciled metadata: enumerated=%lu alreadyExist=%lu newlyAdded=%lu removed=%lu foundShInEnum=%d", (unsigned long)enumeratedFiles, (unsigned long)alreadyExists, (unsigned long)insertedFiles, (unsigned long)removedPaths, foundSh);
     }
     return YES;
 }
