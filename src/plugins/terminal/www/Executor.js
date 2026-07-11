@@ -124,6 +124,12 @@ class Executor {
     });
   }
 
+  resize(uuid, columns, rows) {
+    return new Promise((resolve, reject) => {
+      exec(resolve, reject, this.ExecutorType, "resize", [uuid, columns, rows]);
+    });
+  }
+
   /**
    * Moves the executor service to the background (stops foreground notification).
    *

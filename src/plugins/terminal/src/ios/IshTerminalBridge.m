@@ -101,6 +101,19 @@ static NSMapTable<NSUUID *, Terminal *> *acodeTerminalsByUUID;
     });
 }
 
+- (void)resizeToColumns:(int)columns rows:(int)rows {
+	struct linux_tty *tty = _linuxTTY;
+	if (!tty || !tty->ops || !tty->ops->resize) {
+		return;
+	}
+
+	async_do_in_workqueue(^{
+		if (tty && tty->ops && tty->ops->resize) {
+			tty->ops->resize(tty, columns, rows);
+		}
+	});
+}
+
 - (NSString *)arrow:(char)direction {
     return [NSString stringWithFormat:@"\x1b[%c", direction];
 }

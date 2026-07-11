@@ -5,6 +5,7 @@ NS_ASSUME_NONNULL_BEGIN
 FOUNDATION_EXPORT NSString *const AcodeIshDefaultRootId;
 FOUNDATION_EXPORT NSString *AcodeIshActiveRootPath(void);
 FOUNDATION_EXPORT BOOL AcodeIshIsDefaultRootActive(void);
+FOUNDATION_EXPORT BOOL AcodeIshRootfsContainsPath(NSString *rootPath, NSString *fakePath);
 
 @interface RootfsManager : CDVPlugin
 - (void)list:(CDVInvokedUrlCommand *)command;

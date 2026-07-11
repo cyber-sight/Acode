@@ -54,8 +54,11 @@ export default function rootfsSettings() {
 		page?.hide();
 		try {
 			await refreshPublicHome();
-			page = createPage(await rootfsManager.list());
+			const roots = await rootfsManager.list();
+			console.log("[rootfs] Listed", roots.length, "root filesystem(s)");
+			page = createPage(roots);
 		} catch (error) {
+			console.log("[rootfs] List failed:", error?.message);
 			page = createPage([], error?.message || "The iOS RootfsManager service is unavailable.");
 		}
 		page.show();
@@ -78,8 +81,10 @@ export default function rootfsSettings() {
 			});
 			if (!name) return;
 			loader.showTitleLoader();
+			console.log("[rootfs] Starting import:", directory ? "folder" : "archive", "→", name);
 			if (directory) await rootfsManager.importDirectory(selected.url, name);
 			else await rootfsManager.importArchive(selected.url, name);
+			console.log("[rootfs] Import finished:", name);
 			toast("Root filesystem imported");
 			await refresh();
 		} catch (error) {
@@ -100,23 +105,30 @@ export default function rootfsSettings() {
 		const action = await select(root.name, options);
 		if (!action) return;
 		if (action === "activate") {
+			console.log("[rootfs] Activating:", root.name);
 			const result = await rootfsManager.activate(root.id);
 			await refreshPublicHome();
 			if (result.restartRequired) toast("Root selected. Close and relaunch Acode to use it.");
 			await refresh();
+			console.log("[rootfs] Activated:", root.name);
 			return;
 		}
 		if (action === "rename") {
 			const name = await prompt("Root Filesystem Name", root.name, "text", { required: true });
-			if (name) await rootfsManager.rename(root.id, name);
+			if (name) {
+				console.log("[rootfs] Renaming:", root.name, "→", name);
+				await rootfsManager.rename(root.id, name);
+			}
 			await refresh();
 			return;
 		}
 		if (action === "delete") {
 			const accepted = await confirm("Delete Root Filesystem", `Delete ${root.name}? This cannot be undone.`);
 			if (accepted) {
+				console.log("[rootfs] Deleting:", root.name);
 				await rootfsManager.delete(root.id);
 				await refresh();
+				console.log("[rootfs] Deleted:", root.name);
 			}
 		}
 	}
