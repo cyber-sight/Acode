@@ -244,6 +244,33 @@
     }
 }
 
+- (BOOL)reconcileFs:(NSError **)error {
+    NSString *rootPath = [self rootfsPath];
+    if (rootPath.length == 0) {
+        if (error) {
+            *error = [NSError errorWithDomain:@"IshBridge" code:8
+                userInfo:@{NSLocalizedDescriptionKey: @"Root filesystem path unavailable"}];
+        }
+        return NO;
+    }
+
+    // ensureRootfsReady must have been called first (sets up IshSetRootPath etc.)
+    if (!self.kernelStarted) {
+        if (error) {
+            *error = [NSError errorWithDomain:@"IshBridge" code:9
+                userInfo:@{NSLocalizedDescriptionKey: @"Kernel not started"}];
+        }
+        return NO;
+    }
+
+    BOOL ok = [self reconcileFakefsMetadataAtRootPath:rootPath];
+    if (!ok && error) {
+        *error = [NSError errorWithDomain:@"IshBridge" code:10
+            userInfo:@{NSLocalizedDescriptionKey: @"Metadata reconciliation failed"}];
+    }
+    return ok;
+}
+
 - (BOOL)startKernelIfNeeded {
     if (self.kernelStarted) {
         return YES;

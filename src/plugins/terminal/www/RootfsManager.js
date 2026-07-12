@@ -12,4 +12,5 @@ module.exports = {
   rename: (id, name) => invoke("rename", [id, name]),
   delete: (id) => invoke("delete", [id]),
   getActivePublicHome: () => invoke("getActivePublicHome"),
+  reconcileFs: () => invoke("reconcileFs"),
 };
