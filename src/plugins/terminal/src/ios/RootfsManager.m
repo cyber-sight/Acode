@@ -1,5 +1,6 @@
 #import "RootfsManager.h"
 #import <Cordova/CDVPluginResult.h>
+#import "IshBridge.h"
 #import "fakefs.h"
 #import <sqlite3.h>
 #include <sys/stat.h>
@@ -484,6 +485,17 @@ static void rootfs_progress_callback(void *cookie, double progress, const char *
 - (void)getActivePublicHome:(CDVInvokedUrlCommand *)command {
     NSString *path = [[AcodeIshActiveRootPath() stringByAppendingPathComponent:@"data"] stringByAppendingPathComponent:@"home"];
     [self.commandDelegate sendPluginResult:[CDVPluginResult resultWithStatus:CDVCommandStatus_OK messageAsString:path] callbackId:command.callbackId];
+}
+
+- (void)reconcileFs:(CDVInvokedUrlCommand *)command {
+    NSError *error = nil;
+    BOOL ok = [[IshBridge shared] reconcileFs:&error];
+    if (ok) {
+        [self.commandDelegate sendPluginResult:[CDVPluginResult resultWithStatus:CDVCommandStatus_OK] callbackId:command.callbackId];
+    } else {
+        NSString *msg = error.localizedDescription ?: @"Reconciliation failed";
+        [self.commandDelegate sendPluginResult:[CDVPluginResult resultWithStatus:CDVCommandStatus_ERROR messageAsString:msg] callbackId:command.callbackId];
+    }
 }
 
 @end

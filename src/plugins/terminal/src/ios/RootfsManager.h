@@ -15,6 +15,13 @@ FOUNDATION_EXPORT BOOL AcodeIshRootfsContainsPath(NSString *rootPath, NSString *
 - (void)rename:(CDVInvokedUrlCommand *)command;
 - (void)delete:(CDVInvokedUrlCommand *)command;
 - (void)getActivePublicHome:(CDVInvokedUrlCommand *)command;
+
+/**
+ * Reconcile the active rootfs filesystem metadata.
+ * Scans the data/ directory for files that exist on disk but are missing
+ * from meta.db (e.g. newly added via Finder) and vice versa.
+ */
+- (void)reconcileFs:(CDVInvokedUrlCommand *)command;
 @end
 
 NS_ASSUME_NONNULL_END

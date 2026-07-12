@@ -15,6 +15,16 @@ typedef void (^IshEventHandler)(NSString *sessionId, NSString *type, NSString *p
 
 - (void)setEventHandler:(IshEventHandler)handler;
 
+/**
+ * Reconcile metadata: scans the active rootfs data/ directory and registers
+ * any files that exist on disk but are missing from meta.db. Also removes
+ * stale entries for files that no longer exist.
+ *
+ * Call this after files are added or removed outside of iSH (e.g. via Finder).
+ * Returns YES on success.
+ */
+- (BOOL)reconcileFs:(NSError **)error;
+
 @end
 
 NS_ASSUME_NONNULL_END
