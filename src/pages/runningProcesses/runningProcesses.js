@@ -233,7 +233,9 @@ export default function RunningProcesses() {
 				>
 					<span className="process-name">{name}</span>
 					<span className="process-pid">{proc.pid}</span>
-					{proc.managed && <span className="process-tag">Managed</span>}
+					{proc.managed && (
+						<span className="process-tag">{text("managed", "Managed")}</span>
+					)}
 					<span className="process-memory">{formatMemory(proc.memory)}</span>
 					{!proc.isSelf && (
 						<span
@@ -251,22 +253,26 @@ export default function RunningProcesses() {
 
 				<div className={`process-item-details ${isExpanded ? "expanded" : ""}`}>
 					<div className="detail-row">
-						<span className="detail-label">Command</span>
+						<span className="detail-label">{text("command", "Command")}</span>
 						<code className="detail-value monospace selectable">
 							{proc.command}
 						</code>
 					</div>
 					<div className="detail-row">
-						<span className="detail-label">PPID (Parent)</span>
+						<span className="detail-label">
+							{text("ppid parent", "PPID (Parent)")}
+						</span>
 						<code className="detail-value">{proc.ppid}</code>
 					</div>
 					<div className="detail-row">
-						<span className="detail-label">Uptime</span>
+						<span className="detail-label">{text("uptime", "Uptime")}</span>
 						<span className="detail-value">{uptime}</span>
 					</div>
 					{proc.managed && (
 						<div className="detail-row highlight">
-							<span className="detail-label">Acode Service</span>
+							<span className="detail-label">
+								{text("acode service", "Acode Service")}
+							</span>
 							<span className="detail-value">
 								{proc.managedType} ({proc.alpine ? "Alpine" : "Android"})
 							</span>
@@ -274,8 +280,10 @@ export default function RunningProcesses() {
 					)}
 					{proc.isSelf && (
 						<div className="detail-row highlight-self">
-							<span className="detail-label">Note</span>
-							<span className="detail-value">Acode main process</span>
+							<span className="detail-label">{text("note", "Note")}</span>
+							<span className="detail-value">
+								{text("acode main process", "Acode main process")}
+							</span>
 						</div>
 					)}
 				</div>
@@ -415,11 +423,17 @@ function formatMemory(kb) {
 	return `${mb.toFixed(1)} MB`;
 }
 
+function interpolate(str, replacements) {
+	return str.replace(/\{(\w+)\}/g, (match, key) => {
+		return replacements.hasOwnProperty(key) ? replacements[key] : match;
+	});
+}
+
 function formatUptime(startedAt) {
-	if (!startedAt) return "Unknown";
+	if (!startedAt) return text("unknown", "Unknown");
 	const now = Date.now();
 	const diffMs = now - startedAt;
-	if (diffMs < 0) return "Just started";
+	if (diffMs < 0) return text("just started", "Just Started");
 
 	const diffSec = Math.floor(diffMs / 1000);
 	const diffMin = Math.floor(diffSec / 60);
@@ -427,13 +441,24 @@ function formatUptime(startedAt) {
 	const diffDays = Math.floor(diffHr / 24);
 
 	if (diffDays > 0) {
-		return `${diffDays}d ${diffHr % 24}h ago`;
+		return interpolate(text("diff days", "{days}d {hr}h ago"), {
+			days: diffDays,
+			hr: diffHr % 24,
+		});
 	}
 	if (diffHr > 0) {
-		return `${diffHr}h ${diffMin % 60}m ago`;
+		return interpolate(text("diff hr", "{hr}h {min}m ago"), {
+			hr: diffHr,
+			min: diffMin % 60,
+		});
 	}
 	if (diffMin > 0) {
-		return `${diffMin}m ${diffSec % 60}s ago`;
+		return interpolate(text("diff min", "{min}m {sec}s ago"), {
+			min: diffMin,
+			sec: diffSec % 60,
+		});
 	}
-	return `${diffSec}s ago`;
+	return interpolate(text("diff sec", "{sec}s ago"), {
+		sec: diffSec,
+	});
 }
