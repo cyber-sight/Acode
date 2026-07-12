@@ -4759,6 +4759,22 @@ async function EditorManager($header, $body) {
 				manager.activeFile = file;
 				file.tab?.classList.add("active");
 				updateHeaderForFile(file);
+				if (file.type === "editor") {
+					if (!file.loaded && !file.loading) {
+						showLoadingEditor(file);
+					} else {
+						applyFileToPaneEditor(file, pane);
+					}
+					pane.editorContainer.style.display = "block";
+
+					$hScrollbar.hideImmediately();
+					$vScrollbar.hideImmediately();
+
+					setVScrollValue();
+					if (!appSettings.value.textWrap) {
+						setHScrollValue();
+					}
+				}
 				if (isPaneTabLayout()) syncGlobalOpenFileListMirror();
 				recordHistory(file);
 				manager.onupdate("switch-file");
