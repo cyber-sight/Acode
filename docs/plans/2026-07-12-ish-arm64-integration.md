@@ -1,7 +1,7 @@
 # Plan: Integrate OpenMinis/ish-arm64 into Acode
 
 **Date:** 2026-07-12  
-**Status:** Revised draft — pending approval before implementation  
+**Status:** Implemented locally — native builds verified; physical-device runtime verification remains
 **Goal:** Keep Acode's current `third_party/ish` checkout intact as the known-good x86 implementation and porting reference, add a pinned OpenMinis/ish-arm64 checkout at `third_party/ish-arm64`, build an arm64 Linux guest consistently from the new checkout, and ship an Alpine aarch64 rootfs without regressing the existing terminal and rootfs features.
 
 ## 1. Validated Current State
@@ -61,7 +61,7 @@ The OpenMinis fork inspected for this plan was:
 - Validated commit: `8932511fa0ab6abf77d5ead19503476d8b816f4f`
 - Commit date: 2026-07-07
 
-Revalidate the remote immediately before implementation and deliberately update the pinned commit if a newer revision is chosen.
+This commit was deliberately retained as the integration base. The Acode port currently ends at `5483be0` on branch `acode-arm64`.
 
 ### 2.1 Guest architecture model
 
@@ -94,14 +94,29 @@ The fork retains the `ReleaseLinux` configuration and `libiSHLinux` target. Its 
 
 Library names and paths must still be verified from actual build output before changing the Cordova link hook.
 
-## 3. Decisions Required Before Implementation
+## 3. Implementation Record
 
-Only two choices are required before work begins:
+The implementation selected an arm64-only initial compatibility target and retained OpenMinis as the recorded upstream source. The port branch must be pushed to the configured durable `upstream` remote before the parent repository's gitlink is treated as shareable.
 
-1. **Canonical iSH repository:** use OpenMinis directly at a pinned commit, or create an Acode-owned fork that will contain the ported commits. An Acode-owned fork is recommended because Acode already carries a durable native patch series.
-2. **Initial compatibility target:** ship arm64 guest only, or produce separate x86 and arm64 guest builds. Arm64-only is recommended for the first integration. Supporting both requires separate native artifact sets and an explicit build/package selection strategy; bundling two rootfs directories alone is insufficient.
+Exact nested revisions at the current port tip are:
 
-The test scope is not optional: run the fork's registered tests for the selected guest architecture plus Acode's device-level integration and regression checks.
+- `deps/libapps`: `b8cacae35e5b11d64bb736a053921c16ca7faf9e`
+- `deps/libarchive`: `fc6563f5130d8a7ee1fc27c0e55baef35119f26c`
+- `deps/linux`: `8ec9bf17f89c6dba818f3ed2427de4223e78644a`
+
+Port commits, in order:
+
+- `70c4bbd` — PTY initialization and Xcode build configuration
+- `a09efa1` — root filesystem initialization and logging
+- `e661934` — Linux interoperability and filesystem tools
+- `864e2f6` — fakefs symlink-target storage
+- `7fc5976` — fakefs orphan auto-registration
+- `1329b28` — Acode `/tmp` bootstrap with the arm64 Linux dependency retained
+- `6760246` — SQLite linkage for the ported `fakefsify` importer
+- `163a8a7` — arm64 register bridging and robust multi-entry rootfs archive import
+- `5483be0` — removal of duplicate ARM64 gadget definitions that blocked final app linking
+
+The old dependency-pointer-only change was not copied because the fork's arm64 Linux revision is intentional. Architecture-sensitive futex/syscall work was merged into the fork's architecture-specific implementation. Generated noise was excluded.
 
 ## 4. Implementation Plan
 
@@ -383,13 +398,14 @@ Do not reset or clean `third_party/ish` during rollback. Its preserved branch, H
 
 The integration is complete only when:
 
-- [ ] `third_party/ish` remains at its original branch, HEAD, and working-tree state.
-- [ ] `third_party/ish-arm64` has a valid `.gitmodules` entry and pinned gitlink.
-- [ ] Every current Acode iSH change is ported, superseded with evidence, or explicitly excluded as generated noise.
-- [ ] The selected OpenMinis base commit, `third_party/ish-arm64` port branch, and nested dependency revisions are documented.
-- [ ] Guest architecture is explicitly set to `arm64` throughout Xcode, Meson, manual compilation, host tools, and tests.
-- [ ] Device and simulator builds produce and link all required archives from the same arm64 guest build.
-- [ ] The arm64 guest CLI runs the staged Alpine aarch64 rootfs and reports `aarch64`.
+- [x] `third_party/ish` remains at its original branch, HEAD, and working-tree state.
+- [x] `third_party/ish-arm64` has a valid `.gitmodules` entry and pinned gitlink.
+- [x] Every current Acode iSH change is ported, superseded with evidence, or explicitly excluded as generated noise.
+- [x] The selected OpenMinis base commit, `third_party/ish-arm64` port branch, and nested dependency revisions are documented.
+- [x] Guest architecture is explicitly set to `arm64` throughout Xcode, Meson, manual compilation, host tools, and tests.
+- [x] Device and simulator builds produce all required archives from the same arm64 guest build, with archive architecture and required symbols inspected.
+- [x] A freshly prepared Cordova project is confirmed to link only the architecture-qualified `third_party/ish-arm64` artifacts.
+- [x] The arm64 guest CLI runs the staged Alpine aarch64 rootfs and reports `aarch64`.
 - [ ] The bundled rootfs passes metadata integrity, command-presence, package, and `acode doctor` checks.
 - [ ] The Cordova iOS app builds and runs on a physical device.
 - [ ] Terminal start, write, resize, stop, streaming, exit-status, and concurrent-session behavior pass.
@@ -397,6 +413,18 @@ The integration is complete only when:
 - [ ] Rootfs import, validation, activation, listing, rename, deletion, and reconciliation pass.
 - [ ] All tests registered by the selected fork configuration pass, or any exception is documented and approved.
 - [ ] Rollback successfully rebuilds from the still-present `third_party/ish` checkout without reconstructing it.
+
+### Verification notes
+
+Local native verification completed on 2026-07-12:
+
+- The clean OpenMinis arm64 baseline and patched fork compile with Meson.
+- Matching arm64-guest host `ish` and `fakefsify` targets compile.
+- Device and simulator builds produced all six primary archives; archive inspection reported arm64 and found the required Acode session symbols.
+- Cordova prepare and the iOS device archive/export completed.
+- Shell syntax validation passed for the integration scripts.
+
+The fork's registered end-to-end test is not counted as passing: its test script assumes `./build/ish` even when Meson uses another build directory and downloads an x86 Alpine archive. The physical-device checks in sections 7.3 through 7.6 remain mandatory. They cannot be replaced by an iOS archive/link result.
 
 ## 8. Estimated Effort
 

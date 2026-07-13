@@ -308,6 +308,34 @@
     BOOL hasMetaDb = [fm fileExistsAtPath:rootMeta];
     BOOL hasDataDirectory = [fm fileExistsAtPath:rootData isDirectory:&dataIsDir] && dataIsDir;
 
+    NSString *bundleRoot = [[NSBundle mainBundle] pathForResource:@"ish-rootfs" ofType:nil];
+    if (!bundleRoot) {
+        bundleRoot = [[NSBundle mainBundle] pathForResource:@"ish-rootfs" ofType:nil inDirectory:@"www"];
+    }
+
+    // Replace an installed default root when the bundled rootfs release changes.
+    // Without this check, upgrades keep using an older meta.db indefinitely and
+    // can mix x86 metadata with an arm64 data directory.
+    if (AcodeIshIsDefaultRootActive() && hasRootDirectory && bundleRoot) {
+        NSString *releaseRelativePath = @"data/etc/acode-rootfs-release";
+        NSString *installedReleasePath = [rootPath stringByAppendingPathComponent:releaseRelativePath];
+        NSString *bundledReleasePath = [bundleRoot stringByAppendingPathComponent:releaseRelativePath];
+        NSData *installedRelease = [NSData dataWithContentsOfFile:installedReleasePath];
+        NSData *bundledRelease = [NSData dataWithContentsOfFile:bundledReleasePath];
+        if (bundledRelease.length > 0 && ![installedRelease isEqualToData:bundledRelease]) {
+            NSLog(@"iSH rootfs: bundled release changed; replacing installed default rootfs");
+            NSError *removeError = nil;
+            if (![fm removeItemAtPath:rootPath error:&removeError]) {
+                NSLog(@"iSH rootfs: failed removing outdated rootfs %@: %@", rootPath, removeError);
+                return NO;
+            }
+            hasRootDirectory = NO;
+            hasMetaDb = NO;
+            hasDataDirectory = NO;
+            dataIsDir = NO;
+        }
+    }
+
     // iSH stores Linux symlinks as regular backing files plus metadata. Repair
     // older folder imports before checking /bin/sh, since merged-/usr roots
     // commonly expose /bin as a native host symlink to /usr/bin.
@@ -331,10 +359,6 @@
         return NO;
     }
 
-    NSString *bundleRoot = [[NSBundle mainBundle] pathForResource:@"ish-rootfs" ofType:nil];
-    if (!bundleRoot) {
-        bundleRoot = [[NSBundle mainBundle] pathForResource:@"ish-rootfs" ofType:nil inDirectory:@"www"];
-    }
     if (!bundleRoot) {
         NSLog(@"iSH rootfs: bundled ish-rootfs not found");
         return NO;
@@ -411,6 +435,7 @@
         const void *statBytes = sqlite3_column_blob(stmt, 1);
         int statLength = sqlite3_column_bytes(stmt, 1);
         if (statLength < (int)sizeof(uint32_t)) {
+            NSLog(@"iSH rootfs: invalid stat blob length %d", statLength);
             success = NO;
             break;
         }
@@ -420,13 +445,16 @@
             continue;
         NSString *fakePath = [[NSString alloc] initWithBytes:pathBytes length:pathLength encoding:NSUTF8StringEncoding];
         if (!fakePath || [fakePath containsString:@".."] || ![fakePath hasPrefix:@"/"]) {
+            NSLog(@"iSH rootfs: invalid symlink metadata path (length=%d path=%@)", pathLength, fakePath);
             success = NO;
             break;
         }
         [symlinkPaths addObject:fakePath];
     }
-    if (sqlite3_errcode(db) != SQLITE_OK && sqlite3_errcode(db) != SQLITE_DONE)
+    if (sqlite3_errcode(db) != SQLITE_OK && sqlite3_errcode(db) != SQLITE_DONE) {
+        NSLog(@"iSH rootfs: sqlite error while inspecting symlinks: %s", sqlite3_errmsg(db));
         success = NO;
+    }
     sqlite3_finalize(stmt);
     sqlite3_close(db);
     if (!success) {

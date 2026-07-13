@@ -1,5 +1,15 @@
 alpine-baselayout
 alpine-keys
+alpine-release
 apk-tools
+bash
 busybox
+ca-certificates
+command-not-found
+curl
+git
 libc-utils
+nodejs
+npm
+py3-pip
+python3

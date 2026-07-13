@@ -12,8 +12,19 @@ if ! command -v xcodebuild >/dev/null 2>&1; then
 fi
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-ISH_DIR="$ROOT_DIR/third_party/ish"
-OUTPUT_DIR="$ISH_DIR/build"
+ISH_SOURCE_DIR="${ISH_SOURCE_DIR:-$ROOT_DIR/third_party/ish-arm64}"
+ISH_GUEST_ARCH="${ISH_GUEST_ARCH:-arm64}"
+case "$ISH_GUEST_ARCH" in
+  x86) GUEST_DEFINE="GUEST_X86" ;;
+  arm64) GUEST_DEFINE="GUEST_ARM64" ;;
+  *) echo "ISH_GUEST_ARCH must be x86 or arm64 (got: $ISH_GUEST_ARCH)" >&2; exit 64 ;;
+esac
+ISH_DIR="$(cd "$ISH_SOURCE_DIR" 2>/dev/null && pwd || true)"
+if [[ -z "$ISH_DIR" ]]; then
+  echo "iSH source not found at $ISH_SOURCE_DIR" >&2
+  exit 1
+fi
+OUTPUT_DIR="${ISH_OUTPUT_DIR:-$ISH_DIR/build}"
 LINUX_SRC="$ISH_DIR/deps/linux"
 LINUX_BUILD="$LINUX_SRC/build"
 AUTOCONF_SOURCE="$LINUX_BUILD/include/config/auto.conf"
@@ -29,10 +40,9 @@ if [[ -z "$LLVM_OBJCOPY" ]]; then
   exit 1
 fi
 
-if [[ ! -d "$ISH_DIR" ]]; then
-  echo "iSH source not found at $ISH_DIR"
-  exit 1
-fi
+echo "==> iSH source: $ISH_DIR"
+echo "==> Guest architecture: $ISH_GUEST_ARCH"
+echo "==> Output directory: $OUTPUT_DIR"
 
 if [[ ! -d "$LINUX_SRC" || -z "$(ls -A "$LINUX_SRC" 2>/dev/null)" ]]; then
   echo "deps/linux submodule not initialized. Run:"
@@ -116,7 +126,7 @@ copy_kernel_headers() {
 build_linux_user_archive() {
   local sdk="$1"
   local target="$2"
-  local build_name="ReleaseLinux-$sdk"
+  local build_name="ReleaseLinux-$ISH_GUEST_ARCH-$sdk"
   local meson_dir="$OUTPUT_DIR/$build_name/meson"
   local sysroot
   sysroot="$(xcrun --sdk "$sdk" --show-sdk-path)"
@@ -147,6 +157,7 @@ build_linux_user_archive() {
       -Wtautological-constant-in-range-compare \
       -DLOG_HANDLER_NSLOG=1 \
       -DENGINE_ASBESTOS=1 \
+      "-D$GUEST_DEFINE=1" \
       -Wno-switch \
       -include user.h \
       -include linux/kconfig.h \
@@ -163,7 +174,7 @@ build_linux_user_archive() {
 build_fakefs_import() {
   local sdk="$1"
   local target="$2"
-  local build_name="ReleaseLinux-$sdk"
+  local build_name="ReleaseLinux-$ISH_GUEST_ARCH-$sdk"
   local meson_dir="$OUTPUT_DIR/$build_name/meson"
   local sysroot
   sysroot="$(xcrun --sdk "$sdk" --show-sdk-path)"
@@ -221,7 +232,7 @@ build_fakefs_import() {
 build_sdk() {
   local sdk="$1"
   local target="$2"
-  local build_name="ReleaseLinux-$sdk"
+  local build_name="ReleaseLinux-$ISH_GUEST_ARCH-$sdk"
   shift 2
 
   copy_kernel_headers "$build_name"
@@ -245,7 +256,9 @@ build_sdk() {
     -configuration ReleaseLinux \
     -sdk "$sdk" \
     IPHONEOS_DEPLOYMENT_TARGET=15.0 \
+    GUEST_ARCH="$ISH_GUEST_ARCH" \
     BUILD_DIR="$OUTPUT_DIR" \
+    CONFIGURATION_BUILD_DIR="$OUTPUT_DIR/$build_name" \
     "$@" \
     build
 
@@ -253,11 +266,25 @@ build_sdk() {
     "$OUTPUT_DIR/$build_name/liblinux.a" \
     "$OUTPUT_DIR/$build_name/liblinux-acode.a"
 
+  # Darwin orders custom Mach-O sections by the first object that introduces
+  # them. Linux's sections.S must therefore be linked before every object that
+  # contributes initcalls; keeping it inside the large kernel archive is not
+  # sufficient once other force-loaded archives precede liblinux-acode.a.
+  (
+    cd "$OUTPUT_DIR/$build_name"
+    rm -rf linux-sections.a.p liblinux-sections.a
+    mkdir linux-sections.a.p
+    cd linux-sections.a.p
+    xcrun --sdk "$sdk" ar -x ../liblinux-acode.a sections.o
+    xcrun --sdk "$sdk" ar -d ../liblinux-acode.a sections.o
+    xcrun --sdk "$sdk" libtool -static -o ../liblinux-sections.a sections.o
+  )
+
   build_linux_user_archive "$sdk" "$target"
 
   build_fakefs_import "$sdk" "$target"
 
-  for lib in libarchive.a libiSHLinux.a liblinux-acode.a meson/liblinux_user.a meson/libish_emu.a meson/libfakefs.a; do
+  for lib in liblinux-sections.a libarchive.a libiSHLinux.a liblinux-acode.a meson/liblinux_user.a meson/libish_emu.a meson/libfakefs.a; do
     local lib_path="$OUTPUT_DIR/$build_name/$lib"
     if [[ ! -f "$lib_path" ]]; then
       echo "ERROR: $lib_path not found after build"
@@ -272,7 +299,7 @@ build_sdk iphonesimulator arm64-apple-ios15.0-simulator ARCHS=arm64 ONLY_ACTIVE_
 echo "==> iSH builds succeeded:"
 for sdk in iphoneos iphonesimulator; do
   for lib in libiSHLinux.a liblinux-acode.a; do
-    lib_path="$OUTPUT_DIR/ReleaseLinux-$sdk/$lib"
+    lib_path="$OUTPUT_DIR/ReleaseLinux-$ISH_GUEST_ARCH-$sdk/$lib"
     echo "    $lib_path ($(du -h "$lib_path" | cut -f1))"
   done
 done

@@ -2,7 +2,15 @@
 set -euo pipefail
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-ISH_DIR="$ROOT_DIR/third_party/ish"
+ISH_DIR="${ISH_SOURCE_DIR:-$ROOT_DIR/third_party/ish-arm64}"
+ISH_GUEST_ARCH="${ISH_GUEST_ARCH:-arm64}"
+case "$ISH_GUEST_ARCH" in
+  x86|arm64) ;;
+  *) echo "ISH_GUEST_ARCH must be x86 or arm64 (got: $ISH_GUEST_ARCH)" >&2; exit 64 ;;
+esac
+HOST_BUILD_DIR="${ISH_HOST_BUILD_DIR:-$ISH_DIR/build-host-$ISH_GUEST_ARCH}"
+ISH_CLI="$HOST_BUILD_DIR/ish"
+FAKEFSIFY="$HOST_BUILD_DIR/tools/fakefsify"
 DEST="${ISH_ROOTFS_DEST:-$ROOT_DIR/src/plugins/terminal/src/ios/ish-rootfs}"
 STAGING_DEST=""
 PACKAGES_FILE="$ROOT_DIR/scripts/ish-rootfs-packages.txt"
@@ -10,7 +18,7 @@ ARCHIVE=""
 EXPECTED_SHA256=""
 
 usage() {
-  echo "Usage: $0 /path/to/alpine-minirootfs-i386.tar.gz [--sha256 <digest>]"
+  echo "Usage: $0 /path/to/alpine-minirootfs-ARCH.tar.gz [--sha256 <digest>]"
   echo "Imports Alpine, installs the tracked developer package set, and writes the bundled iSH rootfs."
 }
 
@@ -64,49 +72,14 @@ if [[ ! -f "$PACKAGES_FILE" ]]; then
   exit 1
 fi
 
-build_fakefsify() {
-  local archive_prefix
-  archive_prefix=""
-  if command -v brew >/dev/null 2>&1; then
-    archive_prefix="$(brew --prefix libarchive 2>/dev/null || true)"
+if [[ ! -x "$ISH_CLI" || ! -x "$FAKEFSIFY" ]]; then
+  echo "Building $ISH_GUEST_ARCH guest host tools in $HOST_BUILD_DIR..."
+  if [[ -f "$HOST_BUILD_DIR/meson-private/coredata.dat" ]]; then
+    meson setup "$HOST_BUILD_DIR" --reconfigure "-Dguest_arch=$ISH_GUEST_ARCH"
+  else
+    meson setup "$HOST_BUILD_DIR" "$ISH_DIR" "-Dguest_arch=$ISH_GUEST_ARCH"
   fi
-  if [[ -z "$archive_prefix" && -f /opt/homebrew/opt/libarchive/include/archive.h ]]; then
-    archive_prefix="/opt/homebrew/opt/libarchive"
-  fi
-  if [[ -z "$archive_prefix" && -f /usr/local/opt/libarchive/include/archive.h ]]; then
-    archive_prefix="/usr/local/opt/libarchive"
-  fi
-  if [[ -z "$archive_prefix" || ! -f "$archive_prefix/include/archive.h" ]]; then
-    echo "fakefsify requires Homebrew libarchive. Install it with: brew install libarchive" >&2
-    return 1
-  fi
-
-  mkdir -p "$ISH_DIR/build/Release"
-  xcrun clang \
-    -I"$ISH_DIR" \
-    -I"$archive_prefix/include" \
-    "$ISH_DIR/tools/fakefsify.c" \
-    "$ISH_DIR/tools/fakefs.c" \
-    "$ISH_DIR/tools/fakefsify-log.c" \
-    "$ISH_DIR/util/fchdir.c" \
-    "$ISH_DIR/fs/fake-db.c" \
-    "$ISH_DIR/fs/fake-migrate.c" \
-    "$ISH_DIR/fs/fake-rebuild.c" \
-    -L"$archive_prefix/lib" \
-    -lsqlite3 \
-    -larchive \
-    -o "$ISH_DIR/build/Release/fakefsify"
-}
-
-if [[ ! -x "$ISH_DIR/build/Release/fakefsify" ]]; then
-  echo "Building fakefsify..."
-  build_fakefsify
-fi
-
-if [[ ! -x "$ISH_DIR/build/Release/ish" ]]; then
-  echo "iSH CLI not found at $ISH_DIR/build/Release/ish"
-  echo "Build it before preparing the developer rootfs."
-  exit 1
+  meson compile -C "$HOST_BUILD_DIR" ./ish:executable tools/fakefsify
 fi
 
 ACTUAL_SHA256="$(shasum -a 256 "$ARCHIVE" | awk '{print $1}')"
@@ -131,7 +104,15 @@ mkdir -p "$(dirname "$DEST")"
 STAGING_DEST="${DEST}.tmp.$$"
 rm -rf "$STAGING_DEST"
 
-"$ISH_DIR/build/Release/fakefsify" "$ARCHIVE" "$STAGING_DEST"
+"$FAKEFSIFY" "$ARCHIVE" "$STAGING_DEST"
+
+EXPECTED_UNAME="i686"
+[[ "$ISH_GUEST_ARCH" == "arm64" ]] && EXPECTED_UNAME="aarch64"
+ACTUAL_UNAME="$("$ISH_CLI" -f "$STAGING_DEST" /bin/sh -lc 'uname -m')"
+if [[ "$ACTUAL_UNAME" != "$EXPECTED_UNAME" ]]; then
+  echo "Guest architecture mismatch: expected $EXPECTED_UNAME, got $ACTUAL_UNAME" >&2
+  exit 1
+fi
 
 PACKAGE_ARGS="${PACKAGES[*]}"
 GUEST_SETUP=$(cat <<EOF
@@ -168,9 +149,9 @@ PROFILE
   printf '%s\n' "    printf '%s\\n' 'Acode iSH environment'"
   printf '%s\n' '    for command in sh bash git node npm python3 pip3 curl; do'
   printf '%s\n' '      if command -v "\$command" >/dev/null 2>&1; then'
-  printf '%s\n' "        printf '%s: %s\\n' \"\$command\" \"\$(command -v \"\$command\")\""
+  printf '%s\n' "        printf '%s: %s\\n' \"\\\$command\" \"\\\$(command -v \"\\\$command\")\""
   printf '%s\n' '      else'
-  printf '%s\n' "        printf '%s: missing\\n' \"\$command\""
+  printf '%s\n' "        printf '%s: missing\\n' \"\\\$command\""
   printf '%s\n' '      fi'
   printf '%s\n' '    done'
   printf '%s\n' "    printf '%s\\n' 'Recent kernel diagnostics:'"
@@ -183,17 +164,23 @@ PROFILE
   printf '%s\n' 'esac'
 } > /usr/local/bin/acode
 chmod 755 /usr/local/bin/acode
-printf '%s\\n' 'archive_sha256=$ACTUAL_SHA256' > /etc/acode-rootfs-release
-printf '%s\\n' 'packages=$PACKAGE_ARGS' >> /etc/acode-rootfs-release
+	printf '%s\\n' 'archive_sha256=$ACTUAL_SHA256' > /etc/acode-rootfs-release
+	printf '%s\\n' 'guest_arch=$ISH_GUEST_ARCH' >> /etc/acode-rootfs-release
+	printf '%s\\n' 'uname_machine=$EXPECTED_UNAME' >> /etc/acode-rootfs-release
+	printf '%s\\n' 'archive_name=$(basename "$ARCHIVE")' >> /etc/acode-rootfs-release
+	printf '%s\\n' 'packages=$PACKAGE_ARGS' >> /etc/acode-rootfs-release
 rm -rf /var/cache/apk/*
 EOF
 )
 
-"$ISH_DIR/build/Release/ish" -f "$STAGING_DEST" /bin/sh -lc "$GUEST_SETUP"
+"$ISH_CLI" -f "$STAGING_DEST" /bin/sh -lc "$GUEST_SETUP"
 
 for command in bash git node npm python3 pip3 curl; do
-  "$ISH_DIR/build/Release/ish" -f "$STAGING_DEST" /bin/sh -lc "command -v $command >/dev/null"
+  "$ISH_CLI" -f "$STAGING_DEST" /bin/sh -lc "command -v $command >/dev/null"
 done
+
+"$ISH_CLI" -f "$STAGING_DEST" /usr/local/bin/acode doctor
+sqlite3 "$STAGING_DEST/meta.db" 'pragma integrity_check;' | rg -qx 'ok'
 
 rm -rf "$DEST"
 mv "$STAGING_DEST" "$DEST"

@@ -1,0 +1,5 @@
+archive_sha256=f31202c4070c4ef7de9e157e1bd01cb4da3a2150035d74ea5372c5e86f1efac1
+guest_arch=arm64
+uname_machine=aarch64
+archive_name=alpine-minirootfs-3.21.0-aarch64.tar.gz
+packages=bash ca-certificates command-not-found curl git nodejs npm py3-pip python3
