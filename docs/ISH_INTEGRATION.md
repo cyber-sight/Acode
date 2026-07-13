@@ -1,71 +1,82 @@
-# iSH arm64 integration
+# iSH ARM64 integration
 
-## Architecture and source layout
+## Supported architecture
 
-Acode's iOS terminal runs an Alpine **aarch64 guest** through the OpenMinis iSH arm64 userspace emulator. The iOS host is arm64 too, but host and guest architecture are separate build inputs; every supported build path explicitly selects the guest with `ISH_GUEST_ARCH=arm64`.
+Acode's iOS terminal uses OpenMinis iSH with its userspace kernel:
 
-Two iSH checkouts intentionally coexist:
+- Meson `kernel=ish`
+- Meson `guest_arch=arm64`
+- ARM64 iOS host targets for device and simulator
+- Alpine aarch64 guest rootfs
 
-- `third_party/ish` is the preserved x86 implementation and porting/rollback reference. Do not reset, clean, repoint, or build over its working tree as part of arm64 work.
-- `third_party/ish-arm64` is the registered arm64 submodule used by default by the build, header-sync, rootfs, and Cordova integration scripts.
+This is not the fork's experimental `ReleaseLinux` configuration. That path embeds a modified Linux 5.16 kernel and is incomplete for an ARM64 guest ABI, including signal-frame and `rt_sigreturn` behavior. It is not linked into Acode.
 
-The arm64 port is based on OpenMinis commit `8932511fa0ab6abf77d5ead19503476d8b816f4f`. The current Acode port tip is `5483be0` on `acode-arm64`. Its pinned nested dependencies are:
+Two source trees intentionally remain:
 
-- `deps/libapps`: `b8cacae35e5b11d64bb736a053921c16ca7faf9e`
-- `deps/libarchive`: `fc6563f5130d8a7ee1fc27c0e55baef35119f26c`
-- `deps/linux`: `8ec9bf17f89c6dba818f3ed2427de4223e78644a`
+- `third_party/ish` is the untouched x86 reference checkout.
+- `third_party/ish-arm64` is the registered OpenMinis checkout used by the supported build.
 
-## Runtime bridge
+The active fork branch is `acode-arm64` at `5483be0`. The abandoned experiment is preserved locally as `archive/acode-release-linux-arm64` at `4946324`; its nested Linux work is preserved at `cc0802716`. No Git bundle is required.
 
-The Cordova terminal plugin owns the Acode/iSH bridge:
+## Runtime flow
 
-- `IshBridge` starts the kernel and sessions, routes input and resize events, selects the rootfs, reconciles fakefs files, and reports process-group exit status.
-- `IshTerminalBridge` implements the platform callbacks required by the iSH runtime.
-- `Executor.start` returns a session UUID and retains its Cordova callback for streamed events.
-- `Executor.write`, `Executor.resize`, and `Executor.stop` operate on that session.
-- `Executor.execute` uses an exit-status marker and resolves with command output or rejects on nonzero status.
-- `IshRootfs` and `RootfsManager` provide the bundled/default root and imported-root lifecycle.
+`IshBridge` owns a serialized native control queue and boots the kernel once:
 
-The port preserves Acode's session-exit callback (`LinuxSessionExitBlock` and `linux_set_session_exit_handler()`), fakefs symlink storage, host-file reconciliation, `/tmp` bootstrap, root initialization, and interoperability helpers. Architecture-sensitive syscall and futex changes were reconciled with the fork's separate x86 and arm64 syscall tables rather than copied wholesale.
+1. Validate the selected `meta.db` + `data/` fakefs, its SQLite integrity, `/bin/sh`, and ARM64 ELF machine.
+2. Mount `data/` with `fakefs`.
+3. Create PID 1, required device nodes, `/proc`, and `/dev/pts`.
+4. Start `/sbin/init`.
+5. Create terminal children with `become_new_init_child`, an Acode PTY driver, `create_stdio`, `do_execve`, and `task_start`.
 
-## Build and rootfs tools
+`AcodeIshTerminal` is the narrow native adapter. It sends input with `tty_input`, applies window sizes with `tty_set_winsize`, forwards PTY output to Cordova, and hangs up sessions safely. Process completion comes from the standard iSH `exit_hook`; no LinuxInterop API or Objective-C method swizzling is used.
 
-The scripts default to `third_party/ish-arm64` and an arm64 guest. Both can be selected explicitly for diagnostic or rollback builds:
+The JavaScript API remains `start`, `write`, `resize`, `stop`, and `exec`. The executor buffers output or exit events that arrive before Cordova registers the session callback.
+
+## Build
+
+Build both supported SDK archive sets:
 
 ```bash
-ISH_SOURCE_DIR="$PWD/third_party/ish-arm64" ISH_GUEST_ARCH=arm64 ./scripts/build-ish.sh
-ISH_SOURCE_DIR="$PWD/third_party/ish-arm64" ISH_GUEST_ARCH=arm64 ./scripts/sync-ish-headers.sh
-ISH_SOURCE_DIR="$PWD/third_party/ish-arm64" ISH_GUEST_ARCH=arm64 ./scripts/prepare-ish-rootfs.sh <alpine-aarch64-minirootfs.tar.gz> --sha256 <digest>
+ISH_GUEST_ARCH=arm64 ./scripts/build-ish.sh
 ```
 
-`build-ish.sh` produces separate device and simulator artifacts in architecture-qualified directories:
+Outputs:
 
-- `third_party/ish-arm64/build/ReleaseLinux-arm64-iphoneos`
-- `third_party/ish-arm64/build/ReleaseLinux-arm64-iphonesimulator`
+- `third_party/ish-arm64/build/Release-arm64-iphoneos`
+- `third_party/ish-arm64/build/Release-arm64-iphonesimulator`
 
-The terminal plugin hook links the archives from the selected source and guest architecture. After changing a plugin hook, refresh the installed Cordova plugin and run `bunx cordova prepare ios`; the generated `plugins/` copy is not the source of truth.
+Each contains `meson/libish.a`, `meson/libish_emu.a`, `meson/libfakefs.a`, and `libarchive.a`. The build checks ARM64 slices and required kernel, process, PTY, and fakefs-import symbols. It does not build kernel headers, `libiSHLinux`, `liblinux_user`, section archives, or a renamed Linux kernel entry point.
 
-`prepare-ish-rootfs.sh` builds matching arm64-guest host tools, imports a pinned Alpine aarch64 minirootfs, checks `uname -m` for `aarch64`, installs `scripts/ish-rootfs-packages.txt`, runs `acode doctor`, verifies SQLite integrity, and records the archive/architecture metadata in `/etc/acode-rootfs-release` before replacing the bundled root.
+The terminal hook adds the fork root to Xcode header search paths, selects archives per SDK, and removes obsolete ReleaseLinux linker flags. After changing the plugin, refresh its generated Cordova copy before building:
 
-## Verification status
+```bash
+bunx cordova plugin remove com.foxdebug.acode.rk.exec.terminal
+bunx cordova plugin add src/plugins/terminal
+bunx cordova prepare ios
+```
 
-Completed locally:
+## Root filesystem
 
-- The clean OpenMinis arm64 baseline configures and builds.
-- The patched arm64 Meson build and the arm64-guest host `ish` and `fakefsify` targets compile.
-- Device and simulator archive sets build; the six primary archives are arm64 and export the required Acode bridge symbols.
-- Shell-script syntax checks and Cordova iOS prepare complete.
-- The iOS device archive/export completes.
+Generate the bundled root from a pinned Alpine aarch64 minirootfs:
 
-Still requires physical-device/runtime verification:
+```bash
+ISH_GUEST_ARCH=arm64 ./scripts/prepare-ish-rootfs.sh <alpine-aarch64.tar.gz> --sha256 <digest>
+```
 
-- Confirm `uname -m` returns `aarch64` and Node.js reports `process.arch === 'arm64'` in the bundled rootfs.
-- Exercise start, streaming I/O, resize, success/nonzero/signal exit, explicit stop, and concurrent sessions.
-- Exercise rootfs import, rejection, activation/relaunch, listing, rename, deletion, default-root protection, and reconciliation.
-- Verify DNS/package-manager access and characterize shell, Node.js, Python, and filesystem performance.
+The script uses the standard ARM64 host `ish` and `fakefsify`, installs the tracked developer packages, verifies `uname -m`, checks required commands and SQLite integrity, checkpoints metadata, and removes `meta.db-shm`/`meta.db-wal` before promotion.
 
-The upstream Meson end-to-end test is not currently a reliable automated gate in an alternate build directory: its script hardcodes `./build/ish` and downloads an x86 Alpine rootfs. Record this limitation when reporting test results; do not report the test as passed without correcting or replacing those assumptions.
+`meta.db` is authoritative. Files and directories must enter imported roots through `fakefs_import` or `fakefs_import_directory`; moving host files directly into `data/` is unsupported. Startup does not manufacture SQLite path records or rewrite fakefs symlinks. Bundled-root installation uses staging and rollback, while valid installed roots are preserved.
 
-## Rollback
+## Verification
 
-Set `ISH_SOURCE_DIR` to `third_party/ish`, select `ISH_GUEST_ARCH=x86`, rebuild the x86 artifacts and rootfs, then refresh the Cordova project. The preserved x86 checkout is the rollback source of truth and must remain untouched by arm64 cleanup.
+For long commands, redirect output to `/private/tmp` and inspect the tail. The required checks are:
+
+1. Build both archive sets with `scripts/build-ish.sh`.
+2. Regenerate the rootfs and verify `aarch64`, required commands, SQLite integrity, and no sidecars.
+3. Refresh the Cordova plugin and ensure the generated project contains no `ReleaseLinux`, `libiSHLinux`, or `liblinux-acode` references.
+4. Build simulator and device configurations.
+5. Install and launch on the existing simulator.
+6. Manually verify prompt, input/Enter, `pwd`, `ls -la /`, `uname -m`, resize, Ctrl-C, exit, stop, concurrent terminals, and one-shot execution.
+7. Inspect app logs for host crashes, guest page faults, invalid-directory failures, hung sessions, or dropped input.
+
+The fork documents a 223-case compatibility result, but its bundled benchmark runner requires both its own x86 and ARM64 build/root directory names and rewrites benchmark reports. Do not claim a fresh 223/223 run unless that full fixture is provisioned; Acode's generated root is instead validated directly with the standard ARM64 CLI and app runtime flow.

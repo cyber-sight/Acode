@@ -29,15 +29,6 @@ export default function openWelcomeTab() {
 	// Set custom subtitle for the header
 	welcomeFile.setCustomTitle(() => "Get Started");
 
-	// Temporary iOS integration smoke trigger: exercise native terminal startup
-	// automatically after the UI settles so emulator runs are reproducible.
-	if (
-		window.cordova?.platformId === "ios" &&
-		!window.__acodeTerminalSmokeScheduled
-	) {
-		window.__acodeTerminalSmokeScheduled = true;
-		setTimeout(() => acode.exec("new-terminal"), 5000);
-	}
 }
 
 /**

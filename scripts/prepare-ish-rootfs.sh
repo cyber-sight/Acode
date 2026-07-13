@@ -180,7 +180,9 @@ for command in bash git node npm python3 pip3 curl; do
 done
 
 "$ISH_CLI" -f "$STAGING_DEST" /usr/local/bin/acode doctor
+sqlite3 "$STAGING_DEST/meta.db" 'pragma wal_checkpoint(truncate);' >/dev/null
 sqlite3 "$STAGING_DEST/meta.db" 'pragma integrity_check;' | rg -qx 'ok'
+rm -f "$STAGING_DEST/meta.db-shm" "$STAGING_DEST/meta.db-wal"
 
 rm -rf "$DEST"
 mv "$STAGING_DEST" "$DEST"

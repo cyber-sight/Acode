@@ -1,4 +1,4 @@
-#import <Cordova/CDVPlugin.h>
+#import "Executor.h"
 
-@interface BackgroundExecutor : CDVPlugin
+@interface BackgroundExecutor : Executor
 @end

@@ -5,7 +5,100 @@
 static NSMutableDictionary<NSString *, NSString *> *sessionCallbacks;
 static NSMutableDictionary<NSString *, NSString *> *execCallbacks;
 static NSMutableDictionary<NSString *, NSMutableString *> *execOutputs;
+static NSMutableDictionary<NSString *, NSString *> *execMarkers;
+static NSMutableDictionary<NSString *, NSMutableArray<NSDictionary<NSString *, NSString *> *> *> *pendingEvents;
 static __weak Executor *sharedExecutor;
+
+static void HandleExecutorEvent(NSString *sessionId, NSString *type, NSString *payload) {
+    NSString *execCallbackId = execCallbacks[sessionId];
+    NSString *sessionCallbackId = sessionCallbacks[sessionId];
+    if (!execCallbackId && !sessionCallbackId) {
+        NSMutableArray *events = pendingEvents[sessionId];
+        if (!events) {
+            events = [NSMutableArray array];
+            pendingEvents[sessionId] = events;
+            dispatch_after(dispatch_time(DISPATCH_TIME_NOW, 5 * NSEC_PER_SEC), dispatch_get_main_queue(), ^{
+                if (!sessionCallbacks[sessionId] && !execCallbacks[sessionId]) {
+                    [pendingEvents removeObjectForKey:sessionId];
+                }
+            });
+        }
+        [events addObject:@{ @"type": type ?: @"stdout", @"payload": payload ?: @"" }];
+        if (events.count > 256) [events removeObjectAtIndex:0];
+        return;
+    }
+
+    if (execCallbackId) {
+        if ([type isEqualToString:@"exit"]) {
+            [execCallbacks removeObjectForKey:sessionId];
+            [execOutputs removeObjectForKey:sessionId];
+            [execMarkers removeObjectForKey:sessionId];
+            [pendingEvents removeObjectForKey:sessionId];
+            if (sharedExecutor) {
+                NSString *message = [NSString stringWithFormat:@"Command session exited before returning a result (status %@)", payload ?: @"unknown"];
+                CDVPluginResult *result = [CDVPluginResult resultWithStatus:CDVCommandStatus_ERROR messageAsString:message];
+                [sharedExecutor.commandDelegate sendPluginResult:result callbackId:execCallbackId];
+            }
+            return;
+        }
+        NSMutableString *output = execOutputs[sessionId];
+        if (!output) {
+            output = [NSMutableString string];
+            execOutputs[sessionId] = output;
+        }
+        [output appendString:payload ?: @""];
+
+        NSString *marker = execMarkers[sessionId];
+        if (!marker) return;
+        NSRange markerRange = [output rangeOfString:marker];
+        if (markerRange.location == NSNotFound) return;
+        NSUInteger exitCodeStart = NSMaxRange(markerRange);
+        NSRange newlineRange = [output rangeOfString:@"\n" options:0 range:NSMakeRange(exitCodeStart, output.length - exitCodeStart)];
+        if (newlineRange.location == NSNotFound) return;
+
+        NSString *exitCodeString = [output substringWithRange:NSMakeRange(exitCodeStart, newlineRange.location - exitCodeStart)];
+        NSScanner *scanner = [NSScanner scannerWithString:exitCodeString];
+        NSInteger exitCode = 0;
+        if (![scanner scanInteger:&exitCode] || !scanner.isAtEnd) return;
+
+        NSString *commandOutput = [output substringToIndex:markerRange.location];
+        [execCallbacks removeObjectForKey:sessionId];
+        [execOutputs removeObjectForKey:sessionId];
+        [execMarkers removeObjectForKey:sessionId];
+        [pendingEvents removeObjectForKey:sessionId];
+        [[IshBridge shared] stopSession:sessionId completion:nil];
+        if (!sharedExecutor) return;
+
+        CDVPluginResult *result;
+        if (exitCode == 0) {
+            result = [CDVPluginResult resultWithStatus:CDVCommandStatus_OK messageAsString:commandOutput];
+        } else {
+            NSString *message = commandOutput.length > 0 ? commandOutput : [NSString stringWithFormat:@"Command exited with status %ld", (long)exitCode];
+            result = [CDVPluginResult resultWithStatus:CDVCommandStatus_ERROR messageAsString:message];
+        }
+        [sharedExecutor.commandDelegate sendPluginResult:result callbackId:execCallbackId];
+        return;
+    }
+
+    if (!sharedExecutor) return;
+    NSString *message = [NSString stringWithFormat:@"%@:%@", type, payload ?: @""];
+    CDVPluginResult *result = [CDVPluginResult resultWithStatus:CDVCommandStatus_OK messageAsString:message];
+    BOOL exited = [type isEqualToString:@"exit"];
+    [result setKeepCallback:@(!exited)];
+    if (exited) {
+        [sessionCallbacks removeObjectForKey:sessionId];
+        [pendingEvents removeObjectForKey:sessionId];
+    }
+    [sharedExecutor.commandDelegate sendPluginResult:result callbackId:sessionCallbackId];
+}
+
+static void DrainPendingEvents(NSString *sessionId) {
+    NSArray<NSDictionary<NSString *, NSString *> *> *events = [pendingEvents[sessionId] copy];
+    [pendingEvents removeObjectForKey:sessionId];
+    for (NSDictionary<NSString *, NSString *> *event in events) {
+        HandleExecutorEvent(sessionId, event[@"type"], event[@"payload"]);
+    }
+}
 
 @implementation Executor
 
@@ -14,67 +107,11 @@ static __weak Executor *sharedExecutor;
         sessionCallbacks = [NSMutableDictionary dictionary];
         execCallbacks = [NSMutableDictionary dictionary];
         execOutputs = [NSMutableDictionary dictionary];
+        execMarkers = [NSMutableDictionary dictionary];
+        pendingEvents = [NSMutableDictionary dictionary];
         [[IshBridge shared] setEventHandler:^(NSString *sessionId, NSString *type, NSString *payload) {
             dispatch_async(dispatch_get_main_queue(), ^{
-                NSString *execCallbackId = execCallbacks[sessionId];
-                if (execCallbackId) {
-                    NSMutableString *output = execOutputs[sessionId];
-                    if (!output) {
-                        output = [NSMutableString string];
-                        execOutputs[sessionId] = output;
-                    }
-                    [output appendString:payload ?: @""];
-
-                    NSRange markerRange = [output rangeOfString:@"\n__ACODE_EXEC_EXIT__:"];
-                    if (markerRange.location == NSNotFound) {
-                        return;
-                    }
-
-                    NSUInteger exitCodeStart = NSMaxRange(markerRange);
-                    NSRange newlineRange = [output rangeOfString:@"\n" options:0 range:NSMakeRange(exitCodeStart, output.length - exitCodeStart)];
-                    if (newlineRange.location == NSNotFound) {
-                        return;
-                    }
-
-                    NSString *exitCodeString = [output substringWithRange:NSMakeRange(exitCodeStart, newlineRange.location - exitCodeStart)];
-                    NSScanner *scanner = [NSScanner scannerWithString:exitCodeString];
-                    NSInteger exitCode = 0;
-                    BOOL hasExitCode = [scanner scanInteger:&exitCode] && scanner.isAtEnd;
-                    if (!hasExitCode) {
-                        return;
-                    }
-
-                    NSString *commandOutput = [output substringToIndex:markerRange.location];
-                    [execCallbacks removeObjectForKey:sessionId];
-                    [execOutputs removeObjectForKey:sessionId];
-                    [[IshBridge shared] stopSession:sessionId completion:nil];
-
-                    if (!sharedExecutor) {
-                        return;
-                    }
-                    CDVPluginResult *result = nil;
-                    if (exitCode == 0) {
-                        result = [CDVPluginResult resultWithStatus:CDVCommandStatus_OK messageAsString:commandOutput];
-                    } else {
-                        NSString *message = commandOutput.length > 0 ? commandOutput : [NSString stringWithFormat:@"Command exited with status %ld", (long)exitCode];
-                        result = [CDVPluginResult resultWithStatus:CDVCommandStatus_ERROR messageAsString:message];
-                    }
-                    [sharedExecutor.commandDelegate sendPluginResult:result callbackId:execCallbackId];
-                    return;
-                }
-
-                NSString *callbackId = sessionCallbacks[sessionId];
-                if (!callbackId || !sharedExecutor) {
-                    return;
-                }
-                NSString *message = [NSString stringWithFormat:@"%@:%@", type, payload ?: @""];
-                CDVPluginResult *result = [CDVPluginResult resultWithStatus:CDVCommandStatus_OK messageAsString:message];
-                BOOL exited = [type isEqualToString:@"exit"];
-                [result setKeepCallback:@(!exited)];
-                if (exited) {
-                    [sessionCallbacks removeObjectForKey:sessionId];
-                }
-                [sharedExecutor.commandDelegate sendPluginResult:result callbackId:callbackId];
+                HandleExecutorEvent(sessionId, type, payload);
             });
         }];
     }
@@ -103,6 +140,7 @@ static __weak Executor *sharedExecutor;
         CDVPluginResult *result = [CDVPluginResult resultWithStatus:CDVCommandStatus_OK messageAsString:sessionId];
         [result setKeepCallback:@YES];
         [self.commandDelegate sendPluginResult:result callbackId:callbackId];
+        DrainPendingEvents(sessionId);
     }];
 }
 
@@ -146,6 +184,8 @@ static __weak Executor *sharedExecutor;
         [sessionCallbacks removeObjectForKey:sessionId];
         [execCallbacks removeObjectForKey:sessionId];
         [execOutputs removeObjectForKey:sessionId];
+        [execMarkers removeObjectForKey:sessionId];
+        [pendingEvents removeObjectForKey:sessionId];
         CDVPluginResult *result = [CDVPluginResult resultWithStatus:CDVCommandStatus_OK];
         [self.commandDelegate sendPluginResult:result callbackId:command.callbackId];
     }];
@@ -153,7 +193,9 @@ static __weak Executor *sharedExecutor;
 
 - (void)exec:(CDVInvokedUrlCommand *)command {
     NSString *cmd = command.arguments.count > 0 ? command.arguments[0] : @"";
-    NSString *wrappedCommand = [NSString stringWithFormat:@"(\n%@\n)\n__acode_exec_status=$?\nprintf '\\n__ACODE_EXEC_EXIT__:%%s\\n' \"$__acode_exec_status\"", cmd];
+    NSString *token = NSUUID.UUID.UUIDString;
+    NSString *marker = [NSString stringWithFormat:@"\n__ACODE_EXEC_EXIT_%@__:", token];
+    NSString *wrappedCommand = [NSString stringWithFormat:@"(\n%@\n)\n__acode_exec_status=$?\nprintf '\\n__ACODE_EXEC_EXIT_%@__:%%s\\n' \"$__acode_exec_status\"", cmd, token];
 
     [[IshBridge shared] startWithCommand:wrappedCommand completion:^(NSString *sessionId, NSError * _Nullable error) {
         if (error) {
@@ -168,6 +210,8 @@ static __weak Executor *sharedExecutor;
         }
         execCallbacks[sessionId] = command.callbackId;
         execOutputs[sessionId] = [NSMutableString string];
+        execMarkers[sessionId] = marker;
+        DrainPendingEvents(sessionId);
         dispatch_after(dispatch_time(DISPATCH_TIME_NOW, 120 * NSEC_PER_SEC), dispatch_get_main_queue(), ^{
             NSString *callbackId = execCallbacks[sessionId];
             if (!callbackId) {
@@ -175,6 +219,8 @@ static __weak Executor *sharedExecutor;
             }
             [execCallbacks removeObjectForKey:sessionId];
             [execOutputs removeObjectForKey:sessionId];
+            [execMarkers removeObjectForKey:sessionId];
+            [pendingEvents removeObjectForKey:sessionId];
             [[IshBridge shared] stopSession:sessionId completion:nil];
             if (sharedExecutor) {
                 CDVPluginResult *result = [CDVPluginResult resultWithStatus:CDVCommandStatus_ERROR messageAsString:@"Command timed out after 120 seconds"];
@@ -192,6 +238,8 @@ static __weak Executor *sharedExecutor;
     [sessionCallbacks removeAllObjects];
     [execCallbacks removeAllObjects];
     [execOutputs removeAllObjects];
+    [execMarkers removeAllObjects];
+    [pendingEvents removeAllObjects];
     CDVPluginResult *result = [CDVPluginResult resultWithStatus:CDVCommandStatus_OK];
     [self.commandDelegate sendPluginResult:result callbackId:command.callbackId];
 }

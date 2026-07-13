@@ -1,243 +1,119 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+export PATH="/opt/homebrew/bin:/usr/local/bin:$PATH"
+
 if [[ "$(uname -s)" != "Darwin" ]]; then
-  echo "This script is intended for macOS with Xcode installed."
+  echo "This script is intended for macOS with Xcode installed." >&2
   exit 1
 fi
 
-if ! command -v xcodebuild >/dev/null 2>&1; then
-  echo "xcodebuild not found. Install Xcode and Command Line Tools."
-  exit 1
-fi
+for command in xcodebuild xcrun meson; do
+  if ! command -v "$command" >/dev/null 2>&1; then
+    echo "$command not found." >&2
+    exit 1
+  fi
+done
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 ISH_SOURCE_DIR="${ISH_SOURCE_DIR:-$ROOT_DIR/third_party/ish-arm64}"
 ISH_GUEST_ARCH="${ISH_GUEST_ARCH:-arm64}"
-case "$ISH_GUEST_ARCH" in
-  x86) GUEST_DEFINE="GUEST_X86" ;;
-  arm64) GUEST_DEFINE="GUEST_ARM64" ;;
-  *) echo "ISH_GUEST_ARCH must be x86 or arm64 (got: $ISH_GUEST_ARCH)" >&2; exit 64 ;;
-esac
+
+if [[ "$ISH_GUEST_ARCH" != "arm64" ]]; then
+  echo "The supported Acode iOS runtime currently requires ISH_GUEST_ARCH=arm64." >&2
+  exit 64
+fi
+
 ISH_DIR="$(cd "$ISH_SOURCE_DIR" 2>/dev/null && pwd || true)"
-if [[ -z "$ISH_DIR" ]]; then
+if [[ -z "$ISH_DIR" || ! -f "$ISH_DIR/meson.build" ]]; then
   echo "iSH source not found at $ISH_SOURCE_DIR" >&2
   exit 1
 fi
+
 OUTPUT_DIR="${ISH_OUTPUT_DIR:-$ISH_DIR/build}"
-LINUX_SRC="$ISH_DIR/deps/linux"
-LINUX_BUILD="$LINUX_SRC/build"
-AUTOCONF_SOURCE="$LINUX_BUILD/include/config/auto.conf"
-AUTOCONF_HEADER="$LINUX_BUILD/include/generated/autoconf.h"
-LLVM_OBJCOPY="${LLVM_OBJCOPY:-$(command -v llvm-objcopy || true)}"
-
-if [[ -z "$LLVM_OBJCOPY" && -x /opt/homebrew/opt/llvm/bin/llvm-objcopy ]]; then
-  LLVM_OBJCOPY=/opt/homebrew/opt/llvm/bin/llvm-objcopy
-fi
-
-if [[ -z "$LLVM_OBJCOPY" ]]; then
-  echo "llvm-objcopy not found. Install LLVM (for example: brew install llvm) or set LLVM_OBJCOPY."
-  exit 1
-fi
 
 echo "==> iSH source: $ISH_DIR"
-echo "==> Guest architecture: $ISH_GUEST_ARCH"
+echo "==> Runtime: userspace iSH kernel, arm64 guest"
 echo "==> Output directory: $OUTPUT_DIR"
 
-if [[ ! -d "$LINUX_SRC" || -z "$(ls -A "$LINUX_SRC" 2>/dev/null)" ]]; then
-  echo "deps/linux submodule not initialized. Run:"
-  echo "  cd $ISH_DIR && git submodule update --init deps/linux"
-  echo "Or clone manually:"
-  echo "  git clone --depth=1 https://github.com/ish-app/linux $LINUX_SRC"
-  exit 1
-fi
-
-echo "==> Generating kernel headers..."
-mkdir -p "$LINUX_BUILD"
-make -C "$LINUX_SRC" ARCH=ish O="$LINUX_BUILD" ish_defconfig
-make -C "$LINUX_SRC" ARCH=ish O="$LINUX_BUILD" LLVM_IAS=1 prepare
-
-if [[ ! -f "$AUTOCONF_HEADER" && -f "$AUTOCONF_SOURCE" ]]; then
-  mkdir -p "$(dirname "$AUTOCONF_HEADER")"
-  awk '
-    /^CONFIG_[A-Za-z0-9_]+=/ {
-      name = $0
-      sub(/=.*/, "", name)
-      value = $0
-      sub(/^[^=]*=/, "", value)
-      if (value == "y") {
-        print "#define " name " 1"
-      } else if (value == "m") {
-        print "#define " name "_MODULE 1"
-      } else if (value ~ /^"/) {
-        print "#define " name " " value
-      } else {
-        print "#define " name " " value
-      }
-    }
-  ' "$AUTOCONF_SOURCE" > "$AUTOCONF_HEADER"
-fi
-
-echo "==> Checking generated headers..."
-for f in autoconf.h utsrelease.h bounds.h timeconst.h asm-offsets.h; do
-  if [[ ! -f "$LINUX_BUILD/include/generated/$f" ]]; then
-    echo "ERROR: Missing $LINUX_BUILD/include/generated/$f"
-    exit 1
-  fi
-done
-echo "    All generated headers found."
-
-copy_kernel_headers() {
-  local build_name="$1"
-  local meson_deps="$OUTPUT_DIR/$build_name/meson/deps"
-
-  echo "==> Copying kernel headers for $build_name..."
-  mkdir -p "$meson_deps/linux/arch/ish/include/generated"
-  mkdir -p "$meson_deps/linux/arch/ish/include/generated/uapi"
-  mkdir -p "$meson_deps/linux/arch/x86"
-  mkdir -p "$meson_deps/arch/x86"
-  mkdir -p "$meson_deps/linux/include"
-  mkdir -p "$meson_deps/linux/include/generated"
-  mkdir -p "$meson_deps/linux/include/generated/uapi"
-
-  rm -rf "$meson_deps/linux/arch/ish/include/generated/asm"
-  rm -rf "$meson_deps/linux/arch/ish/include/generated/uapi/asm"
-  rm -rf "$meson_deps/linux/arch/x86/include"
-  rm -rf "$meson_deps/arch/x86/include"
-  rm -f "$meson_deps/linux/include/generated/autoconf.h"
-  rm -f "$meson_deps/linux/include/utsrelease.h"
-  rm -f "$meson_deps/linux/include/bounds.h"
-  rm -f "$meson_deps/linux/include/timeconst.h"
-  rm -f "$meson_deps/linux/include/asm-offsets.h"
-  rm -rf "$meson_deps/linux/include/generated/uapi/linux"
-
-  cp -R "$LINUX_BUILD/arch/ish/include/generated/asm" "$meson_deps/linux/arch/ish/include/generated/asm"
-  cp -R "$LINUX_BUILD/arch/ish/include/generated/uapi/asm" "$meson_deps/linux/arch/ish/include/generated/uapi/asm"
-  cp -R "$LINUX_SRC/arch/x86/include" "$meson_deps/linux/arch/x86/include"
-  cp -R "$LINUX_SRC/arch/x86/include" "$meson_deps/arch/x86/include"
-  cp "$LINUX_BUILD/include/generated/autoconf.h" "$meson_deps/linux/include/generated/autoconf.h"
-  cp "$LINUX_BUILD/include/generated/utsrelease.h" "$meson_deps/linux/include/utsrelease.h"
-  cp "$LINUX_BUILD/include/generated/bounds.h" "$meson_deps/linux/include/bounds.h"
-  cp "$LINUX_BUILD/include/generated/timeconst.h" "$meson_deps/linux/include/timeconst.h"
-  cp "$LINUX_BUILD/include/generated/asm-offsets.h" "$meson_deps/linux/include/asm-offsets.h"
-  cp -R "$LINUX_BUILD/include/generated/uapi/linux" "$meson_deps/linux/include/generated/uapi/linux"
-}
-
-build_linux_user_archive() {
-  local sdk="$1"
-  local target="$2"
-  local build_name="ReleaseLinux-$ISH_GUEST_ARCH-$sdk"
-  local meson_dir="$OUTPUT_DIR/$build_name/meson"
-  local sysroot
-  sysroot="$(xcrun --sdk "$sdk" --show-sdk-path)"
-
-  echo "==> Building liblinux_user.a for $sdk..."
-  (
-    cd "$meson_dir"
-    rm -rf liblinux_user.a.p liblinux_user.a
-    mkdir -p liblinux_user.a.p
-    xcrun --sdk "$sdk" clang \
-      -target "$target" \
-      -isysroot "$sysroot" \
-      -Iliblinux_user.a.p \
-      -I. \
-      -I../../.. \
-      -Ideps/linux/arch/ish/include \
-      -I../../../deps/linux/arch/ish/include \
-      -Ideps/linux/include \
-      -I../../../deps/linux/include \
-      -Ideps \
-      -fdiagnostics-color=always \
-      -Wall \
-      -Wextra \
-      -std=gnu11 \
-      -O0 \
-      -g \
-      -Wimplicit-fallthrough \
-      -Wtautological-constant-in-range-compare \
-      -DLOG_HANDLER_NSLOG=1 \
-      -DENGINE_ASBESTOS=1 \
-      "-D$GUEST_DEFINE=1" \
-      -Wno-switch \
-      -include user.h \
-      -include linux/kconfig.h \
-      -c ../../../linux/emu_asbestos.c \
-      -o liblinux_user.a.p/linux_emu_asbestos.c.o
-    xcrun --sdk "$sdk" libtool -static -o liblinux_user.a liblinux_user.a.p/linux_emu_asbestos.c.o
-  )
-}
-
-# Compile tools/fakefs.c (which provides fakefs_import/fakefs_import_directory)
-# and merge it into libfakefs.a. The meson build only includes fs/fake-db.c,
-# fs/fake-migrate.c, and fs/fake-rebuild.c in libfakefs.a, but the Cordova
-# terminal plugin needs the import functions from tools/fakefs.c.
 build_fakefs_import() {
   local sdk="$1"
   local target="$2"
-  local build_name="ReleaseLinux-$ISH_GUEST_ARCH-$sdk"
-  local meson_dir="$OUTPUT_DIR/$build_name/meson"
+  local build_dir="$3"
+  local meson_dir="$build_dir/meson"
   local sysroot
+  local deployment_flag
   sysroot="$(xcrun --sdk "$sdk" --show-sdk-path)"
+  deployment_flag="-miphoneos-version-min=15.0"
+  [[ "$sdk" == "iphonesimulator" ]] && deployment_flag="-mios-simulator-version-min=15.0"
 
-  echo "==> Building tools/fakefs.c and merging into libfakefs.a for $sdk..."
+  echo "==> Adding fakefs import support for $sdk..."
   (
     cd "$meson_dir"
-    # A previous build may already contain these two generated members. Remove
-    # them first so repeated invocations remain linkable.
     while xcrun --sdk "$sdk" ar -t libfakefs.a | rg -q '^(tools_fakefs\.c\.o|util_fchdir\.c\.o)$'; do
       xcrun --sdk "$sdk" ar -d libfakefs.a tools_fakefs.c.o util_fchdir.c.o
     done
+
+    rm -rf libfakefs_import.a.p libfakefs_import.a libfakefs-merged.a
     mkdir -p libfakefs_import.a.p
+
     xcrun --sdk "$sdk" clang \
       -target "$target" \
       -isysroot "$sysroot" \
-      -Ilibfakefs_import.a.p \
+      "$deployment_flag" \
       -I. \
-      -I../../.. \
+      -I"$ISH_DIR" \
       -I"$ISH_DIR/deps/libarchive/libarchive" \
-      -fdiagnostics-color=always \
-      -Wall \
-      -Wextra \
-      -std=gnu11 \
-      -O0 \
-      -g \
-      -Wimplicit-fallthrough \
       -DLOG_HANDLER_NSLOG=1 \
-      -Wno-switch \
-      -c ../../../tools/fakefs.c \
+      -DGUEST_ARM64=1 \
+      -std=gnu11 \
+      -O2 \
+      -c "$ISH_DIR/tools/fakefs.c" \
       -o libfakefs_import.a.p/tools_fakefs.c.o
-    xcrun --sdk "$sdk" clang \
-      -target "$target" \
-      -isysroot "$sysroot" \
-      -I. \
-      -I../../.. \
-      -fdiagnostics-color=always \
-      -Wall \
-      -Wextra \
-      -std=gnu11 \
-      -O0 \
-      -g \
-      -DLOG_HANDLER_NSLOG=1 \
-      -c ../../../util/fchdir.c \
-      -o libfakefs_import.a.p/util_fchdir.c.o
+
     xcrun --sdk "$sdk" libtool -static -o libfakefs_import.a \
-      libfakefs_import.a.p/tools_fakefs.c.o \
-      libfakefs_import.a.p/util_fchdir.c.o
+      libfakefs_import.a.p/tools_fakefs.c.o
     xcrun --sdk "$sdk" libtool -static -o libfakefs-merged.a libfakefs.a libfakefs_import.a
     mv libfakefs-merged.a libfakefs.a
-    rm -rf libfakefs_import.a libfakefs_import.a.p
+    rm -rf libfakefs_import.a.p libfakefs_import.a
   )
+}
+
+verify_archive() {
+  local sdk="$1"
+  local archive="$2"
+  shift 2
+
+  if [[ ! -f "$archive" ]]; then
+    echo "ERROR: missing archive: $archive" >&2
+    exit 1
+  fi
+
+  local architectures
+  architectures="$(xcrun lipo -archs "$archive")"
+  if [[ " $architectures " != *" arm64 "* ]]; then
+    echo "ERROR: $archive does not contain arm64 (found: $architectures)" >&2
+    exit 1
+  fi
+
+  local symbols
+  symbols="$(xcrun --sdk "$sdk" nm -gU "$archive")"
+  for symbol in "$@"; do
+    if ! rg -q "[[:space:]]_$symbol$" <<<"$symbols"; then
+      echo "ERROR: $archive is missing required symbol $symbol" >&2
+      exit 1
+    fi
+  done
 }
 
 build_sdk() {
   local sdk="$1"
   local target="$2"
-  local build_name="ReleaseLinux-$ISH_GUEST_ARCH-$sdk"
   shift 2
+  local build_name="Release-arm64-$sdk"
+  local build_dir="$OUTPUT_DIR/$build_name"
 
-  copy_kernel_headers "$build_name"
-
-  echo "==> Building iSH archives for $sdk..."
+  echo "==> Building supported iSH ARM64 archives for $sdk..."
   xcodebuild \
     -project "$ISH_DIR/deps/libarchive.xcodeproj" \
     -target libarchive \
@@ -246,60 +122,42 @@ build_sdk() {
     IPHONEOS_DEPLOYMENT_TARGET=15.0 \
     HEADER_SEARCH_PATHS="$(brew --prefix xz)/include" \
     GCC_PREPROCESSOR_DEFINITIONS="HAVE_CONFIG_H HAVE_LZMA_H=1" \
-    CONFIGURATION_BUILD_DIR="$OUTPUT_DIR/$build_name" \
+    CONFIGURATION_BUILD_DIR="$build_dir" \
+    CODE_SIGNING_ALLOWED=NO \
     "$@" \
     build
 
   xcodebuild \
     -project "$ISH_DIR/iSH.xcodeproj" \
-    -target libiSHLinux \
-    -configuration ReleaseLinux \
+    -target iSH-ARM64 \
+    -configuration Release \
     -sdk "$sdk" \
     IPHONEOS_DEPLOYMENT_TARGET=15.0 \
-    GUEST_ARCH="$ISH_GUEST_ARCH" \
+    GUEST_ARCH=arm64 \
+    ISH_KERNEL=ish \
     BUILD_DIR="$OUTPUT_DIR" \
-    CONFIGURATION_BUILD_DIR="$OUTPUT_DIR/$build_name" \
+    CONFIGURATION_BUILD_DIR="$build_dir" \
+    CODE_SIGNING_ALLOWED=NO \
     "$@" \
     build
 
-  "$LLVM_OBJCOPY" --redefine-sym _main=_ish_kernel_main \
-    "$OUTPUT_DIR/$build_name/liblinux.a" \
-    "$OUTPUT_DIR/$build_name/liblinux-acode.a"
+  build_fakefs_import "$sdk" "$target" "$build_dir"
 
-  # Darwin orders custom Mach-O sections by the first object that introduces
-  # them. Linux's sections.S must therefore be linked before every object that
-  # contributes initcalls; keeping it inside the large kernel archive is not
-  # sufficient once other force-loaded archives precede liblinux-acode.a.
-  (
-    cd "$OUTPUT_DIR/$build_name"
-    rm -rf linux-sections.a.p liblinux-sections.a
-    mkdir linux-sections.a.p
-    cd linux-sections.a.p
-    xcrun --sdk "$sdk" ar -x ../liblinux-acode.a sections.o
-    xcrun --sdk "$sdk" ar -d ../liblinux-acode.a sections.o
-    xcrun --sdk "$sdk" libtool -static -o ../liblinux-sections.a sections.o
-  )
-
-  build_linux_user_archive "$sdk" "$target"
-
-  build_fakefs_import "$sdk" "$target"
-
-  for lib in liblinux-sections.a libarchive.a libiSHLinux.a liblinux-acode.a meson/liblinux_user.a meson/libish_emu.a meson/libfakefs.a; do
-    local lib_path="$OUTPUT_DIR/$build_name/$lib"
-    if [[ ! -f "$lib_path" ]]; then
-      echo "ERROR: $lib_path not found after build"
-      exit 1
-    fi
-  done
+  verify_archive "$sdk" "$build_dir/meson/libish.a" \
+    mount_root become_first_process become_new_init_child create_stdio do_execve task_start pty_open_fake
+  verify_archive "$sdk" "$build_dir/meson/libish_emu.a"
+  verify_archive "$sdk" "$build_dir/meson/libfakefs.a" fakefs_import fakefs_import_directory
+  verify_archive "$sdk" "$build_dir/libarchive.a"
 }
 
 build_sdk iphoneos arm64-apple-ios15.0
 build_sdk iphonesimulator arm64-apple-ios15.0-simulator ARCHS=arm64 ONLY_ACTIVE_ARCH=YES EXCLUDED_ARCHS=x86_64
 
-echo "==> iSH builds succeeded:"
+echo "==> Supported iSH ARM64 builds succeeded:"
 for sdk in iphoneos iphonesimulator; do
-  for lib in libiSHLinux.a liblinux-acode.a; do
-    lib_path="$OUTPUT_DIR/ReleaseLinux-$ISH_GUEST_ARCH-$sdk/$lib"
-    echo "    $lib_path ($(du -h "$lib_path" | cut -f1))"
+  build_dir="$OUTPUT_DIR/Release-arm64-$sdk"
+  for archive in meson/libish.a meson/libish_emu.a meson/libfakefs.a libarchive.a; do
+    archive_path="$build_dir/$archive"
+    echo "    $archive_path ($(du -h "$archive_path" | cut -f1))"
   done
 done

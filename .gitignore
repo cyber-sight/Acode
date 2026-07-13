@@ -24,3 +24,6 @@ tsconfig.tsbuildinfo
 
 /www/cordova.js
 /www/cordova_plugins.js
+# SQLite runtime sidecars are never distributable rootfs artifacts.
+src/plugins/terminal/src/ios/ish-rootfs/meta.db-shm
+src/plugins/terminal/src/ios/ish-rootfs/meta.db-wal

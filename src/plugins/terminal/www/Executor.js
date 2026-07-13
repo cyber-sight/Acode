@@ -87,11 +87,10 @@ class Executor {
     return new Promise((resolve, reject) => {
       let first = true;
       exec(
-        async (message) => {
+        (message) => {
           //console.log(message);
           if (first) {
             first = false;
-            await new Promise(resolve => setTimeout(resolve, 100));
             // First message is always the process UUID
             resolve(message);
           } else {

@@ -9,19 +9,16 @@ typedef void (^IshEventHandler)(NSString *sessionId, NSString *type, NSString *p
 + (instancetype)shared;
 
 - (void)startWithCommand:(NSString *)command completion:(void (^)(NSString *sessionId, NSError * _Nullable error))completion;
-- (void)writeToSession:(NSString *)sessionId input:(NSString *)input completion:(void (^)(NSError * _Nullable error))completion;
-- (void)resizeSession:(NSString *)sessionId columns:(NSInteger)columns rows:(NSInteger)rows completion:(void (^)(NSError * _Nullable error))completion;
-- (void)stopSession:(NSString *)sessionId completion:(void (^)(NSError * _Nullable error))completion;
+- (void)writeToSession:(NSString *)sessionId input:(NSString *)input completion:(void (^ _Nullable)(NSError * _Nullable error))completion;
+- (void)resizeSession:(NSString *)sessionId columns:(NSInteger)columns rows:(NSInteger)rows completion:(void (^ _Nullable)(NSError * _Nullable error))completion;
+- (void)stopSession:(NSString *)sessionId completion:(void (^ _Nullable)(NSError * _Nullable error))completion;
 
 - (void)setEventHandler:(IshEventHandler)handler;
 
 /**
- * Reconcile metadata: scans the active rootfs data/ directory and registers
- * any files that exist on disk but are missing from meta.db. Also removes
- * stale entries for files that no longer exist.
- *
- * Call this after files are added or removed outside of iSH (e.g. via Finder).
- * Returns YES on success.
+ * Validate the active fakefs metadata and checkpoint it when the kernel has
+ * not mounted it yet. Host-side files must be imported through RootfsManager;
+ * this method intentionally does not synthesize metadata records.
  */
 - (BOOL)reconcileFs:(NSError **)error;
 

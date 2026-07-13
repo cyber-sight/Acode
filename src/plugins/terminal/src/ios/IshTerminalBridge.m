@@ -1,256 +1,98 @@
-#import <Foundation/Foundation.h>
-#import <UIKit/UIKit.h>
-#import <pthread.h>
+#import "AcodeIshTerminal.h"
 
-#ifndef ISH_LINUX
-#define ISH_LINUX 1
-#endif
+#define ISH_INTERNAL 1
+#include "fs/devices.h"
+#include "fs/tty.h"
+#include "kernel/errno.h"
 
-#if __has_include("ish/include/LinuxInterop.h")
-#import "ish/include/LinuxInterop.h"
-#import "ish/include/Terminal.h"
-#elif __has_include("LinuxInterop.h")
-#import "LinuxInterop.h"
-#import "Terminal.h"
-#else
-#define ACODE_ISH_HEADERS_MISSING 1
-#endif
-
-#ifndef ACODE_ISH_HEADERS_MISSING
-
-@interface Terminal ()
-@property (nonatomic, strong) NSUUID *uuid;
-@property (nonatomic, assign) struct linux_tty *linuxTTY;
-@property (nonatomic, assign) BOOL loaded;
-- (int)roomForOutput;
-- (void)setTty:(struct linux_tty *)tty;
+@interface AcodeIshTerminal () {
+    struct tty *_tty;
+}
+@property (nonatomic, readwrite) NSUUID *uuid;
 @end
 
-@implementation Terminal
+@implementation AcodeIshTerminal
 
-static const int AcodeTerminalBufferSize = 1 << 20;
-static NSMapTable<NSNumber *, Terminal *> *acodeTerminalsByKey;
-static NSMapTable<NSUUID *, Terminal *> *acodeTerminalsByUUID;
-
-+ (void)initialize {
-    if (self == Terminal.class) {
-        acodeTerminalsByKey = [NSMapTable strongToWeakObjectsMapTable];
-        acodeTerminalsByUUID = [NSMapTable strongToWeakObjectsMapTable];
-    }
+static int acode_tty_init(struct tty *tty) {
+    AcodeIshTerminal *terminal = [[AcodeIshTerminal alloc] init];
+    terminal->_tty = tty;
+    tty->data = (void *)CFBridgingRetain(terminal);
+    return 0;
 }
 
-+ (Terminal *)terminalWithType:(int)type number:(int)number {
-    NSNumber *key = @(((type & 0xffff) << 16) | (number & 0xffff));
-    @synchronized (Terminal.class) {
-        Terminal *terminal = [acodeTerminalsByKey objectForKey:key];
-        if (terminal) {
-            return terminal;
-        }
-
-        terminal = [[Terminal alloc] init];
-        terminal.uuid = [NSUUID UUID];
-        [acodeTerminalsByKey setObject:terminal forKey:key];
-        [acodeTerminalsByUUID setObject:terminal forKey:terminal.uuid];
-        return terminal;
+static int acode_tty_write(struct tty *tty, const void *buffer, size_t length, bool blocking) {
+    (void)blocking;
+    AcodeIshTerminal *terminal = (__bridge AcodeIshTerminal *)tty->data;
+    AcodeIshTerminalOutputHandler handler = terminal.outputHandler;
+    if (handler && length > 0) {
+        handler([NSData dataWithBytes:buffer length:length]);
     }
+    return (int)length;
 }
 
-+ (Terminal *)terminalWithUUID:(NSUUID *)uuid {
-    if (!uuid) {
-        return nil;
-    }
-    @synchronized (Terminal.class) {
-        return [acodeTerminalsByUUID objectForKey:uuid];
-    }
+static void acode_tty_cleanup(struct tty *tty) {
+    AcodeIshTerminal *terminal = CFBridgingRelease(tty->data);
+    tty->data = NULL;
+    terminal->_tty = NULL;
 }
 
-+ (void)convertCommand:(NSArray<NSString *> *)command toArgs:(char *)argv limitSize:(size_t)maxSize {
-    if (!argv || maxSize == 0) {
-        return;
-    }
+static struct tty_driver_ops acode_tty_ops = {
+    .init = acode_tty_init,
+    .write = acode_tty_write,
+    .cleanup = acode_tty_cleanup,
+};
 
-    NSString *joined = [command componentsJoinedByString:@" "];
-    NSData *data = [joined dataUsingEncoding:NSUTF8StringEncoding] ?: [NSData data];
-    size_t len = MIN(data.length, maxSize - 1);
-    memcpy(argv, data.bytes, len);
-    argv[len] = '\0';
+static struct tty_driver acode_pty_driver = {
+    .ops = &acode_tty_ops,
+};
+
+static struct tty_driver acode_console_driver = {
+    .ops = &acode_tty_ops,
+};
+
+void AcodeIshInstallConsoleDriver(void) {
+    acode_console_driver.major = TTY_CONSOLE_MAJOR;
+    acode_console_driver.limit = 64;
+    acode_console_driver.ttys = calloc(acode_console_driver.limit, sizeof(*acode_console_driver.ttys));
+    tty_drivers[TTY_CONSOLE_MAJOR] = &acode_console_driver;
 }
 
-- (int)sendOutput:(const void *)buf length:(int)len {
-    if (!buf || len <= 0) {
-        return 0;
+- (instancetype)init {
+    self = [super init];
+    if (self) {
+        _uuid = [NSUUID UUID];
     }
-    return len;
+    return self;
 }
 
-- (int)roomForOutput {
-    return AcodeTerminalBufferSize;
++ (instancetype)createPseudoTerminal:(struct tty **)tty {
+    if (!tty) return nil;
+    *tty = pty_open_fake(&acode_pty_driver);
+    if (IS_ERR(*tty)) return nil;
+    return (__bridge AcodeIshTerminal *)(*tty)->data;
 }
 
 - (void)sendInput:(NSData *)input {
-    if (!input.length || _linuxTTY == NULL) {
-        return;
-    }
-
-    NSData *inputRef = [input copy];
-    struct linux_tty *tty = _linuxTTY;
-    async_do_in_workqueue(^{
-        if (tty && tty->ops && tty->ops->send_input) {
-            tty->ops->send_input(tty, inputRef.bytes, inputRef.length);
-        }
-    });
+    struct tty *tty = _tty;
+    if (!tty || input.length == 0) return;
+    tty_input(tty, input.bytes, input.length, false);
 }
 
 - (void)resizeToColumns:(int)columns rows:(int)rows {
-	struct linux_tty *tty = _linuxTTY;
-	if (!tty || !tty->ops || !tty->ops->resize) {
-		return;
-	}
-
-	async_do_in_workqueue(^{
-		if (tty && tty->ops && tty->ops->resize) {
-			tty->ops->resize(tty, columns, rows);
-		}
-	});
-}
-
-- (NSString *)arrow:(char)direction {
-    return [NSString stringWithFormat:@"\x1b[%c", direction];
+    struct tty *tty = _tty;
+    if (!tty) return;
+    lock(&tty->lock);
+    tty_set_winsize(tty, (struct winsize_){.col = columns, .row = rows});
+    unlock(&tty->lock);
 }
 
 - (void)destroy {
-    struct linux_tty *tty = _linuxTTY;
-    _linuxTTY = NULL;
-    if (tty && tty->ops && tty->ops->hangup) {
-        async_do_in_workqueue(^{
-            tty->ops->hangup(tty);
-        });
-    }
-
-    @synchronized (Terminal.class) {
-        if (self.uuid) {
-            [acodeTerminalsByUUID removeObjectForKey:self.uuid];
-        }
-    }
-}
-
-- (WKWebView *)webView {
-    return nil;
-}
-
-- (void)setEnableVoiceOverAnnounce:(BOOL)enableVoiceOverAnnounce {
-    _enableVoiceOverAnnounce = enableVoiceOverAnnounce;
-}
-
-- (void)setTty:(struct linux_tty *)tty {
-    @synchronized (self) {
-        _linuxTTY = tty;
-    }
+    struct tty *tty = _tty;
+    if (!tty) return;
+    lock(&tty->lock);
+    tty_hangup(tty);
+    unlock(&tty->lock);
+    self.outputHandler = nil;
 }
 
 @end
-
-void async_do_in_ios(void (^block)(void)) {
-    dispatch_async(dispatch_get_main_queue(), block);
-}
-
-void ConsoleLog(const char *data, unsigned len) {
-    NSLog(@"%.*s", (int)len, data);
-}
-
-void FsInitialize(void) {
-}
-
-int initrd_below_start_ok = 0;
-unsigned long initrd_start = 0;
-unsigned long initrd_end = 0;
-unsigned int real_root_dev = 0;
-
-bool initrd_load(void) {
-    return false;
-}
-
-void wait_for_initramfs(void) {
-}
-
-int unzstd(unsigned char *inbuf, long len, long (*fill)(void *, unsigned long),
-           long (*flush)(void *, unsigned long), unsigned char *outbuf,
-           long *pos, void (*error)(char *x)) {
-    if (error) {
-        error("zstd initramfs decompression is not available");
-    }
-    return -1;
-}
-
-nsobj_t objc_get(nsobj_t object) {
-    if (object) {
-        CFRetain(object);
-    }
-    return object;
-}
-
-void objc_put(nsobj_t object) {
-    if (object) {
-        CFRelease(object);
-    }
-}
-
-void sync_do_in_workqueue(void (^block)(void (^done)(void))) {
-    __block pthread_mutex_t mutex = PTHREAD_MUTEX_INITIALIZER;
-    __block pthread_cond_t cond = PTHREAD_COND_INITIALIZER;
-    __block BOOL doneFlag = NO;
-
-    async_do_in_workqueue(^{
-        block(^{
-            pthread_mutex_lock(&mutex);
-            doneFlag = YES;
-            pthread_mutex_unlock(&mutex);
-            pthread_cond_broadcast(&cond);
-        });
-    });
-
-    pthread_mutex_lock(&mutex);
-    while (!doneFlag) {
-        pthread_cond_wait(&cond, &mutex);
-    }
-    pthread_mutex_unlock(&mutex);
-}
-
-long UIPasteboard_changeCount(void) {
-    return UIPasteboard.generalPasteboard.changeCount;
-}
-
-nsobj_t UIPasteboard_get(void) {
-    NSData *data = [UIPasteboard.generalPasteboard.string dataUsingEncoding:NSUTF8StringEncoding];
-    return (__bridge_retained nsobj_t)data;
-}
-
-void UIPasteboard_set(const char *data, size_t len) {
-    UIPasteboard.generalPasteboard.string = [[NSString alloc] initWithBytes:data length:len encoding:NSUTF8StringEncoding] ?: @"";
-}
-
-size_t NSData_length(nsobj_t data) {
-    return [(__bridge NSData *)data length];
-}
-
-const void *NSData_bytes(nsobj_t data) {
-    return [(__bridge NSData *)data bytes];
-}
-
-nsobj_t Terminal_terminalWithType_number(int type, int number) {
-    return (__bridge_retained nsobj_t)[Terminal terminalWithType:type number:number];
-}
-
-void Terminal_setLinuxTTY(nsobj_t _self, struct linux_tty *tty) {
-    [(__bridge Terminal *)_self setTty:tty];
-}
-
-int Terminal_sendOutput_length(nsobj_t _self, const char *data, int size) {
-    return [(__bridge Terminal *)_self sendOutput:data length:size];
-}
-
-int Terminal_roomForOutput(nsobj_t _self) {
-    return [(__bridge Terminal *)_self roomForOutput];
-}
-
-#endif

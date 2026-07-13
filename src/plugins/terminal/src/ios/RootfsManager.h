@@ -6,6 +6,7 @@ FOUNDATION_EXPORT NSString *const AcodeIshDefaultRootId;
 FOUNDATION_EXPORT NSString *AcodeIshActiveRootPath(void);
 FOUNDATION_EXPORT BOOL AcodeIshIsDefaultRootActive(void);
 FOUNDATION_EXPORT BOOL AcodeIshRootfsContainsPath(NSString *rootPath, NSString *fakePath);
+FOUNDATION_EXPORT BOOL AcodeIshRootfsIsArm64(NSString *rootPath);
 
 @interface RootfsManager : CDVPlugin
 - (void)list:(CDVInvokedUrlCommand *)command;
@@ -17,9 +18,8 @@ FOUNDATION_EXPORT BOOL AcodeIshRootfsContainsPath(NSString *rootPath, NSString *
 - (void)getActivePublicHome:(CDVInvokedUrlCommand *)command;
 
 /**
- * Reconcile the active rootfs filesystem metadata.
- * Scans the data/ directory for files that exist on disk but are missing
- * from meta.db (e.g. newly added via Finder) and vice versa.
+ * Validate the active fakefs metadata. External files must be imported rather
+ * than moved directly into data/, because meta.db is authoritative.
  */
 - (void)reconcileFs:(CDVInvokedUrlCommand *)command;
 @end
