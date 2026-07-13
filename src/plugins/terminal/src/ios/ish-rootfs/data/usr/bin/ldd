@@ -1,2 +1,2 @@
 #!/bin/sh
-exec /lib/ld-musl-i386.so.1 --list "$@"
+exec /lib/ld-musl-aarch64.so.1 --list "$@"

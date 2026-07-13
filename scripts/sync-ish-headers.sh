@@ -2,7 +2,7 @@
 set -euo pipefail
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-ISH_DIR="$ROOT_DIR/third_party/ish"
+ISH_DIR="${ISH_SOURCE_DIR:-$ROOT_DIR/third_party/ish-arm64}"
 DEST_DIR="$ROOT_DIR/src/plugins/terminal/src/ios/ish/include"
 
 mkdir -p "$DEST_DIR"

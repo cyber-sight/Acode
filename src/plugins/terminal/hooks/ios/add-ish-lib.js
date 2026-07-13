@@ -16,12 +16,18 @@ function quotePbx(value) {
 
 function main() {
   const projectRoot = process.cwd();
-  const buildRoot = path.join(projectRoot, "third_party", "ish", "build");
+  const guestArch = process.env.ISH_GUEST_ARCH || "arm64";
+  if (!new Set(["x86", "arm64"]).has(guestArch)) {
+    throw new Error(`iSH hook: unsupported guest architecture: ${guestArch}`);
+  }
+  const sourceDir = process.env.ISH_SOURCE_DIR || path.join(projectRoot, "third_party", "ish-arm64");
+  const buildRoot = process.env.ISH_OUTPUT_DIR || path.join(sourceDir, "build");
   const sdkBuilds = {
-    "iphoneos*": path.join(buildRoot, "ReleaseLinux-iphoneos"),
-    "iphonesimulator*": path.join(buildRoot, "ReleaseLinux-iphonesimulator"),
+    "iphoneos*": path.join(buildRoot, `ReleaseLinux-${guestArch}-iphoneos`),
+    "iphonesimulator*": path.join(buildRoot, `ReleaseLinux-${guestArch}-iphonesimulator`),
   };
   const libNames = [
+    "liblinux-sections.a",
     "libarchive.a",
     "libiSHLinux.a",
     "liblinux-acode.a",
@@ -99,7 +105,7 @@ function main() {
   }
 
   fs.writeFileSync(pbxprojPath, pbxproj);
-  console.log("iSH hook: linked iSH native archives and libresolv.");
+  console.log(`iSH hook: linked ${guestArch} guest archives from ${buildRoot} and libresolv.`);
 }
 
 main();

@@ -1,11 +1,15 @@
-#ifndef ACODE_ISH_FAKEFS_H
-#define ACODE_ISH_FAKEFS_H
-
+#ifndef FS_FAKEFSIFY_H
+#define FS_FAKEFSIFY_H
 #include <stdbool.h>
 
 struct fakefsify_error {
     int line;
-    enum { ERR_ARCHIVE, ERR_SQLITE, ERR_POSIX, ERR_CANCELLED } type;
+    enum {
+        ERR_ARCHIVE,
+        ERR_SQLITE,
+        ERR_POSIX,
+        ERR_CANCELLED,
+    } type;
     int code;
     char *message;
 };
@@ -16,6 +20,9 @@ struct progress {
 };
 
 bool fakefs_import(const char *archive_path, const char *fs, struct fakefsify_error *err_out, struct progress progress);
+// Converts a host directory into an iSH fakefs root. The selected directory is
+// the root itself, so callers must validate its layout before activation.
 bool fakefs_import_directory(const char *source_path, const char *fs, struct fakefsify_error *err_out, struct progress progress);
+bool fakefs_export(const char *fs, const char *archive_path, struct fakefsify_error *err_out, struct progress progress);
 
 #endif
