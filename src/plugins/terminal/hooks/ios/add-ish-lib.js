@@ -1,4 +1,4 @@
-#!/usr/bin/env node
+#!/usr/bin/env bun
 "use strict";
 
 const fs = require("fs");
@@ -17,21 +17,18 @@ function quotePbx(value) {
 function main() {
   const projectRoot = process.cwd();
   const guestArch = process.env.ISH_GUEST_ARCH || "arm64";
-  if (!new Set(["x86", "arm64"]).has(guestArch)) {
-    throw new Error(`iSH hook: unsupported guest architecture: ${guestArch}`);
+  if (guestArch !== "arm64") {
+    throw new Error(`iSH hook: the supported iOS runtime requires arm64 (got: ${guestArch})`);
   }
   const sourceDir = process.env.ISH_SOURCE_DIR || path.join(projectRoot, "third_party", "ish-arm64");
   const buildRoot = process.env.ISH_OUTPUT_DIR || path.join(sourceDir, "build");
   const sdkBuilds = {
-    "iphoneos*": path.join(buildRoot, `ReleaseLinux-${guestArch}-iphoneos`),
-    "iphonesimulator*": path.join(buildRoot, `ReleaseLinux-${guestArch}-iphonesimulator`),
+    "iphoneos*": path.join(buildRoot, `Release-${guestArch}-iphoneos`),
+    "iphonesimulator*": path.join(buildRoot, `Release-${guestArch}-iphonesimulator`),
   };
   const libNames = [
-    "liblinux-sections.a",
     "libarchive.a",
-    "libiSHLinux.a",
-    "liblinux-acode.a",
-    path.join("meson", "liblinux_user.a"),
+    path.join("meson", "libish.a"),
     path.join("meson", "libish_emu.a"),
     path.join("meson", "libfakefs.a"),
   ];
@@ -54,19 +51,22 @@ function main() {
     return;
   }
 
-  const commonFlags = [
-    "-Wl,-ld_classic",
-    "-sectalign",
-    "__DATA",
-    "__percpu_first",
-    "1000",
-    "-sectalign",
-    "__DATA",
-    "__tracepoints",
-    "20",
-  ];
+  const commonFlags = [];
 
   let pbxproj = fs.readFileSync(pbxprojPath, "utf8");
+  for (const obsoleteFlag of ["-Wl,-ld_classic", "-sectalign", "__DATA", "__percpu_first", "1000", "__tracepoints", "20"]) {
+    const escaped = obsoleteFlag.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+    pbxproj = pbxproj.replace(new RegExp(`\\n\\s*\"?${escaped}\"?,`, "g"), "");
+  }
+  const headerSearchPath = quotePbx(sourceDir);
+  pbxproj = pbxproj.replace(/HEADER_SEARCH_PATHS = \(([^;]*?)\);/g, (match, body) => {
+    if (body.includes(sourceDir)) return match;
+    return match.replace(/\n\s*\);$/, `\n\t\t\t\t\t${headerSearchPath},\n\t\t\t\t);`);
+  });
+  pbxproj = pbxproj.replace(/HEADER_SEARCH_PATHS = ([^;(][^;]*);/g, (match, value) => {
+    if (value.includes(sourceDir)) return match;
+    return `HEADER_SEARCH_PATHS = (${value.trim()}, ${headerSearchPath});`;
+  });
   pbxproj = pbxproj.replace(/OTHER_LDFLAGS = \(([\s\S]*?)\);/g, (match, body) => {
     const additions = commonFlags
       .filter((flag) => !body.includes(flag))
@@ -105,7 +105,7 @@ function main() {
   }
 
   fs.writeFileSync(pbxprojPath, pbxproj);
-  console.log(`iSH hook: linked ${guestArch} guest archives from ${buildRoot} and libresolv.`);
+  console.log(`iSH hook: linked supported userspace iSH ${guestArch} archives from ${buildRoot}.`);
 }
 
 main();

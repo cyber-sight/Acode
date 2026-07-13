@@ -101,7 +101,6 @@
         <hook type="after_prepare" src="hooks/ios/fix-deployment-target.js" />
         <hook type="after_prepare" src="hooks/ios/fix-advanced-http-private-headers.js" />
         <hook type="after_prepare" src="hooks/ios/fix-ftp-goldraccoon.js" />
-        <hook type="after_prepare" src="hooks/ios/fix-ish-rootfs-c-header.js" />
         <hook type="after_prepare" src="hooks/ios/fix-terminal-executor-header.js" />
         <hook type="after_prepare" src="hooks/ios/fix-sftp-ios-stub.js" />
         <hook type="after_prepare" src="hooks/ios/remove-sftp-nmssh-pod.js" />
