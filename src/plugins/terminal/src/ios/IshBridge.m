@@ -1,6 +1,9 @@
 #import "IshBridge.h"
 #import "AcodeIshTerminal.h"
 #import "RootfsManager.h"
+#include <arpa/inet.h>
+#include <netdb.h>
+#include <resolv.h>
 #import <sqlite3.h>
 
 #define ISH_INTERNAL 1
@@ -47,6 +50,7 @@ static void AcodeIshHandleFatalError(const char *message) {
 @property (nonatomic) NSMutableDictionary<NSNumber *, NSNumber *> *pendingExitStatuses;
 @property (nonatomic, copy) IshEventHandler eventHandler;
 @property (nonatomic) BOOL kernelStarted;
+- (BOOL)installBundledDefaultRootfs:(NSError **)error;
 @end
 
 @implementation IshBridge
@@ -299,8 +303,10 @@ static void AcodeIshProcessExited(struct task *task, int status) {
         return NO;
     }
 
-    [self writeGuestFile:@"/etc/resolv.conf"
-                 content:@"nameserver 1.1.1.1\nnameserver 8.8.8.8\n"];
+    NSError *dnsError = nil;
+    if (![self configureGuestDns:&dnsError]) {
+        NSLog(@"iSH: %@", dnsError.localizedDescription);
+    }
 
     NSData *argv = IshStringVector(@[@"/sbin/init"]);
     NSData *envp = IshStringVector(@[
@@ -320,22 +326,72 @@ static void AcodeIshProcessExited(struct task *task, int status) {
     return YES;
 }
 
-- (void)writeGuestFile:(NSString *)path content:(NSString *)content {
+- (BOOL)configureGuestDns:(NSError **)error {
+    struct __res_state resolver = {0};
+    if (res_ninit(&resolver) != 0) {
+        if (error) *error = IshError(34, @"Unable to read the iOS DNS configuration");
+        return NO;
+    }
+
+    NSMutableString *content = [NSMutableString string];
+    if (resolver.dnsrch[0] != NULL) {
+        [content appendString:@"search"];
+        for (int index = 0; resolver.dnsrch[index] != NULL; index++) {
+            [content appendFormat:@" %s", resolver.dnsrch[index]];
+        }
+        [content appendString:@"\n"];
+    }
+
+    union res_sockaddr_union servers[NI_MAXSERV];
+    int serverCount = res_getservers(&resolver, servers, NI_MAXSERV);
+    for (int index = 0; index < serverCount; index++) {
+        union res_sockaddr_union server = servers[index];
+        const struct sockaddr *address = (const struct sockaddr *)&server;
+        socklen_t addressLength = address->sa_len;
+        if (addressLength == 0) continue;
+
+        char host[NI_MAXHOST];
+        int result = getnameinfo(address, addressLength, host, sizeof(host), NULL, 0, NI_NUMERICHOST);
+        if (result == 0) [content appendFormat:@"nameserver %s\n", host];
+    }
+    res_nclose(&resolver);
+
+    // A resolver can temporarily report no servers while iOS changes network
+    // paths. Keep the guest usable until its next launch in that edge case.
+    if ([content rangeOfString:@"nameserver "].location == NSNotFound) {
+        [content appendString:@"nameserver 1.1.1.1\nnameserver 8.8.8.8\n"];
+    }
+
+    BOOL wroteConfiguration = [self writeGuestFile:@"/etc/resolv.conf" content:content error:error];
+    if (wroteConfiguration) NSLog(@"iSH: wrote %d iOS DNS server(s) to /etc/resolv.conf", serverCount);
+    return wroteConfiguration;
+}
+
+- (BOOL)writeGuestFile:(NSString *)path content:(NSString *)content error:(NSError **)error {
     struct fd *fd = generic_open(path.fileSystemRepresentation, O_WRONLY_ | O_CREAT_ | O_TRUNC_, 0644);
     if (IS_ERR(fd)) {
-        NSLog(@"iSH: unable to open guest file %@ (%ld)", path, (long)PTR_ERR(fd));
-        return;
+        if (error) {
+            *error = IshError(35, [NSString stringWithFormat:@"Unable to open guest file %@ (%ld)", path, (long)PTR_ERR(fd)]);
+        }
+        return NO;
     }
     NSData *data = [content dataUsingEncoding:NSUTF8StringEncoding];
-    fd->ops->write(fd, data.bytes, data.length);
+    ssize_t written = fd->ops->write(fd, data.bytes, data.length);
     fd_close(fd);
+    if (written < 0 || (NSUInteger)written != data.length) {
+        if (error) {
+            *error = IshError(36, [NSString stringWithFormat:@"Unable to write guest file %@ (%ld of %lu bytes)",
+                                   path, (long)written, (unsigned long)data.length]);
+        }
+        return NO;
+    }
+    return YES;
 }
 
 - (BOOL)ensureRootfsReady:(NSError **)error {
     NSString *rootPath = AcodeIshActiveRootPath();
     if ([self validateRootAtPath:rootPath requireRelease:AcodeIshIsDefaultRootActive() error:nil]) {
-        [self checkpointRootAtPath:rootPath];
-        return YES;
+        return [self checkpointRootAtPath:rootPath error:error];
     }
 
     if (!AcodeIshIsDefaultRootActive()) {
@@ -343,11 +399,20 @@ static void AcodeIshProcessExited(struct task *task, int status) {
         return NO;
     }
 
-    NSString *bundleRoot = [NSBundle.mainBundle pathForResource:@"ish-rootfs" ofType:nil];
-    if (!bundleRoot) bundleRoot = [NSBundle.mainBundle pathForResource:@"ish-rootfs" ofType:nil inDirectory:@"www"];
-    if (![self validateRootAtPath:bundleRoot requireRelease:YES error:error]) return NO;
+    return [self installBundledDefaultRootfs:error];
+}
+
+- (BOOL)installBundledDefaultRootfs:(NSError **)error {
+    NSString *rootPath = AcodeIshDefaultRootPath();
+    NSString *bundleRoot = [NSBundle.mainBundle.bundlePath stringByAppendingPathComponent:@"www/ish-rootfs"];
 
     NSFileManager *fm = NSFileManager.defaultManager;
+    BOOL bundleRootIsDirectory = NO;
+    if (![fm fileExistsAtPath:bundleRoot isDirectory:&bundleRootIsDirectory] || !bundleRootIsDirectory) {
+        if (error) *error = IshError(44, [NSString stringWithFormat:@"Bundled root filesystem was not found at %@", bundleRoot]);
+        return NO;
+    }
+
     NSString *parent = rootPath.stringByDeletingLastPathComponent;
     NSString *staging = [parent stringByAppendingPathComponent:[NSString stringWithFormat:@".ish-rootfs-staging-%@", NSUUID.UUID.UUIDString]];
     NSString *backup = [parent stringByAppendingPathComponent:[NSString stringWithFormat:@".ish-rootfs-backup-%@", NSUUID.UUID.UUIDString]];
@@ -357,7 +422,12 @@ static void AcodeIshProcessExited(struct task *task, int status) {
         if (error) *error = IshError(41, [NSString stringWithFormat:@"Unable to stage bundled root: %@", copyError.localizedDescription]);
         return NO;
     }
-    [self checkpointRootAtPath:staging];
+    // App bundle resources are signed and read-only. Validate only after the
+    // bundled root has been copied into its writable staging directory.
+    if (![self checkpointRootAtPath:staging error:error]) {
+        [fm removeItemAtPath:staging error:nil];
+        return NO;
+    }
     if (![self validateRootAtPath:staging requireRelease:YES error:error]) {
         [fm removeItemAtPath:staging error:nil];
         return NO;
@@ -378,6 +448,18 @@ static void AcodeIshProcessExited(struct task *task, int status) {
     return YES;
 }
 
+- (void)restoreDefaultRootfsWithCompletion:(void (^)(NSError * _Nullable error))completion {
+    dispatch_async(self.kernelQueue, ^{
+        NSError *error = nil;
+        if (self.kernelStarted) {
+            error = IshError(48, @"Close and relaunch Acode before restoring the default root filesystem. The iSH kernel is already running.");
+        } else if (![self installBundledDefaultRootfs:&error]) {
+            if (!error) error = IshError(49, @"Unable to restore the bundled root filesystem");
+        }
+        dispatch_async(dispatch_get_main_queue(), ^{ completion(error); });
+    });
+}
+
 - (BOOL)validateRootAtPath:(NSString *)rootPath
             requireRelease:(BOOL)requireRelease
                      error:(NSError **)error {
@@ -389,10 +471,19 @@ static void AcodeIshProcessExited(struct task *task, int status) {
     BOOL isDirectory = NO;
     NSString *dataPath = [rootPath stringByAppendingPathComponent:@"data"];
     NSString *metaPath = [rootPath stringByAppendingPathComponent:@"meta.db"];
-    if (![fm fileExistsAtPath:dataPath isDirectory:&isDirectory] || !isDirectory ||
-        ![fm fileExistsAtPath:metaPath] || !AcodeIshRootfsContainsPath(rootPath, @"/bin/sh") ||
-        !AcodeIshRootfsIsArm64(rootPath)) {
-        if (error) *error = IshError(45, @"Root filesystem must contain meta.db, data/, and /bin/sh");
+    BOOL hasData = [fm fileExistsAtPath:dataPath isDirectory:&isDirectory] && isDirectory;
+    BOOL hasMetadata = [fm fileExistsAtPath:metaPath];
+    BOOL hasShell = hasData && hasMetadata && AcodeIshRootfsContainsPath(rootPath, @"/bin/sh");
+    BOOL hasArm64Shell = hasShell && AcodeIshRootfsIsArm64(rootPath);
+    NSLog(@"[rootfs] validating %@: data=%d metadata=%d shell=%d arm64=%d",
+          rootPath, hasData, hasMetadata, hasShell, hasArm64Shell);
+    if (!hasData || !hasMetadata || !hasShell || !hasArm64Shell) {
+        NSString *reason;
+        if (!hasData) reason = @"data/ is missing or is not a directory";
+        else if (!hasMetadata) reason = @"meta.db is missing";
+        else if (!hasShell) reason = @"/bin/sh is missing from the fakefs metadata";
+        else reason = @"/bin/sh does not resolve to an executable ARM64 Linux ELF file";
+        if (error) *error = IshError(45, [NSString stringWithFormat:@"Invalid root filesystem: %@.", reason]);
         return NO;
     }
 
@@ -419,22 +510,38 @@ static void AcodeIshProcessExited(struct task *task, int status) {
     return YES;
 }
 
-- (void)checkpointRootAtPath:(NSString *)rootPath {
+- (BOOL)checkpointRootAtPath:(NSString *)rootPath error:(NSError **)error {
     NSString *metaPath = [rootPath stringByAppendingPathComponent:@"meta.db"];
     sqlite3 *database = NULL;
-    if (sqlite3_open_v2(metaPath.fileSystemRepresentation, &database, SQLITE_OPEN_READWRITE, NULL) == SQLITE_OK) {
-        sqlite3_wal_checkpoint_v2(database, NULL, SQLITE_CHECKPOINT_TRUNCATE, NULL, NULL);
+    int result = sqlite3_open_v2(metaPath.fileSystemRepresentation, &database, SQLITE_OPEN_READWRITE, NULL);
+    if (result == SQLITE_OK) {
+        result = sqlite3_wal_checkpoint_v2(database, NULL, SQLITE_CHECKPOINT_TRUNCATE, NULL, NULL);
     }
+    if (result == SQLITE_OK) {
+        result = sqlite3_exec(database, "PRAGMA journal_mode=DELETE", NULL, NULL, NULL);
+    }
+    NSString *message = result == SQLITE_OK
+        ? nil
+        : [NSString stringWithFormat:@"Unable to checkpoint root filesystem metadata (%d: %s)",
+                                      result, database ? sqlite3_errmsg(database) : "database unavailable"];
     if (database) sqlite3_close(database);
+
+    if (result != SQLITE_OK) {
+        NSLog(@"[rootfs] %@", message);
+        if (error) *error = IshError(50, message);
+        return NO;
+    }
+
     NSFileManager *fm = NSFileManager.defaultManager;
     [fm removeItemAtPath:[metaPath stringByAppendingString:@"-shm"] error:nil];
     [fm removeItemAtPath:[metaPath stringByAppendingString:@"-wal"] error:nil];
+    return YES;
 }
 
 - (BOOL)reconcileFs:(NSError **)error {
     NSString *rootPath = AcodeIshActiveRootPath();
     BOOL valid = [self validateRootAtPath:rootPath requireRelease:AcodeIshIsDefaultRootActive() error:error];
-    if (valid && !self.kernelStarted) [self checkpointRootAtPath:rootPath];
+    if (valid && !self.kernelStarted) valid = [self checkpointRootAtPath:rootPath error:error];
     return valid;
 }
 

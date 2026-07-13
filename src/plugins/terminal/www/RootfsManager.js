@@ -8,6 +8,7 @@ module.exports = {
   list: () => invoke("list"),
   importArchive: (sourceUrl, name) => invoke("importArchive", [sourceUrl, name]),
   importDirectory: (sourceUrl, name) => invoke("importDirectory", [sourceUrl, name]),
+  restoreDefault: () => invoke("restoreDefault"),
   activate: (id) => invoke("activate", [id]),
   rename: (id, name) => invoke("rename", [id, name]),
   delete: (id) => invoke("delete", [id]),

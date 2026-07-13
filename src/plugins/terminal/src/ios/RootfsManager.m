@@ -25,6 +25,10 @@ static NSString *RootPathForId(NSString *rootId) {
     return [RootsPath() stringByAppendingPathComponent:rootId];
 }
 
+NSString *AcodeIshDefaultRootPath(void) {
+    return RootPathForId(AcodeIshDefaultRootId);
+}
+
 NSString *AcodeIshActiveRootPath(void) {
     NSString *rootId = [NSUserDefaults.standardUserDefaults stringForKey:AcodeIshActiveRootKey];
     if (rootId.length == 0)
@@ -59,6 +63,62 @@ static BOOL RootfsLookupPath(sqlite3 *db, NSString *fakePath, uint32_t *mode) {
     return found;
 }
 
+static NSString *RootfsNormalizedPath(NSString *path) {
+    NSString *normalized = [path stringByStandardizingPath];
+    return [normalized hasPrefix:@"/"] ? normalized : [@"/" stringByAppendingString:normalized];
+}
+
+static NSString *RootfsSymlinkTarget(NSString *rootPath, NSString *fakePath) {
+    if (fakePath.length < 2) return nil;
+    NSString *backingPath = [[rootPath stringByAppendingPathComponent:@"data"]
+                             stringByAppendingPathComponent:[fakePath substringFromIndex:1]];
+    NSData *targetData = [NSData dataWithContentsOfFile:backingPath];
+    NSString *target = targetData ? [[NSString alloc] initWithData:targetData encoding:NSUTF8StringEncoding] : nil;
+    return target.length ? target : nil;
+}
+
+/** Resolve both intermediate and final fakefs symlinks, such as
+ * /bin -> usr/bin and /usr/bin/sh -> busybox. */
+static BOOL RootfsResolvePath(sqlite3 *db,
+                              NSString *rootPath,
+                              NSString *fakePath,
+                              NSString **resolvedPath,
+                              uint32_t *resolvedMode) {
+    NSString *candidate = RootfsNormalizedPath(fakePath);
+    for (NSUInteger depth = 0; depth < 32; depth++) {
+        NSArray<NSString *> *components = candidate.pathComponents;
+        NSString *prefix = @"/";
+        BOOL followedSymlink = NO;
+        uint32_t mode = 0;
+
+        for (NSUInteger index = 0; index < components.count; index++) {
+            NSString *component = components[index];
+            if ([component isEqualToString:@"/"] || component.length == 0) continue;
+            prefix = [prefix stringByAppendingPathComponent:component];
+            if (!RootfsLookupPath(db, prefix, &mode)) return NO;
+            if (!S_ISLNK(mode)) continue;
+
+            NSString *target = RootfsSymlinkTarget(rootPath, prefix);
+            if (!target) return NO;
+            NSString *next = [target hasPrefix:@"/"]
+                ? target
+                : [[prefix stringByDeletingLastPathComponent] stringByAppendingPathComponent:target];
+            for (NSUInteger remainder = index + 1; remainder < components.count; remainder++) {
+                next = [next stringByAppendingPathComponent:components[remainder]];
+            }
+            candidate = RootfsNormalizedPath(next);
+            followedSymlink = YES;
+            break;
+        }
+
+        if (followedSymlink) continue;
+        if (resolvedPath) *resolvedPath = candidate;
+        if (resolvedMode) *resolvedMode = mode;
+        return YES;
+    }
+    return NO;
+}
+
 BOOL AcodeIshRootfsContainsPath(NSString *rootPath, NSString *fakePath) {
     NSString *metaPath = [rootPath stringByAppendingPathComponent:@"meta.db"];
     sqlite3 *db = NULL;
@@ -68,49 +128,8 @@ BOOL AcodeIshRootfsContainsPath(NSString *rootPath, NSString *fakePath) {
         return NO;
     }
 
-    BOOL found = NO;
-    NSString *candidate = [fakePath stringByStandardizingPath];
-    for (NSUInteger depth = 0; depth < 16 && !found; depth++) {
-        if (RootfsLookupPath(db, candidate, NULL)) {
-            found = YES;
-            break;
-        }
-
-        NSArray<NSString *> *components = candidate.pathComponents;
-        BOOL resolvedSymlink = NO;
-        NSString *prefix = @"/";
-        for (NSUInteger index = 0; index + 1 < components.count; index++) {
-            NSString *component = components[index];
-            if ([component isEqualToString:@"/"] || component.length == 0)
-                continue;
-            prefix = [prefix stringByAppendingPathComponent:component];
-
-            uint32_t mode = 0;
-            if (!RootfsLookupPath(db, prefix, &mode) || !S_ISLNK(mode))
-                continue;
-
-            NSString *backingPath = [[rootPath stringByAppendingPathComponent:@"data"]
-                                     stringByAppendingPathComponent:[prefix substringFromIndex:1]];
-            NSData *targetData = [NSData dataWithContentsOfFile:backingPath];
-            NSString *target = targetData ? [[NSString alloc] initWithData:targetData encoding:NSUTF8StringEncoding] : nil;
-            if (target.length == 0)
-                break;
-
-            NSString *resolved = [target hasPrefix:@"/"]
-                ? target
-                : [[prefix stringByDeletingLastPathComponent] stringByAppendingPathComponent:target];
-            for (NSUInteger remainder = index + 1; remainder < components.count; remainder++) {
-                resolved = [resolved stringByAppendingPathComponent:components[remainder]];
-            }
-            candidate = [resolved stringByStandardizingPath];
-            if (![candidate hasPrefix:@"/"])
-                candidate = [@"/" stringByAppendingString:candidate];
-            resolvedSymlink = YES;
-            break;
-        }
-        if (!resolvedSymlink)
-            break;
-    }
+    NSString *candidate = nil;
+    BOOL found = RootfsResolvePath(db, rootPath, fakePath, &candidate, NULL);
 
     if (found && ![candidate isEqualToString:fakePath])
         NSLog(@"[rootfs] resolved virtual path %@ -> %@", fakePath, candidate);
@@ -126,29 +145,15 @@ BOOL AcodeIshRootfsIsArm64(NSString *rootPath) {
         return NO;
     }
 
-    NSString *candidate = @"/bin/sh";
-    NSData *executable = nil;
-    for (NSUInteger depth = 0; depth < 16; depth++) {
-        uint32_t mode = 0;
-        if (!RootfsLookupPath(db, candidate, &mode)) break;
-        NSString *backingPath = [[rootPath stringByAppendingPathComponent:@"data"]
-                                 stringByAppendingPathComponent:[candidate substringFromIndex:1]];
-        NSData *data = [NSData dataWithContentsOfFile:backingPath options:NSDataReadingMappedIfSafe error:nil];
-        if (!S_ISLNK(mode)) {
-            executable = data;
-            break;
-        }
-
-        NSString *target = data ? [[NSString alloc] initWithData:data encoding:NSUTF8StringEncoding] : nil;
-        if (target.length == 0) break;
-        candidate = [target hasPrefix:@"/"]
-            ? target
-            : [[candidate stringByDeletingLastPathComponent] stringByAppendingPathComponent:target];
-        candidate = [candidate stringByStandardizingPath];
-        if (![candidate hasPrefix:@"/"]) candidate = [@"/" stringByAppendingString:candidate];
-    }
+    NSString *candidate = nil;
+    uint32_t mode = 0;
+    BOOL resolved = RootfsResolvePath(db, rootPath, @"/bin/sh", &candidate, &mode);
     sqlite3_close(db);
 
+    if (!resolved || !S_ISREG(mode) || (mode & 0111) == 0 || candidate.length < 2) return NO;
+    NSString *backingPath = [[rootPath stringByAppendingPathComponent:@"data"]
+                             stringByAppendingPathComponent:[candidate substringFromIndex:1]];
+    NSData *executable = [NSData dataWithContentsOfFile:backingPath options:NSDataReadingMappedIfSafe error:nil];
     if (executable.length < 20) return NO;
     const uint8_t *bytes = executable.bytes;
     if (bytes[0] != 0x7f || bytes[1] != 'E' || bytes[2] != 'L' || bytes[3] != 'F') return NO;
@@ -310,6 +315,19 @@ static void rootfs_progress_callback(void *cookie, double progress, const char *
 
 - (void)importDirectory:(CDVInvokedUrlCommand *)command {
     [self importCommand:command directory:YES];
+}
+
+- (void)restoreDefault:(CDVInvokedUrlCommand *)command {
+    [[IshBridge shared] restoreDefaultRootfsWithCompletion:^(NSError *error) {
+        if (error) {
+            [self sendError:error command:command];
+            return;
+        }
+        [NSUserDefaults.standardUserDefaults setObject:AcodeIshDefaultRootId forKey:AcodeIshActiveRootKey];
+        NSDictionary *result = @{ @"restartRequired": @YES };
+        [self.commandDelegate sendPluginResult:[CDVPluginResult resultWithStatus:CDVCommandStatus_OK messageAsDictionary:result]
+                                     callbackId:command.callbackId];
+    }];
 }
 
 - (NSString *)archiveSuffixForURL:(NSURL *)sourceURL {

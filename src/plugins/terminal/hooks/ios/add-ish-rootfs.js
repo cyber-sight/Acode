@@ -28,6 +28,17 @@ function main() {
     return;
   }
 
+  const sqliteSidecars = ["meta.db-shm", "meta.db-wal"].filter((name) =>
+    fs.existsSync(path.join(srcRootfs, name)),
+  );
+  if (sqliteSidecars.length) {
+    throw new Error(
+      `iSH rootfs metadata is not checkpointed; remove ${sqliteSidecars.join(
+        ", ",
+      )} only after checkpointing meta.db. SQLite sidecars must never be bundled.`,
+    );
+  }
+
   const iosPath = path.join(projectRoot, "platforms", "ios");
   const xcodeProject = fs.existsSync(iosPath)
     ? fs.readdirSync(iosPath).find((entry) => entry.endsWith(".xcodeproj"))
