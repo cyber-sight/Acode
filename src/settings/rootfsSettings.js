@@ -9,10 +9,13 @@ import FileBrowser from "pages/fileBrowser";
 
 export default function rootfsSettings() {
 	let page;
+	let restoringDefault = false;
 
 	async function refreshPublicHome() {
 		const path = await rootfsManager.getActivePublicHome();
-		localStorage.ishActivePublicHome = path.startsWith("file://") ? path : `file://${path}`;
+		localStorage.ishActivePublicHome = path.startsWith("file://")
+			? path
+			: `file://${path}`;
 	}
 
 	function createPage(roots = [], error = "") {
@@ -29,17 +32,29 @@ export default function rootfsSettings() {
 				info: "Import a local folder containing bin/sh.",
 				chevron: true,
 			},
-			...(error
-				? [{ key: "load-error", text: "Root Filesystems Unavailable", info: error }]
-				: roots.map((root) => ({
-				key: `root:${root.id}`,
-				text: root.name,
-				value: root.isActive ? "Next launch" : "",
-				info: root.isDefault
-					? "Bundled root filesystem"
-					: root.importedAt || "Imported root filesystem",
+			{
+				key: "restore-default",
+				text: "Restore Default Rootfs",
+				info: "Reinstall the bundled ARM64 root filesystem and select it for the next launch.",
 				chevron: true,
-			}))),
+			},
+			...(error
+				? [
+						{
+							key: "load-error",
+							text: "Root Filesystems Unavailable",
+							info: error,
+						},
+					]
+				: roots.map((root) => ({
+						key: `root:${root.id}`,
+						text: root.name,
+						value: root.isActive ? "Next launch" : "",
+						info: root.isDefault
+							? "Bundled root filesystem"
+							: root.importedAt || "Imported root filesystem",
+						chevron: true,
+					}))),
 		];
 		return settingsPage("Root Filesystems", items, callback, undefined, {
 			preserveOrder: true,
@@ -48,6 +63,34 @@ export default function rootfsSettings() {
 			infoAsDescription: true,
 			valueInTail: true,
 		});
+	}
+
+	async function restoreDefault() {
+		if (restoringDefault) return;
+		const accepted = await confirm(
+			"Restore Default Rootfs",
+			"Replace the current default root filesystem with the bundled copy? Files stored inside the default root filesystem will be removed.",
+		);
+		if (!accepted) return;
+
+		restoringDefault = true;
+		loader.showTitleLoader();
+		try {
+			console.log("[rootfs] Restoring bundled default root filesystem");
+			const result = await rootfsManager.restoreDefault();
+			await refreshPublicHome();
+			toast(
+				result.restartRequired
+					? "Default rootfs restored. Close and relaunch Acode to use it."
+					: "Default rootfs restored.",
+			);
+			await refresh();
+		} catch (error) {
+			toast(error?.message || String(error));
+		} finally {
+			restoringDefault = false;
+			loader.removeTitleLoader();
+		}
 	}
 
 	async function refresh() {
@@ -59,7 +102,10 @@ export default function rootfsSettings() {
 			page = createPage(roots);
 		} catch (error) {
 			console.log("[rootfs] List failed:", error?.message);
-			page = createPage([], error?.message || "The iOS RootfsManager service is unavailable.");
+			page = createPage(
+				[],
+				error?.message || "The iOS RootfsManager service is unavailable.",
+			);
 		}
 		page.show();
 	}
@@ -75,20 +121,29 @@ export default function rootfsSettings() {
 			);
 			const suggestedName = directory
 				? selected.name
-				: selected.name.replace(/(\.tar\.gz|\.tgz|\.tar\.xz|\.txz|\.zip)$/i, "");
+				: selected.name.replace(
+						/(\.tar\.gz|\.tgz|\.tar\.xz|\.txz|\.zip)$/i,
+						"",
+					);
 			const name = await prompt("Root Filesystem Name", suggestedName, "text", {
 				required: true,
 			});
 			if (!name) return;
 			loader.showTitleLoader();
-			console.log("[rootfs] Starting import:", directory ? "folder" : "archive", "→", name);
+			console.log(
+				"[rootfs] Starting import:",
+				directory ? "folder" : "archive",
+				"→",
+				name,
+			);
 			if (directory) await rootfsManager.importDirectory(selected.url, name);
 			else await rootfsManager.importArchive(selected.url, name);
 			console.log("[rootfs] Import finished:", name);
 			toast("Root filesystem imported");
 			await refresh();
 		} catch (error) {
-			if (error?.message !== "User cancelled") toast(error?.message || String(error));
+			if (error?.message !== "User cancelled")
+				toast(error?.message || String(error));
 		} finally {
 			loader.removeTitleLoader();
 		}
@@ -108,13 +163,16 @@ export default function rootfsSettings() {
 			console.log("[rootfs] Activating:", root.name);
 			const result = await rootfsManager.activate(root.id);
 			await refreshPublicHome();
-			if (result.restartRequired) toast("Root selected. Close and relaunch Acode to use it.");
+			if (result.restartRequired)
+				toast("Root selected. Close and relaunch Acode to use it.");
 			await refresh();
 			console.log("[rootfs] Activated:", root.name);
 			return;
 		}
 		if (action === "rename") {
-			const name = await prompt("Root Filesystem Name", root.name, "text", { required: true });
+			const name = await prompt("Root Filesystem Name", root.name, "text", {
+				required: true,
+			});
 			if (name) {
 				console.log("[rootfs] Renaming:", root.name, "→", name);
 				await rootfsManager.rename(root.id, name);
@@ -123,7 +181,10 @@ export default function rootfsSettings() {
 			return;
 		}
 		if (action === "delete") {
-			const accepted = await confirm("Delete Root Filesystem", `Delete ${root.name}? This cannot be undone.`);
+			const accepted = await confirm(
+				"Delete Root Filesystem",
+				`Delete ${root.name}? This cannot be undone.`,
+			);
 			if (accepted) {
 				console.log("[rootfs] Deleting:", root.name);
 				await rootfsManager.delete(root.id);
@@ -136,6 +197,7 @@ export default function rootfsSettings() {
 	async function callback(key) {
 		if (key === "import-archive") return importRoot(false);
 		if (key === "import-folder") return importRoot(true);
+		if (key === "restore-default") return restoreDefault();
 		if (key.startsWith("root:")) return manageRoot(key.slice(5));
 	}
 

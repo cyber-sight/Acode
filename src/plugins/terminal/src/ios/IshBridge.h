@@ -15,6 +15,10 @@ typedef void (^IshEventHandler)(NSString *sessionId, NSString *type, NSString *p
 
 - (void)setEventHandler:(IshEventHandler)handler;
 
+/** Replace the Documents copy of the bundled default rootfs before the kernel
+ * mounts it. Completion is delivered on the main queue. */
+- (void)restoreDefaultRootfsWithCompletion:(void (^)(NSError * _Nullable error))completion;
+
 /**
  * Validate the active fakefs metadata and checkpoint it when the kernel has
  * not mounted it yet. Host-side files must be imported through RootfsManager;

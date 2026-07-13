@@ -18,6 +18,9 @@ const rootfsManager = {
 	importDirectory(sourceUrl, name) {
 		return invoke("importDirectory", [sourceUrl, name]);
 	},
+	restoreDefault() {
+		return invoke("restoreDefault");
+	},
 	activate(id) {
 		return invoke("activate", [id]);
 	},
