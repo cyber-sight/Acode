@@ -32,6 +32,8 @@ The active fork branch is `acode-arm64` at `5483be0`. The abandoned experiment i
 
 The JavaScript API remains `start`, `write`, `resize`, `stop`, and `exec`. The executor buffers output or exit events that arrive before Cordova registers the session callback.
 
+Guest CPU pthreads use Apple's utility QoS. Long-running package installs and builds therefore yield scheduler priority to the app UI and other foreground work while continuing to make progress. The iOS guest advertises two CPUs by default to prevent language runtimes from creating a host-sized worker pool; host CLI tests can override this with `ISH_GUEST_CPU_COUNT`. This does not grant background execution: iOS may suspend Acode after the app leaves the foreground.
+
 ## Build
 
 Build both supported SDK archive sets:
@@ -80,3 +82,5 @@ For long commands, redirect output to `/private/tmp` and inspect the tail. The r
 7. Inspect app logs for host crashes, guest page faults, invalid-directory failures, hung sessions, or dropped input.
 
 The fork documents a 223-case compatibility result, but its bundled benchmark runner requires both its own x86 and ARM64 build/root directory names and rewrites benchmark reports. Do not claim a fresh 223/223 run unless that full fixture is provisioned; Acode's generated root is instead validated directly with the standard ARM64 CLI and app runtime flow.
+
+For ARM64 host builds, `meson test -C third_party/ish-arm64/build-host-arm64` runs a focused LDXP/STXP and LDNP/STNP regression. This covers the pair atomics and non-temporal stores used by JavaScriptCore. Bun 1.3.14 is also used as a CLI compatibility workload: a local `bun add` must complete, write its lockfile, and execute the installed module. With `ISH_GUEST_CPU_COUNT=2`, four concurrent Bun workers must also start, exchange messages, and exit. A live registry install additionally requires working host network access and DNS.

@@ -50,8 +50,13 @@ build_fakefs_import() {
   echo "==> Adding fakefs import support for $sdk..."
   (
     cd "$meson_dir"
-    while xcrun --sdk "$sdk" ar -t libfakefs.a | rg -q '^(tools_fakefs\.c\.o|util_fchdir\.c\.o)$'; do
-      xcrun --sdk "$sdk" ar -d libfakefs.a tools_fakefs.c.o util_fchdir.c.o
+    # Meson may include either helper object, and llvm-ar fails if any object
+    # named in a delete operation is absent. Remove each object independently
+    # so incremental builds and different Meson layouts are both supported.
+    for object in tools_fakefs.c.o util_fchdir.c.o; do
+      while xcrun --sdk "$sdk" ar -t libfakefs.a | rg -qx "$object"; do
+        xcrun --sdk "$sdk" ar -d libfakefs.a "$object"
+      done
     done
 
     rm -rf libfakefs_import.a.p libfakefs_import.a libfakefs-merged.a
