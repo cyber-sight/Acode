@@ -11,7 +11,9 @@ import confirm from "dialogs/confirm";
 import EditorFile from "lib/editorFile";
 import openFile from "lib/openFile";
 import openFolder from "lib/openFolder";
+import rootfsManager from "lib/rootfsManager";
 import appSettings from "lib/settings";
+import handleTerminalCli from "lib/terminalCli";
 import helpers from "utils/helpers";
 import TerminalComponent from "./terminal";
 import TerminalTouchSelection from "./terminalTouchSelection";
@@ -832,12 +834,11 @@ class TerminalManager {
 			toast(message);
 		};
 
-		// Handle acode CLI open commands (OSC 7777)
-		terminalComponent.onOscOpen = async (type, path) => {
+		const openFromTerminal = async (type, path) => {
 			if (!path) return;
 
 			// Convert proot path
-			const fileUri = this.convertProotPath(path);
+			const fileUri = await this.convertProotPath(path);
 			// Extract folder/file name from normalized path
 			const name = this.getPathDisplayName(path);
 
@@ -853,7 +854,20 @@ class TerminalManager {
 			} catch (error) {
 				console.error("Failed to open from terminal:", error);
 				toast(`Failed to open: ${path}`);
+				throw error;
 			}
+		};
+
+		// Handle the legacy one-way open command and the request/response CLI.
+		terminalComponent.onOscOpen = openFromTerminal;
+		terminalComponent.onOscRequest = async (command, args) => {
+			if (command === "open") {
+				const [type, path] = args;
+				if (!path) throw new Error("A file or folder path is required.");
+				await openFromTerminal(type, path);
+				return `Opened ${path}`;
+			}
+			return handleTerminalCli(command, args);
 		};
 
 		// Store references for cleanup
@@ -1112,8 +1126,13 @@ class TerminalManager {
 	 * @param {string} prootPath - Path from inside proot environment
 	 * @returns {string} App filesystem path
 	 */
-	convertProotPath(prootPath) {
+	async convertProotPath(prootPath) {
 		if (!prootPath) return prootPath;
+		if (isIOSTerminal && prootPath.startsWith("/")) {
+			const homePath = await rootfsManager.getActivePublicHome();
+			const dataRoot = String(homePath).replace(/\/home\/?$/, "");
+			return `file://${dataRoot}${prootPath}`;
+		}
 
 		const packageName = window.BuildInfo?.packageName || "com.foxdebug.acode";
 		const dataDir = `/data/user/0/${packageName}`;

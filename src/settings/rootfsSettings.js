@@ -51,8 +51,8 @@ export default function rootfsSettings() {
 						text: root.name,
 						value: root.isActive ? "Next launch" : "",
 						info: root.isDefault
-							? "Bundled root filesystem"
-							: root.importedAt || "Imported root filesystem",
+							? `Bundled root filesystem · Init: ${root.init || "/sbin/init"}`
+							: `${root.importedAt || "Imported root filesystem"} · Init: ${root.init || "/sbin/init"}`,
 						chevron: true,
 					}))),
 		];
@@ -153,7 +153,10 @@ export default function rootfsSettings() {
 		const roots = await rootfsManager.list();
 		const root = roots.find((item) => item.id === rootId);
 		if (!root) return;
-		const options = [["activate", "Use On Next Launch"]];
+		const options = [
+			["activate", "Use On Next Launch"],
+			["set-init", "Set Init Command"],
+		];
 		if (!root.isDefault && !root.isActive) {
 			options.push(["rename", "Rename"], ["delete", "Delete"]);
 		}
@@ -177,6 +180,23 @@ export default function rootfsSettings() {
 				console.log("[rootfs] Renaming:", root.name, "→", name);
 				await rootfsManager.rename(root.id, name);
 			}
+			await refresh();
+			return;
+		}
+		if (action === "set-init") {
+			const initPath = await prompt(
+				"Init Command",
+				root.init || "/sbin/init",
+				"text",
+				{ required: true },
+			);
+			if (!initPath) return;
+			const result = await rootfsManager.setInit(root.id, initPath.trim());
+			toast(
+				result.restartRequired
+					? "Init updated. Close and relaunch Acode to use it."
+					: "Init command updated.",
+			);
 			await refresh();
 			return;
 		}

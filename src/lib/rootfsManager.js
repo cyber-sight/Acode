@@ -27,6 +27,9 @@ const rootfsManager = {
 	rename(id, name) {
 		return invoke("rename", [id, name]);
 	},
+	setInit(id, initPath) {
+		return invoke("setInit", [id, initPath]);
+	},
 	delete(id) {
 		return invoke("delete", [id]);
 	},

@@ -11,6 +11,7 @@ module.exports = {
   restoreDefault: () => invoke("restoreDefault"),
   activate: (id) => invoke("activate", [id]),
   rename: (id, name) => invoke("rename", [id, name]),
+  setInit: (id, initPath) => invoke("setInit", [id, initPath]),
   delete: (id) => invoke("delete", [id]),
   getActivePublicHome: () => invoke("getActivePublicHome"),
   reconcileFs: () => invoke("reconcileFs"),

@@ -8,6 +8,8 @@ FOUNDATION_EXPORT NSString *AcodeIshActiveRootPath(void);
 FOUNDATION_EXPORT BOOL AcodeIshIsDefaultRootActive(void);
 FOUNDATION_EXPORT BOOL AcodeIshRootfsContainsPath(NSString *rootPath, NSString *fakePath);
 FOUNDATION_EXPORT BOOL AcodeIshRootfsIsArm64(NSString *rootPath);
+FOUNDATION_EXPORT BOOL AcodeIshRootfsExecutableIsArm64(NSString *rootPath, NSString *fakePath);
+FOUNDATION_EXPORT NSString *AcodeIshActiveRootInitPath(void);
 
 @interface RootfsManager : CDVPlugin
 - (void)list:(CDVInvokedUrlCommand *)command;
@@ -16,6 +18,7 @@ FOUNDATION_EXPORT BOOL AcodeIshRootfsIsArm64(NSString *rootPath);
 - (void)restoreDefault:(CDVInvokedUrlCommand *)command;
 - (void)activate:(CDVInvokedUrlCommand *)command;
 - (void)rename:(CDVInvokedUrlCommand *)command;
+- (void)setInit:(CDVInvokedUrlCommand *)command;
 - (void)delete:(CDVInvokedUrlCommand *)command;
 - (void)getActivePublicHome:(CDVInvokedUrlCommand *)command;
 

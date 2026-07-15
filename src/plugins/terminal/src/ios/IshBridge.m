@@ -51,6 +51,7 @@ static void AcodeIshHandleFatalError(const char *message) {
 @property (nonatomic, copy) IshEventHandler eventHandler;
 @property (nonatomic) BOOL kernelStarted;
 - (BOOL)installBundledDefaultRootfs:(NSError **)error;
+- (BOOL)installGuestCli:(NSError **)error;
 @end
 
 @implementation IshBridge
@@ -308,18 +309,39 @@ static void AcodeIshProcessExited(struct task *task, int status) {
         NSLog(@"iSH: %@", dnsError.localizedDescription);
     }
 
-    NSData *argv = IshStringVector(@[@"/sbin/init"]);
+    NSError *cliError = nil;
+    if (![self installGuestCli:&cliError]) {
+        NSLog(@"iSH: %@", cliError.localizedDescription);
+    }
+
     NSData *envp = IshStringVector(@[
         @"TERM=xterm-256color",
         @"HOME=/root",
         @"PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin",
         @"PYTHONMALLOC=malloc",
     ]);
-    result = do_execve("/sbin/init", 1, argv.bytes, envp.bytes);
-    if (result < 0) {
-        if (error) *error = IshError(33, [NSString stringWithFormat:@"Unable to execute /sbin/init (%d)", result]);
+    NSString *configuredInit = AcodeIshActiveRootInitPath();
+    NSArray<NSString *> *initCandidates = [configuredInit isEqualToString:@"/bin/sh"]
+        ? @[configuredInit]
+        : @[configuredInit, @"/bin/sh"];
+    NSString *startedInit = nil;
+    NSMutableArray<NSString *> *failures = [NSMutableArray array];
+    for (NSString *initPath in initCandidates) {
+        NSData *argv = IshStringVector(@[initPath]);
+        result = do_execve(initPath.fileSystemRepresentation, 1, argv.bytes, envp.bytes);
+        if (result == 0) {
+            startedInit = initPath;
+            break;
+        }
+        [failures addObject:[NSString stringWithFormat:@"%@ (%d)", initPath, result]];
+        NSLog(@"iSH: init %@ failed with %d%@", initPath, result,
+              [initPath isEqualToString:@"/bin/sh"] ? @"" : @"; falling back to /bin/sh");
+    }
+    if (!startedInit) {
+        if (error) *error = IshError(33, [NSString stringWithFormat:@"Unable to execute a guest init: %@", [failures componentsJoinedByString:@", "]]);
         return NO;
     }
+    NSLog(@"iSH: started %@ as init for root %@", startedInit, AcodeIshActiveRootPath());
 
     task_start(current);
     self.kernelStarted = YES;
@@ -382,6 +404,33 @@ static void AcodeIshProcessExited(struct task *task, int status) {
         if (error) {
             *error = IshError(36, [NSString stringWithFormat:@"Unable to write guest file %@ (%ld of %lu bytes)",
                                    path, (long)written, (unsigned long)data.length]);
+        }
+        return NO;
+    }
+    return YES;
+}
+
+- (BOOL)installGuestCli:(NSError **)error {
+    NSString *sourcePath = [NSBundle.mainBundle pathForResource:@"acode-cli" ofType:@"sh"];
+    NSError *readError = nil;
+    NSString *content = sourcePath
+        ? [NSString stringWithContentsOfFile:sourcePath encoding:NSUTF8StringEncoding error:&readError]
+        : nil;
+    if (!content) {
+        if (error) {
+            *error = IshError(37, readError.localizedDescription ?: @"Bundled acode CLI was not found");
+        }
+        return NO;
+    }
+    generic_mkdirat(AT_PWD, "/usr/local", 0755);
+    generic_mkdirat(AT_PWD, "/usr/local/bin", 0755);
+    if (![self writeGuestFile:@"/usr/local/bin/acode" content:content error:error]) {
+        return NO;
+    }
+    int result = generic_setattrat(AT_PWD, "/usr/local/bin/acode", make_attr(mode, 0755), false);
+    if (result < 0) {
+        if (error) {
+            *error = IshError(38, [NSString stringWithFormat:@"Unable to make /usr/local/bin/acode executable (%d)", result]);
         }
         return NO;
     }
@@ -543,6 +592,21 @@ static void AcodeIshProcessExited(struct task *task, int status) {
     BOOL valid = [self validateRootAtPath:rootPath requireRelease:AcodeIshIsDefaultRootActive() error:error];
     if (valid && !self.kernelStarted) valid = [self checkpointRootAtPath:rootPath error:error];
     return valid;
+}
+
+- (AcodeIshTerminal *)terminalForSession:(NSString *)sessionId {
+    // Access is safe without dispatching because:
+    // - sessions is only mutated during startWithCommand (kernel queue)
+    //   and stopSession (kernel queue)
+    // - The completion callback fires after the session is stored
+    // - We're reading during the active session lifecycle
+    // - AcodeIshTerminal is immutable for I/O purposes after creation
+    if (sessionId.length == 0) return nil;
+    __block AcodeIshTerminal *terminal = nil;
+    dispatch_sync(self.kernelQueue, ^{
+        terminal = self.sessions[sessionId];
+    });
+    return terminal;
 }
 
 @end

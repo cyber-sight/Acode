@@ -10,6 +10,9 @@
 NSString *const AcodeIshDefaultRootId = @"default";
 static NSString *const AcodeIshRootsKey = @"AcodeIshRoots";
 static NSString *const AcodeIshActiveRootKey = @"AcodeIshActiveRoot";
+static NSString *const AcodeIshDefaultInitKey = @"AcodeIshDefaultRootInit";
+static NSString *const AcodeIshFallbackInitPath = @"/bin/sh";
+static NSString *const AcodeIshPreferredInitPath = @"/sbin/init";
 
 static NSString *DocumentsPath(void) {
     return NSSearchPathForDirectoriesInDomains(NSDocumentDirectory, NSUserDomainMask, YES).firstObject ?: @"";
@@ -39,6 +42,27 @@ NSString *AcodeIshActiveRootPath(void) {
 BOOL AcodeIshIsDefaultRootActive(void) {
     NSString *rootId = [NSUserDefaults.standardUserDefaults stringForKey:AcodeIshActiveRootKey];
     return rootId.length == 0 || [rootId isEqualToString:AcodeIshDefaultRootId];
+}
+
+static NSString *RootfsSanitizedInitPath(id value) {
+    if (![value isKindOfClass:NSString.class]) return AcodeIshPreferredInitPath;
+    NSString *path = [(NSString *)value stringByTrimmingCharactersInSet:NSCharacterSet.whitespaceAndNewlineCharacterSet];
+    return path.length ? path : AcodeIshPreferredInitPath;
+}
+
+NSString *AcodeIshActiveRootInitPath(void) {
+    NSUserDefaults *defaults = NSUserDefaults.standardUserDefaults;
+    NSString *rootId = [defaults stringForKey:AcodeIshActiveRootKey];
+    if (rootId.length == 0 || [rootId isEqualToString:AcodeIshDefaultRootId])
+        return RootfsSanitizedInitPath([defaults stringForKey:AcodeIshDefaultInitKey]);
+
+    NSArray *roots = [defaults objectForKey:AcodeIshRootsKey];
+    if (![roots isKindOfClass:NSArray.class]) return AcodeIshPreferredInitPath;
+    for (NSDictionary *root in roots) {
+        if ([root isKindOfClass:NSDictionary.class] && [root[@"id"] isEqualToString:rootId])
+            return RootfsSanitizedInitPath(root[@"init"]);
+    }
+    return AcodeIshPreferredInitPath;
 }
 
 static BOOL RootfsLookupPath(sqlite3 *db, NSString *fakePath, uint32_t *mode) {
@@ -137,7 +161,7 @@ BOOL AcodeIshRootfsContainsPath(NSString *rootPath, NSString *fakePath) {
     return found;
 }
 
-BOOL AcodeIshRootfsIsArm64(NSString *rootPath) {
+BOOL AcodeIshRootfsExecutableIsArm64(NSString *rootPath, NSString *fakePath) {
     NSString *metaPath = [rootPath stringByAppendingPathComponent:@"meta.db"];
     sqlite3 *db = NULL;
     if (sqlite3_open_v2(metaPath.fileSystemRepresentation, &db, SQLITE_OPEN_READONLY, NULL) != SQLITE_OK) {
@@ -147,7 +171,7 @@ BOOL AcodeIshRootfsIsArm64(NSString *rootPath) {
 
     NSString *candidate = nil;
     uint32_t mode = 0;
-    BOOL resolved = RootfsResolvePath(db, rootPath, @"/bin/sh", &candidate, &mode);
+    BOOL resolved = RootfsResolvePath(db, rootPath, RootfsNormalizedPath(fakePath), &candidate, &mode);
     sqlite3_close(db);
 
     if (!resolved || !S_ISREG(mode) || (mode & 0111) == 0 || candidate.length < 2) return NO;
@@ -161,7 +185,11 @@ BOOL AcodeIshRootfsIsArm64(NSString *rootPath) {
     return machine == 183; // EM_AARCH64
 }
 
-static NSDictionary *RootDictionary(NSString *rootId, NSString *name, BOOL isDefault, BOOL isActive, NSString *importedAt) {
+BOOL AcodeIshRootfsIsArm64(NSString *rootPath) {
+    return AcodeIshRootfsExecutableIsArm64(rootPath, AcodeIshFallbackInitPath);
+}
+
+static NSDictionary *RootDictionary(NSString *rootId, NSString *name, BOOL isDefault, BOOL isActive, NSString *importedAt, NSString *initPath) {
     return @{
         @"id": rootId,
         @"name": name,
@@ -169,6 +197,7 @@ static NSDictionary *RootDictionary(NSString *rootId, NSString *name, BOOL isDef
         @"isActive": @(isActive),
         @"path": RootPathForId(rootId),
         @"importedAt": importedAt ?: @"",
+        @"init": RootfsSanitizedInitPath(initPath),
     };
 }
 
@@ -302,9 +331,10 @@ static void rootfs_progress_callback(void *cookie, double progress, const char *
 - (void)list:(CDVInvokedUrlCommand *)command {
     NSMutableArray *roots = [NSMutableArray array];
     NSString *activeRootId = self.activeRootId;
-    [roots addObject:RootDictionary(AcodeIshDefaultRootId, @"Default Root", YES, [activeRootId isEqualToString:AcodeIshDefaultRootId], @"")];
+    NSString *defaultInit = [NSUserDefaults.standardUserDefaults stringForKey:AcodeIshDefaultInitKey];
+    [roots addObject:RootDictionary(AcodeIshDefaultRootId, @"Default Root", YES, [activeRootId isEqualToString:AcodeIshDefaultRootId], @"", defaultInit)];
     for (NSDictionary *root in self.storedRoots) {
-        [roots addObject:RootDictionary(root[@"id"], root[@"name"], NO, [activeRootId isEqualToString:root[@"id"]], root[@"importedAt"])];
+        [roots addObject:RootDictionary(root[@"id"], root[@"name"], NO, [activeRootId isEqualToString:root[@"id"]], root[@"importedAt"], root[@"init"])];
     }
     [self.commandDelegate sendPluginResult:[CDVPluginResult resultWithStatus:CDVCommandStatus_OK messageAsArray:roots] callbackId:command.callbackId];
 }
@@ -465,10 +495,10 @@ static void rootfs_progress_callback(void *cookie, double progress, const char *
         }
         NSISO8601DateFormatter *formatter = [NSISO8601DateFormatter new];
         NSString *importedAt = [formatter stringFromDate:NSDate.date];
-        NSDictionary *storedRoot = @{@"id": rootId, @"name": name, @"importedAt": importedAt};
+        NSDictionary *storedRoot = @{@"id": rootId, @"name": name, @"importedAt": importedAt, @"init": AcodeIshPreferredInitPath};
         dispatch_async(dispatch_get_main_queue(), ^{
             [self saveRoots:[self.storedRoots arrayByAddingObject:storedRoot]];
-            NSDictionary *result = RootDictionary(rootId, name, NO, NO, importedAt);
+            NSDictionary *result = RootDictionary(rootId, name, NO, NO, importedAt, AcodeIshPreferredInitPath);
             [self.commandDelegate sendPluginResult:[CDVPluginResult resultWithStatus:CDVCommandStatus_OK messageAsDictionary:result] callbackId:command.callbackId];
         });
     });
@@ -500,10 +530,48 @@ static void rootfs_progress_callback(void *cookie, double progress, const char *
         root[@"name"] = name;
         roots[index] = root;
         [self saveRoots:roots];
-        [self.commandDelegate sendPluginResult:[CDVPluginResult resultWithStatus:CDVCommandStatus_OK messageAsDictionary:RootDictionary(rootId, name, NO, [rootId isEqualToString:self.activeRootId], root[@"importedAt"])] callbackId:command.callbackId];
+        [self.commandDelegate sendPluginResult:[CDVPluginResult resultWithStatus:CDVCommandStatus_OK messageAsDictionary:RootDictionary(rootId, name, NO, [rootId isEqualToString:self.activeRootId], root[@"importedAt"], root[@"init"])] callbackId:command.callbackId];
         return;
     }
     [self sendError:[NSError errorWithDomain:@"RootfsManager" code:6 userInfo:@{NSLocalizedDescriptionKey: @"Root filesystem not found."}] command:command];
+}
+
+- (void)setInit:(CDVInvokedUrlCommand *)command {
+    NSString *rootId = command.arguments.count > 0 ? command.arguments[0] : @"";
+    NSString *initPath = command.arguments.count > 1 ? RootfsSanitizedInitPath(command.arguments[1]) : @"";
+    NSDictionary *root = [rootId isEqualToString:AcodeIshDefaultRootId] ? @{} : [self rootWithId:rootId];
+    if (rootId.length == 0 || (![rootId isEqualToString:AcodeIshDefaultRootId] && !root)) {
+        [self sendError:[NSError errorWithDomain:@"RootfsManager" code:6 userInfo:@{NSLocalizedDescriptionKey: @"Root filesystem not found."}] command:command];
+        return;
+    }
+    if (![initPath hasPrefix:@"/"] || [initPath rangeOfCharacterFromSet:NSCharacterSet.whitespaceAndNewlineCharacterSet].location != NSNotFound) {
+        [self sendError:[NSError errorWithDomain:@"RootfsManager" code:11 userInfo:@{NSLocalizedDescriptionKey: @"Init must be one absolute executable path, such as /sbin/init or /bin/sh."}] command:command];
+        return;
+    }
+
+    NSString *rootPath = RootPathForId(rootId);
+    if (!AcodeIshRootfsExecutableIsArm64(rootPath, initPath)) {
+        [self sendError:[NSError errorWithDomain:@"RootfsManager" code:12 userInfo:@{NSLocalizedDescriptionKey: [NSString stringWithFormat:@"%@ is missing, not executable, or not an ARM64 Linux program in this root filesystem.", initPath]}] command:command];
+        return;
+    }
+
+    if ([rootId isEqualToString:AcodeIshDefaultRootId]) {
+        [NSUserDefaults.standardUserDefaults setObject:initPath forKey:AcodeIshDefaultInitKey];
+    } else {
+        NSMutableArray *roots = [self.storedRoots mutableCopy];
+        for (NSUInteger index = 0; index < roots.count; index++) {
+            if (![roots[index][@"id"] isEqualToString:rootId]) continue;
+            NSMutableDictionary *updated = [roots[index] mutableCopy];
+            updated[@"init"] = initPath;
+            roots[index] = updated;
+            break;
+        }
+        [self saveRoots:roots];
+    }
+
+    BOOL restartRequired = [rootId isEqualToString:self.activeRootId];
+    NSDictionary *result = @{@"init": initPath, @"restartRequired": @(restartRequired)};
+    [self.commandDelegate sendPluginResult:[CDVPluginResult resultWithStatus:CDVCommandStatus_OK messageAsDictionary:result] callbackId:command.callbackId];
 }
 
 - (void)delete:(CDVInvokedUrlCommand *)command {

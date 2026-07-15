@@ -1,5 +1,7 @@
 #import <Foundation/Foundation.h>
 
+@class AcodeIshTerminal;
+
 NS_ASSUME_NONNULL_BEGIN
 
 typedef void (^IshEventHandler)(NSString *sessionId, NSString *type, NSString *payload);
@@ -18,6 +20,9 @@ typedef void (^IshEventHandler)(NSString *sessionId, NSString *type, NSString *p
 /** Replace the Documents copy of the bundled default rootfs before the kernel
  * mounts it. Completion is delivered on the main queue. */
 - (void)restoreDefaultRootfsWithCompletion:(void (^)(NSError * _Nullable error))completion;
+
+/** Return the AcodeIshTerminal for an active session. */
+- (nullable AcodeIshTerminal *)terminalForSession:(NSString *)sessionId;
 
 /**
  * Validate the active fakefs metadata and checkpoint it when the kernel has

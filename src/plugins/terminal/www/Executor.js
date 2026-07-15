@@ -47,19 +47,63 @@ class Executor {
    *   process is ready. Use `ws.send()` to write to stdin and `ws.onmessage` to read stdout.
    */
   spawnStream(cmd, callback, onError) {
-    exec((port) => {
-      const ws = new WebSocket(`ws://127.0.0.1:${port}`);
-      ws.binaryType = "arraybuffer";
+    const reportError = (error, fallback) => {
+      if (!onError) return;
+      if (error instanceof Error) {
+        onError(error);
+        return;
+      }
+      const message =
+        typeof error === "string"
+          ? error
+          : error?.message || error?.error || fallback;
+      onError(new Error(message));
+    };
 
-      ws.onopen = () => {
-        callback(ws);
-      };
+    exec(
+      (result) => {
+        this._openWebSocket(result, callback, (error) =>
+          reportError(error, "Terminal WebSocket connection failed")
+        );
+      },
+      (error) => reportError(error, "Failed to start terminal session"),
+      "Executor",
+      "spawn",
+      [cmd]
+    );
+  }
 
-      ws.onerror = (e) => {
-        if (onError) onError(e);
-      };
+  /**
+   * Obtain a live endpoint for an existing iOS terminal session. Native code
+   * recreates the listener first if it is no longer running.
+   */
+  reconnectStream(sessionId, callback, onError) {
+    exec(
+      (result) => this._openWebSocket(result, callback, onError),
+      onError,
+      "Executor",
+      "reconnect",
+      [sessionId]
+    );
+  }
 
-    }, (err) => { if (onError) onError(err); }, "Executor", "spawn", [cmd]);
+  _openWebSocket(result, callback, onError) {
+    const port = typeof result === "object" ? result.port : result;
+    const sessionId = typeof result === "object" ? result.sessionId : null;
+    const ws = new WebSocket(`ws://127.0.0.1:${port}`);
+    let opened = false;
+    ws.binaryType = "arraybuffer";
+    ws.sessionId = sessionId;
+
+    ws.onopen = () => {
+      opened = true;
+      callback(ws, sessionId);
+    };
+    ws.onerror = (event) => {
+      if (!opened) onError?.(event);
+      else console.error("Terminal WebSocket stream error", event);
+    };
+    return ws;
   }
 
 
