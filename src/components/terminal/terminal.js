@@ -31,6 +31,20 @@ import TerminalTouchSelection from "./terminalTouchSelection";
 const isIOSTerminal =
 	typeof cordova !== "undefined" && cordova.platformId === "ios";
 
+function decodeBase64(value) {
+	const bytes = Uint8Array.from(atob(value), (character) =>
+		character.charCodeAt(0),
+	);
+	return new TextDecoder().decode(bytes);
+}
+
+function encodeBase64(value) {
+	const bytes = new TextEncoder().encode(String(value ?? ""));
+	let binary = "";
+	for (const byte of bytes) binary += String.fromCharCode(byte);
+	return btoa(binary);
+}
+
 export default class TerminalComponent {
 	constructor(options = {}) {
 		// Get terminal settings from shared defaults
@@ -67,6 +81,9 @@ export default class TerminalComponent {
 		this.ligaturesAddon = null;
 		this.container = null;
 		this.websocket = null;
+		this.reconnectTimer = null;
+		this.reconnectAttempt = 0;
+		this.isTerminating = false;
 		this.nativeInputDisposable = null;
 		this.pid = null;
 		this.isConnected = false;
@@ -145,8 +162,9 @@ export default class TerminalComponent {
 	}
 
 	/**
-	 * Setup custom OSC handler for acode CLI integration
-	 * OSC 7777 format: \e]7777;command;arg1;arg2;...\a
+	 * Setup custom OSC handler for acode CLI integration.
+	 * Legacy format: \e]7777;open;type;path\a
+	 * Request format: \e]7777;request;id;base64(command + args)\a
 	 */
 	setupOscHandler() {
 		// Register custom OSC handler for ID 7777
@@ -162,6 +180,17 @@ export default class TerminalComponent {
 			const rest = data.substring(firstSemi + 1);
 
 			switch (command) {
+				case "request": {
+					const secondSemi = rest.indexOf(";");
+					if (secondSemi === -1) {
+						console.warn("Invalid OSC 7777 request format:", data);
+						return true;
+					}
+					const requestId = rest.substring(0, secondSemi);
+					const payload = rest.substring(secondSemi + 1);
+					this.handleOscRequest(requestId, payload);
+					break;
+				}
 				case "open": {
 					// Format: open;type;path (path may contain semicolons)
 					const secondSemi = rest.indexOf(";");
@@ -179,6 +208,28 @@ export default class TerminalComponent {
 			}
 			return true;
 		});
+	}
+
+	async handleOscRequest(requestId, encodedPayload) {
+		if (!/^[a-zA-Z0-9._-]{1,80}$/.test(requestId)) return;
+
+		let ok = true;
+		let output = "";
+		try {
+			const fields = decodeBase64(encodedPayload).split("\n");
+			if (fields.at(-1) === "") fields.pop();
+			const command = fields.shift();
+			if (!command) throw new Error("Missing acode command.");
+			output = (await this.onOscRequest?.(command, fields)) ?? "";
+		} catch (error) {
+			ok = false;
+			output = error?.message || String(error);
+		}
+
+		const response = `__ACODE_RESPONSE_${requestId};${ok ? 0 : 1};${encodeBase64(
+			output,
+		)}\r`;
+		this.write(response);
 	}
 
 	/**
@@ -655,6 +706,7 @@ export default class TerminalComponent {
 		}
 
 		try {
+			this.isTerminating = false;
 			// Check if terminal is installed before starting AXS
 			if (!(await Terminal.isInstalled())) {
 				throw new Error(
@@ -663,10 +715,27 @@ export default class TerminalComponent {
 			}
 
 			if (isIOSTerminal) {
-				this.pid = await Executor.start("sh", (type, data) => {
-					this.handleNativeTerminalEvent(type, data);
+				// spawnStream starts iSH and connects its TTY to a local WebSocket.
+				return new Promise((resolve, reject) => {
+					Executor.spawnStream(
+						["sh"],
+						(ws, sessionId) => {
+							this.pid = sessionId || `ios-ws-${Date.now()}`;
+							this.attachIOSWebSocket(ws);
+							this.terminal.unicode.activeVersion = "11";
+
+							this.onConnect?.();
+							this.terminal.focus();
+							this.fit();
+
+							resolve(this.pid);
+						},
+						(err) => {
+							console.error("Failed to spawn iOS terminal:", err);
+							reject(err);
+						},
+					);
 				});
-				return this.pid;
 			}
 
 			// Start AXS if not running
@@ -740,6 +809,51 @@ export default class TerminalComponent {
 		}
 	}
 
+	attachIOSWebSocket(websocket) {
+		this.websocket = websocket;
+		this.isConnected = true;
+		this.reconnectAttempt = 0;
+		this.attachAddon?.dispose();
+		this.attachAddon = new AttachAddon(websocket);
+		this.terminal.loadAddon(this.attachAddon);
+
+		websocket.onclose = () => {
+			if (this.websocket !== websocket || this.isTerminating) return;
+			this.isConnected = false;
+			this.scheduleIOSWebSocketReconnect();
+		};
+	}
+
+	scheduleIOSWebSocketReconnect() {
+		if (this.isTerminating || !this.pid || this.reconnectTimer) return;
+		const delay = Math.min(500 * 2 ** this.reconnectAttempt, 10000);
+		this.reconnectAttempt += 1;
+		this.reconnectTimer = setTimeout(() => {
+			this.reconnectTimer = null;
+			if (this.isTerminating || !this.pid) return;
+			Executor.reconnectStream(
+				this.pid,
+				(websocket) => {
+					if (this.isTerminating) {
+						websocket.close();
+						return;
+					}
+					this.attachIOSWebSocket(websocket);
+					this.terminal.focus();
+					this.fit();
+				},
+				(error) => {
+					const message = error?.message || String(error || "");
+					if (message.includes("no longer exists")) {
+						this.onError?.(new Error(message));
+						return;
+					}
+					this.scheduleIOSWebSocketReconnect();
+				},
+			);
+		}, delay);
+	}
+
 	/**
 	 * Connect to terminal session via WebSocket
 	 * @param {string} pid - Terminal PID
@@ -758,7 +872,17 @@ export default class TerminalComponent {
 		this.pid = pid;
 
 		if (isIOSTerminal) {
-			await this.connectToNativeSession(pid);
+			if (this.isConnected) return;
+			await new Promise((resolve, reject) => {
+				Executor.reconnectStream(
+					pid,
+					(websocket) => {
+						this.attachIOSWebSocket(websocket);
+						resolve();
+					},
+					reject,
+				);
+			});
 			return;
 		}
 
@@ -857,32 +981,6 @@ export default class TerminalComponent {
 		});
 	}
 
-	async connectToNativeSession(pid) {
-		if (!pid) {
-			pid = await this.createSession();
-		}
-
-		this.pid = pid;
-		this.isConnected = true;
-		this.terminal.unicode.activeVersion = "11";
-
-		if (this.nativeInputDisposable) {
-			this.nativeInputDisposable.dispose();
-		}
-
-		this.nativeInputDisposable = this.terminal.onData((data) => {
-			if (!this.pid || !this.isConnected) return;
-			Executor.write(this.pid, data).catch((error) => {
-				console.error("Failed to write to iSH terminal:", error);
-				this.onError?.(error);
-			});
-		});
-
-		this.onConnect?.();
-		this.terminal.focus();
-		this.fit();
-	}
-
 	handleNativeTerminalEvent(type, data) {
 		const output = this.normalizeNativeTerminalOutput(type, data);
 		switch (type) {
@@ -923,7 +1021,15 @@ export default class TerminalComponent {
 	 */
 	async resizeTerminal(cols, rows) {
 		if (!this.pid || !this.serverMode) return;
-		if (isIOSTerminal) return;
+
+		if (isIOSTerminal) {
+			try {
+				this.websocket?.send(JSON.stringify({ type: "resize", cols, rows }));
+			} catch (error) {
+				console.error("Failed to resize iOS terminal:", error);
+			}
+			return;
+		}
 
 		try {
 			await new Promise((resolve, reject) => {
@@ -1206,23 +1312,35 @@ export default class TerminalComponent {
 	 * Terminate terminal session
 	 */
 	async terminate() {
+		this.isTerminating = true;
+		if (this.reconnectTimer) {
+			clearTimeout(this.reconnectTimer);
+			this.reconnectTimer = null;
+		}
+		const sessionId = this.pid;
 		if (this.websocket) {
 			this.websocket.close();
+			this.websocket = null;
+		}
+		this.isConnected = false;
+
+		if (isIOSTerminal) {
+			this.attachAddon?.dispose();
+			this.attachAddon = null;
+			if (sessionId && this.serverMode) {
+				try {
+					await Executor.stop(sessionId);
+				} catch (error) {
+					console.error("Failed to terminate iSH terminal:", error);
+				}
+			}
+			this.pid = null;
+			return;
 		}
 
 		if (this.nativeInputDisposable) {
 			this.nativeInputDisposable.dispose();
 			this.nativeInputDisposable = null;
-		}
-
-		if (isIOSTerminal && this.pid && this.serverMode) {
-			try {
-				await Executor.stop(this.pid);
-			} catch (error) {
-				console.error("Failed to terminate iSH terminal:", error);
-			}
-			this.isConnected = false;
-			return;
 		}
 
 		if (this.pid && this.serverMode) {

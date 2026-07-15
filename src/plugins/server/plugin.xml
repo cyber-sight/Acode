@@ -33,6 +33,10 @@
 
     <header-file src="src/ios/Server.h"/>
     <source-file src="src/ios/Server.m"/>
-    <framework src="GCDWebServer" type="podspec" />
+    <podspec>
+      <pods>
+        <pod name="GCDWebServer" />
+      </pods>
+    </podspec>
   </platform>
 </plugin>

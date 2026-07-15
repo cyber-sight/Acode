@@ -1,7 +1,7 @@
 import fsOperation from "fileSystem";
 import Url from "utils/Url";
 
-const INSTALL_STATE_STORAGE = Url.join(DATA_STORAGE, ".install-state");
+const INSTALL_STATE_STORAGE = Url.join(window.DATA_STORAGE, ".install-state");
 const NATIVE_CHECKSUM_TIMEOUT_MS = 1500;
 
 export default class InstallState {
@@ -22,7 +22,7 @@ export default class InstallState {
 			state.updatedStore = {};
 
 			if (!(await fsOperation(INSTALL_STATE_STORAGE).exists())) {
-				await fsOperation(DATA_STORAGE).createDirectory(".install-state");
+				await fsOperation(window.DATA_STORAGE).createDirectory(".install-state");
 			}
 
 			state.storeUrl = Url.join(INSTALL_STATE_STORAGE, state.id);

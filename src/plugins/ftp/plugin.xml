@@ -31,6 +31,10 @@
 
         <header-file src="src/ios/Ftp.h" />
         <source-file src="src/ios/Ftp.m" />
-        <framework src="GRRequests" type="podspec" />
+        <podspec>
+            <pods>
+                <pod name="GoldRaccoon" />
+            </pods>
+        </podspec>
     </platform>
 </plugin>

@@ -19,7 +19,7 @@ if ! xcodebuild -version >/dev/null 2>&1; then
 fi
 
 sudo xcodebuild -license accept >/dev/null
-
+\
 if ! command -v brew >/dev/null 2>&1; then
   echo "Homebrew not found. Install it from https://brew.sh and re-run this script."
   exit 1

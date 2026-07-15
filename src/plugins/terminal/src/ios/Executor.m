@@ -1,15 +1,25 @@
 #import "Executor.h"
 #import <Cordova/CDVPluginResult.h>
 #import "IshBridge.h"
+#import "IshWebSocketServer.h"
+#import "AcodeIshTerminal.h"
 
 static NSMutableDictionary<NSString *, NSString *> *sessionCallbacks;
 static NSMutableDictionary<NSString *, NSString *> *execCallbacks;
 static NSMutableDictionary<NSString *, NSMutableString *> *execOutputs;
 static NSMutableDictionary<NSString *, NSString *> *execMarkers;
 static NSMutableDictionary<NSString *, NSMutableArray<NSDictionary<NSString *, NSString *> *> *> *pendingEvents;
+static NSMutableDictionary<NSString *, IshWebSocketServer *> *wsServers;
 static __weak Executor *sharedExecutor;
 
 static void HandleExecutorEvent(NSString *sessionId, NSString *type, NSString *payload) {
+    if ([type isEqualToString:@"exit"] && wsServers[sessionId]) {
+        IshWebSocketServer *server = wsServers[sessionId];
+        [wsServers removeObjectForKey:sessionId];
+        [server stop];
+        [pendingEvents removeObjectForKey:sessionId];
+        return;
+    }
     NSString *execCallbackId = execCallbacks[sessionId];
     NSString *sessionCallbackId = sessionCallbacks[sessionId];
     if (!execCallbackId && !sessionCallbackId) {
@@ -100,6 +110,21 @@ static void DrainPendingEvents(NSString *sessionId) {
     }
 }
 
+static IshWebSocketServer *CreateWebSocketServer(NSString *sessionId,
+                                                  AcodeIshTerminal *terminal,
+                                                  NSError **error) {
+    IshWebSocketServer *server = [[IshWebSocketServer alloc] initWithTerminal:terminal];
+    server.sessionId = sessionId;
+    if (![server startWithError:error]) return nil;
+    server.disconnectHandler = ^{
+        // A dropped browser socket must not destroy the PTY. The listener and
+        // iSH session remain alive so the JavaScript side can reconnect.
+        NSLog(@"[WS] awaiting reconnect for session %@", sessionId);
+    };
+    wsServers[sessionId] = server;
+    return server;
+}
+
 @implementation Executor
 
 + (void)initialize {
@@ -109,6 +134,7 @@ static void DrainPendingEvents(NSString *sessionId) {
         execOutputs = [NSMutableDictionary dictionary];
         execMarkers = [NSMutableDictionary dictionary];
         pendingEvents = [NSMutableDictionary dictionary];
+        wsServers = [NSMutableDictionary dictionary];
         [[IshBridge shared] setEventHandler:^(NSString *sessionId, NSString *type, NSString *payload) {
             dispatch_async(dispatch_get_main_queue(), ^{
                 HandleExecutorEvent(sessionId, type, payload);
@@ -175,6 +201,12 @@ static void DrainPendingEvents(NSString *sessionId) {
 - (void)stop:(CDVInvokedUrlCommand *)command {
     NSString *sessionId = command.arguments.count > 0 ? command.arguments[0] : @"";
 
+    IshWebSocketServer *server = wsServers[sessionId];
+    if (server) {
+        [wsServers removeObjectForKey:sessionId];
+        [server stop];
+    }
+
     [[IshBridge shared] stopSession:sessionId completion:^(NSError * _Nullable error) {
         if (error) {
             CDVPluginResult *result = [CDVPluginResult resultWithStatus:CDVCommandStatus_ERROR messageAsString:error.localizedDescription];
@@ -231,8 +263,16 @@ static void DrainPendingEvents(NSString *sessionId) {
 }
 
 - (void)stopService:(CDVInvokedUrlCommand *)command {
-    NSArray<NSString *> *sessionIds = [sessionCallbacks.allKeys arrayByAddingObjectsFromArray:execCallbacks.allKeys];
-    for (NSString *sessionId in sessionIds) {
+    // Stop WebSocket-served sessions
+    for (NSString *sessionId in wsServers.allKeys) {
+        [wsServers[sessionId] stop];
+        [[IshBridge shared] stopSession:sessionId completion:nil];
+    }
+    [wsServers removeAllObjects];
+
+    // Stop Cordova callback-served sessions
+    NSArray<NSString *> *callbackSessionIds = [sessionCallbacks.allKeys arrayByAddingObjectsFromArray:execCallbacks.allKeys];
+    for (NSString *sessionId in callbackSessionIds) {
         [[IshBridge shared] stopSession:sessionId completion:nil];
     }
     [sessionCallbacks removeAllObjects];
@@ -246,7 +286,7 @@ static void DrainPendingEvents(NSString *sessionId) {
 
 - (void)isRunning:(CDVInvokedUrlCommand *)command {
     NSString *sessionId = command.arguments.count > 0 ? command.arguments[0] : @"";
-    BOOL running = sessionCallbacks[sessionId] != nil || execCallbacks[sessionId] != nil;
+    BOOL running = sessionCallbacks[sessionId] != nil || execCallbacks[sessionId] != nil || wsServers[sessionId] != nil;
     CDVPluginResult *result = [CDVPluginResult resultWithStatus:CDVCommandStatus_OK messageAsString:running ? @"running" : @"exited"];
     [self.commandDelegate sendPluginResult:result callbackId:command.callbackId];
 }
@@ -263,6 +303,106 @@ static void DrainPendingEvents(NSString *sessionId) {
 
 - (void)loadLibrary:(CDVInvokedUrlCommand *)command {
     CDVPluginResult *result = [CDVPluginResult resultWithStatus:CDVCommandStatus_ERROR messageAsString:@"Not supported on iOS."];
+    [self.commandDelegate sendPluginResult:result callbackId:command.callbackId];
+}
+
+- (void)spawn:(CDVInvokedUrlCommand *)command {
+    // Handle cmd as either a string or an array of strings (from Executor.js spawnStream)
+    NSString *cmd = @"sh";
+    if (command.arguments.count > 0) {
+        id cmdArg = command.arguments[0];
+        if ([cmdArg isKindOfClass:[NSString class]]) {
+            cmd = cmdArg;
+        } else if ([cmdArg isKindOfClass:[NSArray class]]) {
+            cmd = [cmdArg componentsJoinedByString:@" "];
+        }
+    }
+    NSInteger cols = command.arguments.count > 1 ? [command.arguments[1] integerValue] : 80;
+    NSInteger rows = command.arguments.count > 2 ? [command.arguments[2] integerValue] : 24;
+
+    [[IshBridge shared] startWithCommand:cmd completion:^(NSString *sessionId, NSError *error) {
+        if (error) {
+            CDVPluginResult *result = [CDVPluginResult resultWithStatus:CDVCommandStatus_ERROR
+                                                        messageAsString:error.localizedDescription];
+            [self.commandDelegate sendPluginResult:result callbackId:command.callbackId];
+            return;
+        }
+        if (sessionId.length == 0) {
+            CDVPluginResult *result = [CDVPluginResult resultWithStatus:CDVCommandStatus_ERROR
+                                                        messageAsString:@"Failed to create terminal session"];
+            [self.commandDelegate sendPluginResult:result callbackId:command.callbackId];
+            return;
+        }
+
+        AcodeIshTerminal *terminal = [[IshBridge shared] terminalForSession:sessionId];
+        if (!terminal) {
+            CDVPluginResult *result = [CDVPluginResult resultWithStatus:CDVCommandStatus_ERROR
+                                                        messageAsString:@"Terminal session not found after creation"];
+            [self.commandDelegate sendPluginResult:result callbackId:command.callbackId];
+            return;
+        }
+
+        // Apply requested terminal size
+        [terminal resizeToColumns:(int)cols rows:(int)rows];
+
+        // Create WebSocket server for this session
+        NSError *serverError = nil;
+        IshWebSocketServer *server = CreateWebSocketServer(sessionId, terminal, &serverError);
+        if (!server) {
+            [[IshBridge shared] stopSession:sessionId completion:nil];
+            NSString *msg = serverError.localizedDescription ?: @"Failed to start WebSocket server";
+            CDVPluginResult *result = [CDVPluginResult resultWithStatus:CDVCommandStatus_ERROR
+                                                        messageAsString:msg];
+            [self.commandDelegate sendPluginResult:result callbackId:command.callbackId];
+            return;
+        }
+
+        NSDictionary *stream = @{
+            @"port": @(server.port),
+            @"sessionId": sessionId,
+        };
+        CDVPluginResult *result = [CDVPluginResult resultWithStatus:CDVCommandStatus_OK
+                                               messageAsDictionary:stream];
+        [self.commandDelegate sendPluginResult:result callbackId:command.callbackId];
+    }];
+}
+
+- (void)reconnect:(CDVInvokedUrlCommand *)command {
+    NSString *sessionId = command.arguments.count > 0 ? command.arguments[0] : @"";
+    if (sessionId.length == 0) {
+        CDVPluginResult *result = [CDVPluginResult resultWithStatus:CDVCommandStatus_ERROR
+                                                    messageAsString:@"Missing terminal session ID"];
+        [self.commandDelegate sendPluginResult:result callbackId:command.callbackId];
+        return;
+    }
+
+    AcodeIshTerminal *terminal = [[IshBridge shared] terminalForSession:sessionId];
+    if (!terminal) {
+        CDVPluginResult *result = [CDVPluginResult resultWithStatus:CDVCommandStatus_ERROR
+                                                    messageAsString:@"Terminal session no longer exists"];
+        [self.commandDelegate sendPluginResult:result callbackId:command.callbackId];
+        return;
+    }
+
+    IshWebSocketServer *server = wsServers[sessionId];
+    if (!server.isRunning) {
+        [server stop];
+        [wsServers removeObjectForKey:sessionId];
+        NSError *serverError = nil;
+        server = CreateWebSocketServer(sessionId, terminal, &serverError);
+        if (!server) {
+            NSString *message = serverError.localizedDescription ?: @"Failed to restart terminal WebSocket server";
+            CDVPluginResult *result = [CDVPluginResult resultWithStatus:CDVCommandStatus_ERROR
+                                                        messageAsString:message];
+            [self.commandDelegate sendPluginResult:result callbackId:command.callbackId];
+            return;
+        }
+        NSLog(@"[WS] restarted listener for session %@ on port %u", sessionId, server.port);
+    }
+
+    NSDictionary *stream = @{ @"port": @(server.port), @"sessionId": sessionId };
+    CDVPluginResult *result = [CDVPluginResult resultWithStatus:CDVCommandStatus_OK
+                                           messageAsDictionary:stream];
     [self.commandDelegate sendPluginResult:result callbackId:command.callbackId];
 }
 
