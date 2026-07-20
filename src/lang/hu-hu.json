@@ -829,5 +829,7 @@
 	"diff sec": "{sec}mp ezelőtt",
 	"command": "Parancs",
 	"managed": "Kezelt",
-	"acode service": "Acode-szolgáltatás"
+	"acode service": "Acode-szolgáltatás",
+	"info-terminal-show-scrollbar": "Show the xterm scrollbar beside the terminal.",
+	"terminal:show scrollbar": "Show Scrollbar"
 }
