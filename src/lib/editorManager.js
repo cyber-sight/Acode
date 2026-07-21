@@ -2718,6 +2718,8 @@ async function EditorManager($header, $body) {
 				effects: languageCompartment.reconfigure(ext || []),
 			});
 			file.session = targetEditor.state;
+			file.__cmCachedLanguageExtension = ext || [];
+			file.__cmCachedLanguageSignature = languageSignature;
 			markLanguageReady(file, languageSignature, true);
 		} catch (error) {
 			warnRecoverable("Failed to apply language extensions.", error, warnKey);
@@ -2729,6 +2731,14 @@ async function EditorManager($header, $body) {
 		if (typeof langExtFn !== "function") {
 			markLanguageReady(file, languageSignature, true);
 			return [];
+		}
+
+		if (
+			file.__cmCachedLanguageExtension &&
+			file.__cmCachedLanguageSignature === languageSignature
+		) {
+			markLanguageReady(file, languageSignature, true);
+			return file.__cmCachedLanguageExtension;
 		}
 
 		let result;
@@ -2744,12 +2754,13 @@ async function EditorManager($header, $body) {
 			markLanguageReady(file, languageSignature, false);
 			result
 				.then((ext) => {
+					if (file.__cmLanguageSignature !== languageSignature) {
+						return;
+					}
+					file.__cmCachedLanguageExtension = ext || [];
+					file.__cmCachedLanguageSignature = languageSignature;
 					const pane = getFileLspPane(file);
-					if (
-						!pane?.editor ||
-						pane.activeFile?.id !== fileId ||
-						file.__cmLanguageSignature !== languageSignature
-					) {
+					if (!pane?.editor || pane.activeFile?.id !== fileId) {
 						return;
 					}
 
@@ -2768,6 +2779,8 @@ async function EditorManager($header, $body) {
 		}
 
 		markLanguageReady(file, languageSignature, true);
+		file.__cmCachedLanguageExtension = result || [];
+		file.__cmCachedLanguageSignature = languageSignature;
 		return result || [];
 	}
 
