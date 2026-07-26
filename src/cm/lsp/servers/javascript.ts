@@ -4,6 +4,29 @@ import { resolveJsTsLanguageId } from "./shared";
 
 export const javascriptServers: LspServerManifest[] = [
 	defineServer({
+		id: "typescript",
+		label: "TypeScript / JavaScript (Web Worker)",
+		useWorkspaceFolders: true,
+		languages: [
+			"javascript",
+			"javascriptreact",
+			"typescript",
+			"typescriptreact",
+			"tsx",
+			"jsx",
+		],
+		runtimes: ["web-worker"],
+		transport: { kind: "external" },
+		enabled: true,
+		clientConfig: {
+			builtinExtensions: {
+				inlayHints: true,
+			},
+		},
+		resolveLanguageId: ({ languageId, languageName }) =>
+			resolveJsTsLanguageId(languageId, languageName),
+	}),
+	defineServer({
 		id: "typescript-native",
 		label: "TypeScript 7 / JavaScript (Native STDIO)",
 		useWorkspaceFolders: false,
@@ -15,6 +38,7 @@ export const javascriptServers: LspServerManifest[] = [
 			"tsx",
 			"jsx",
 		],
+		runtimes: ["builtin-alpine"],
 		transport: {
 			kind: "websocket",
 		},
@@ -27,7 +51,7 @@ export const javascriptServers: LspServerManifest[] = [
 			packages: ["@typescript/native@npm:typescript@^7.0.2"],
 		}),
 		logOutput: "warnings-and-errors",
-		enabled: true,
+		enabled: false,
 		initializationOptions: {
 			provideFormatter: true,
 			hostInfo: "acode",
@@ -55,6 +79,7 @@ export const javascriptServers: LspServerManifest[] = [
 			"tsx",
 			"jsx",
 		],
+		runtimes: ["builtin-alpine"],
 		transport: {
 			kind: "websocket",
 		},

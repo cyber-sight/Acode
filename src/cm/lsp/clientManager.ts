@@ -261,10 +261,13 @@ interface InitContext {
   key: string;
   normalizedRootUri: string | null;
   originalRootUri: string | null;
+  runtimeRootUri: string | null;
+  runtimeOriginalRootUri: string | null;
   originalDocumentUri: string;
   documentUri: string;
   runtimeProvider: LspRuntimeProvider;
   scope: LspClientScope;
+  signal: AbortSignal;
 }
 
 interface ResolvedRuntimeTarget {
@@ -281,11 +284,56 @@ interface ExtendedLSPClient extends LSPClient {
   __acodeLoggedInfo?: boolean;
 }
 
+interface PendingClientInitialization {
+  serverId: string;
+  controller: AbortController;
+  promise: Promise<ClientState>;
+}
+
+function initializationCancelledError(serverId: string): Error {
+  const error = new Error(`LSP client initialization cancelled for ${serverId}`);
+  error.name = "AbortError";
+  return error;
+}
+
+function throwIfInitializationCancelled(
+  signal: AbortSignal,
+  serverId: string,
+): void {
+  if (!signal.aborted) return;
+  throw initializationCancelledError(serverId);
+}
+
+function waitForInitialization<T>(
+  promise: PromiseLike<T>,
+  signal: AbortSignal,
+  serverId: string,
+): Promise<T> {
+  throwIfInitializationCancelled(signal, serverId);
+  return new Promise((resolve, reject) => {
+    const onAbort = () => {
+      signal.removeEventListener("abort", onAbort);
+      reject(initializationCancelledError(serverId));
+    };
+    signal.addEventListener("abort", onAbort, { once: true });
+    Promise.resolve(promise).then(
+      (value) => {
+        signal.removeEventListener("abort", onAbort);
+        resolve(value);
+      },
+      (error) => {
+        signal.removeEventListener("abort", onAbort);
+        reject(error);
+      },
+    );
+  });
+}
+
 export class LspClientManager {
   options: ClientManagerOptions;
 
   #clients: Map<string, ClientState>;
-  #pendingClients: Map<string, Promise<ClientState>>;
+  #pendingClients: Map<string, PendingClientInitialization>;
 
   constructor(options: ClientManagerOptions = {}) {
     this.options = { ...options };
@@ -477,6 +525,27 @@ export class LspClientManager {
     }
   }
 
+  async disposeServer(serverId: string): Promise<void> {
+    const normalizedId = safeString(serverId).toLowerCase();
+    if (!normalizedId) return;
+    const pendingDisposals: Promise<void>[] = [];
+    for (const [key, pending] of this.#pendingClients.entries()) {
+      if (pending.serverId !== normalizedId) continue;
+      pending.controller.abort();
+      this.#pendingClients.delete(key);
+      pendingDisposals.push(
+        pending.promise.then((state) => state.dispose()),
+      );
+    }
+    const states = Array.from(this.#clients.values()).filter(
+      (state) => state.server.id.toLowerCase() === normalizedId,
+    );
+    await Promise.allSettled([
+      ...states.map((state) => state.dispose()),
+      ...pendingDisposals,
+    ]);
+  }
+
   async dispose(): Promise<void> {
     try {
       interface FileWithSession {
@@ -527,6 +596,11 @@ export class LspClientManager {
     }
 
     const disposeOps: Promise<void>[] = [];
+    for (const [key, pending] of this.#pendingClients.entries()) {
+      pending.controller.abort();
+      this.#pendingClients.delete(key);
+      disposeOps.push(pending.promise.then((state) => state.dispose()));
+    }
     for (const [key, state] of this.#clients.entries()) {
       disposeOps.push(state.dispose());
       this.#clients.delete(key);
@@ -571,25 +645,50 @@ export class LspClientManager {
 
     // If initialization is already in progress, wait for it
     if (this.#pendingClients.has(key)) {
-      return this.#pendingClients.get(key)!;
+      const pending = await this.#pendingClients.get(key)!.promise;
+      if (useWsFolders && normalizedRootUri) {
+        const workspace = pending.client.workspace as AcodeWorkspace | null;
+        if (workspace && !workspace.hasWorkspaceFolder(normalizedRootUri)) {
+          workspace.addWorkspaceFolder(normalizedRootUri);
+        }
+      }
+      return pending;
     }
 
     // Create and track the pending initialization
+    const controller = new AbortController();
     const initPromise = this.#initializeClient(server, context, {
       key,
       normalizedRootUri: useWsFolders ? null : normalizedRootUri,
       originalRootUri: useWsFolders ? null : originalRootUri,
+      runtimeRootUri: normalizedRootUri,
+      runtimeOriginalRootUri: originalRootUri,
       originalDocumentUri: target.originalDocumentUri,
       documentUri,
       runtimeProvider,
       scope,
+      signal: controller.signal,
     });
-    this.#pendingClients.set(key, initPromise);
+    const pending: PendingClientInitialization = {
+      serverId: server.id.toLowerCase(),
+      controller,
+      promise: initPromise,
+    };
+    this.#pendingClients.set(key, pending);
 
     try {
-      return await initPromise;
+      const state = await initPromise;
+      if (useWsFolders && normalizedRootUri) {
+        const workspace = state.client.workspace as AcodeWorkspace | null;
+        if (workspace && !workspace.hasWorkspaceFolder(normalizedRootUri)) {
+          workspace.addWorkspaceFolder(normalizedRootUri);
+        }
+      }
+      return state;
     } finally {
-      this.#pendingClients.delete(key);
+      if (this.#pendingClients.get(key) === pending) {
+        this.#pendingClients.delete(key);
+      }
     }
   }
 
@@ -602,10 +701,13 @@ export class LspClientManager {
       key,
       normalizedRootUri,
       originalRootUri,
+      runtimeRootUri,
+      runtimeOriginalRootUri,
       originalDocumentUri,
       documentUri,
       runtimeProvider,
       scope,
+      signal,
     } = initContext;
 
     const workspaceOptions = {
@@ -877,13 +979,14 @@ export class LspClientManager {
     let runtimeConnection: LspRuntimeConnection | undefined;
 
     try {
+      throwIfInitializationCancelled(signal, server.id);
       const runtimeContext = {
         ...context,
         uri: documentUri,
         documentUri,
         originalDocumentUri,
-        rootUri: normalizedRootUri ?? null,
-        originalRootUri: originalRootUri ?? undefined,
+        rootUri: runtimeRootUri,
+        originalRootUri: runtimeOriginalRootUri ?? undefined,
         serverId: server.id,
         allowNonTerminalWorkspace:
           this.options.allowNonTerminalWorkspace === true,
@@ -902,17 +1005,18 @@ export class LspClientManager {
         }
       };
       runtimeConnection = connection;
+      throwIfInitializationCancelled(signal, server.id);
 
       transportHandle = createTransportFromRuntimeConnection(
         server,
         runtimeContext,
         connection,
       );
-      await transportHandle.ready;
+      await waitForInitialization(transportHandle.ready, signal, server.id);
       client = new LSPClient(clientConfig) as ExtendedLSPClient;
       client.__acodeServerId = server.id;
       connectClient(client, transportHandle.transport, initializationOptions);
-      await client.initializing;
+      await waitForInitialization(client.initializing, signal, server.id);
       if (!client.__acodeLoggedInfo) {
         // Log root URI info to console
         if (normalizedRootUri) {
@@ -988,6 +1092,7 @@ export class LspClientManager {
     const fileRefs = new Map<string, Set<EditorView>>();
     const uriAliases = new Map<string, string>();
     const effectiveRoot = normalizedRootUri ?? originalRootUri ?? null;
+    let disposed = false;
 
     const attach = (
       uri: string,
@@ -1004,6 +1109,23 @@ export class LspClientManager {
       }
       const suffix = effectiveRoot ? ` (root ${effectiveRoot})` : "";
       logLspInfo(`[LSP:${server.id}] attached to ${uri}${suffix}`);
+    };
+
+    const dispose = async (): Promise<void> => {
+      if (disposed) return;
+      disposed = true;
+      disposePullDiagnostics(client);
+      this.#clients.delete(key);
+      try {
+        client.disconnect();
+      } catch (error) {
+        console.warn(`Error disconnecting LSP client ${server.id}`, error);
+      }
+      try {
+        await transportHandle.dispose?.();
+      } catch (error) {
+        console.warn(`Error disposing LSP transport ${server.id}`, error);
+      }
     };
 
     const detach = (uri: string, view?: EditorView): void => {
@@ -1032,23 +1154,9 @@ export class LspClientManager {
           server,
           client,
           rootUri: effectiveRoot,
+          dispose,
         });
       }
-    };
-
-    const dispose = async (): Promise<void> => {
-      disposePullDiagnostics(client);
-      try {
-        client.disconnect();
-      } catch (error) {
-        console.warn(`Error disconnecting LSP client ${server.id}`, error);
-      }
-      try {
-        await transportHandle.dispose?.();
-      } catch (error) {
-        console.warn(`Error disposing LSP transport ${server.id}`, error);
-      }
-      this.#clients.delete(key);
     };
 
     return {
