@@ -707,6 +707,7 @@ async function EditorManager($header, $body) {
 			updateHeaderForFile(manager.activeFile);
 			if (isPaneTabLayout()) syncGlobalOpenFileListMirror();
 			updateActivePaneScrollbars();
+			updateSideButtonContainer();
 			toggleProblemButton();
 			if (options.emitSwitch !== false && manager.activeFile) {
 				recordHistory(manager.activeFile);
@@ -1569,6 +1570,10 @@ async function EditorManager($header, $body) {
 						next.clientConfig = {
 							...current.clientConfig,
 							...config.clientConfig,
+							builtinExtensions: {
+								...(current.clientConfig?.builtinExtensions || {}),
+								...(config.clientConfig.builtinExtensions || {}),
+							},
 						};
 					}
 					if (
@@ -4752,7 +4757,7 @@ async function EditorManager($header, $body) {
 			return;
 		}
 
-		$body.append(sideButtonContainer);
+		getActivePane()?.content.append(sideButtonContainer);
 	}
 
 	/**

@@ -95,24 +95,20 @@ function formatInitializationError(error: unknown): string {
 }
 
 function isSettingsOrKeybindingsFile(
-  server: LspServerDefinition,
   uri: string | null | undefined,
   file?: { uri?: string } | null,
 ): boolean {
-  if (server.id !== "json") return false;
-
   const fileUri = String(uri || file?.uri || "").toLowerCase();
   if (!fileUri) return false;
 
-  // 1. Check if it matches the exact Acode paths from window globals
   try {
     const dataStorage = (globalThis as any).DATA_STORAGE;
     if (dataStorage) {
-        const settingsPath = Url.join(dataStorage, "settings.json").toLowerCase();
-        const keybindingsPath = (
-            (globalThis as any).KEYBINDING_FILE ||
-            Url.join(dataStorage, ".key-bindings.json")
-        ).toLowerCase();
+      const settingsPath = Url.join(dataStorage, "settings.json").toLowerCase();
+      const keybindingsPath = (
+        (globalThis as any).KEYBINDING_FILE ||
+        Url.join(dataStorage, ".key-bindings.json")
+      ).toLowerCase();
 
       if (fileUri === settingsPath || fileUri === keybindingsPath) {
         return true;
@@ -120,7 +116,6 @@ function isSettingsOrKeybindingsFile(
     }
   } catch {}
 
-  // 2. Check if it matches generic/relative names as a robust fallback
   return (
     fileUri.endsWith("/settings.json") ||
     fileUri.endsWith("/.key-bindings.json") ||
@@ -369,7 +364,7 @@ export class LspClientManager {
     const diagnosticsUiExtension = this.options.diagnosticsUiExtension;
 
     for (const server of servers) {
-      if (isSettingsOrKeybindingsFile(server, originalUri, file)) {
+      if (isSettingsOrKeybindingsFile(originalUri, file)) {
         continue;
       }
       const target = await this.#resolveRuntimeTarget(server, {
@@ -463,7 +458,7 @@ export class LspClientManager {
     if (!servers.length) return false;
 
     for (const server of servers) {
-      if (isSettingsOrKeybindingsFile(server, originalUri, file)) {
+      if (isSettingsOrKeybindingsFile(originalUri, file)) {
         continue;
       }
       if (!supportsBuiltinFormatting(server)) continue;
