@@ -26,6 +26,7 @@ import mimeTypes from "mime-types";
 import mustache from "mustache";
 import filesSettings from "settings/filesSettings";
 import URLParse from "url-parse";
+import copyEntry from "utils/copyEntry";
 import helpers from "utils/helpers";
 import Url from "utils/Url";
 import _addMenu from "./add-menu.hbs";
@@ -726,54 +727,64 @@ function FileBrowserInclude(mode, info, doesOpenLast = true) {
 			);
 
 			let copiedCount = 0;
+			let skippedCount = 0;
 
 			try {
 				for (const url of copiedItems) {
 					const fs = fsOperation(url);
 					const stat = await fs.stat();
 					const name = stat.name || Url.basename(url);
-					const possibleConflictUrl = Url.join(targetDirUrl, name);
 
-					if (stat.isDirectory && isInsideDirectory(url, targetDirUrl)) {
-						alert(
-							strings.warning,
-							strings["cannot paste folder into itself"] ||
-								"Cannot paste a folder into itself",
-						);
-						continue;
-					}
+					const result = await copyEntry(url, targetDirUrl, {
+						name,
+						stat,
+						excludePatterns: appSettings.value.useFileOperationExclusions
+							? appSettings.value.excludeFolders
+							: [],
+						async onBeforeCopy() {
+							if (stat.isDirectory && isInsideDirectory(url, targetDirUrl)) {
+								alert(
+									strings.warning,
+									strings["cannot paste folder into itself"] ||
+										"Cannot paste a folder into itself",
+								);
+								return false;
+							}
 
-					const doesExist = await fsOperation(possibleConflictUrl).exists();
-					if (doesExist) {
-						if (Url.areSame(url, possibleConflictUrl)) {
-							continue;
-						}
+							const possibleConflictUrl = Url.join(targetDirUrl, name);
+							if (!(await fsOperation(possibleConflictUrl).exists())) {
+								return true;
+							}
 
-						const targetStat = await fsOperation(possibleConflictUrl).stat();
-						if (stat.isDirectory || targetStat.isDirectory) {
-							alert(
+							if (Url.areSame(url, possibleConflictUrl)) return false;
+
+							const targetFs = fsOperation(possibleConflictUrl);
+							const targetStat = await targetFs.stat();
+							if (stat.isDirectory || targetStat.isDirectory) {
+								alert(
+									strings.warning,
+									strings["folder already exists"] || "Folder already exists",
+								);
+								return false;
+							}
+
+							const confirmation = await confirm(
 								strings.warning,
-								strings["folder already exists"] || "Folder already exists",
+								strings["file already exists force named"]
+									? strings["file already exists force named"].replace(
+											"{name}",
+											name,
+										)
+									: `"${name}" already exists in this location.`,
 							);
-							continue;
-						}
+							if (!confirmation) return false;
 
-						const confirmation = await confirm(
-							strings.warning,
-							strings["file already exists force named"]
-								? strings["file already exists force named"].replace(
-										"{name}",
-										name,
-									)
-								: `"${name}" already exists in this location.`,
-						);
-						if (!confirmation) continue;
-
-						await fsOperation(possibleConflictUrl).delete();
-					}
-
-					await copyEntry(url, targetDirUrl, name, stat);
-					copiedCount++;
+							await targetFs.delete();
+							return true;
+						},
+					});
+					if (result.url) copiedCount++;
+					skippedCount += result.skipped;
 				}
 			} catch (err) {
 				helpers.error(err);
@@ -781,37 +792,14 @@ function FileBrowserInclude(mode, info, doesOpenLast = true) {
 				if (copiedCount) {
 					toast(strings.success);
 					reload();
+				} else if (skippedCount) {
+					toast(strings.skipped);
 				}
+				if (copiedCount || skippedCount) copiedItems = [];
 				loadingDialog.destroy();
 				isPasting = false;
 				updatePasteToggler();
 			}
-		}
-
-		async function copyEntry(sourceUrl, targetDirUrl, name, sourceStat) {
-			const fs = fsOperation(sourceUrl);
-			const stat = sourceStat || (await fs.stat());
-			const entryName = name || stat.name || Url.basename(sourceUrl);
-
-			if (stat.isDirectory) {
-				const newDirUrl =
-					await fsOperation(targetDirUrl).createDirectory(entryName);
-				const entries = await fs.lsDir();
-
-				for (const entry of entries) {
-					await copyEntry(
-						entry.url,
-						newDirUrl,
-						entry.name || Url.basename(entry.url),
-						entry,
-					);
-				}
-
-				return newDirUrl;
-			}
-
-			const content = await fs.readFile();
-			return fsOperation(targetDirUrl).createFile(entryName, content);
 		}
 
 		function isInsideDirectory(sourceUrl, targetUrl) {
