@@ -7,12 +7,14 @@ import {
 	SearchQuery,
 	setSearchQuery,
 } from "@codemirror/search";
+import { EditorView } from "@codemirror/view";
 import { executeCommand, getRegisteredCommands } from "cm/commandRegistry";
 import { focusEditorIfEditable } from "cm/editorReadOnly";
 import {
 	canQuickToolsEdit,
 	finishQuickToolsModifierInput,
 	focusQuickToolsModifierInput,
+	isSelectedRangeDeletion,
 	setQuickToolsModifierInputHandler,
 } from "cm/quickToolsModifierInput";
 import {
@@ -30,6 +32,7 @@ import {
 	clearModifierState,
 	clearQuickToolsButtonFeedback,
 	removeActionStackEntries,
+	shouldCaptureModifierInput,
 } from "./quickToolsState";
 
 export let quickToolUsed = false;
@@ -69,13 +72,12 @@ quickTools.$input.addEventListener("input", (e) => {
 	if (!key || key.length > 1) return;
 	const keyCombination = getKeys({ key });
 	const target = getInput();
+	const codeMirrorView = getCodeMirrorInputView(target);
 
-	if (isCodeMirrorEditorInput(target)) {
-		handleCodeMirrorQuickToolsTextInput(
-			editorManager.editor,
-			key,
-			keyCombination,
-		);
+	if (
+		codeMirrorView &&
+		runCodeMirrorQuickToolsTextKey(codeMirrorView, key, keyCombination)
+	) {
 		return;
 	}
 
@@ -108,20 +110,27 @@ quickTools.$input.addEventListener("keydown", (e) => {
 	e.preventDefault();
 
 	let target = getInput();
-	if (isCodeMirrorEditorInput(target)) {
+	const codeMirrorView = getCodeMirrorInputView(target);
+	if (codeMirrorView) {
 		try {
-			runCodeMirrorQuickToolKey(keyCode, keyCombination);
+			const handled = runQuickToolKey(codeMirrorView, keyCode, keyCombination);
+			if (!handled && !codeMirrorView.state.readOnly) {
+				target.dispatchEvent(KeyboardEvent("keydown", keyCombination));
+			}
 		} finally {
-			resetKeys();
-			dismissReadOnlyQuickToolsInput(editorManager.editor);
+			if (codeMirrorView.state.readOnly) {
+				resetKeys();
+				dismissReadOnlyQuickToolsInput(codeMirrorView);
+			}
+			setQuicktoolsUsed();
 		}
 		return;
 	}
 	if (target === quickTools.$input) {
-		target = editorManager.editor.contentDOM;
+		target = editorManager.editor?.contentDOM;
 	}
 
-	target.dispatchEvent(KeyboardEvent("keydown", keyCombination));
+	target?.dispatchEvent(KeyboardEvent("keydown", keyCombination));
 	setQuicktoolsUsed();
 });
 
@@ -244,7 +253,9 @@ export function cancelQuickToolsModifierInput() {
 	const changed = clearQuickToolsModifierState();
 	quickTools.$input.value = "";
 	quickTools.$input.blur();
-	dismissReadOnlyQuickToolsInput(editorManager.editor);
+	dismissReadOnlyQuickToolsInput(
+		getCodeMirrorInputView(input) || editorManager.editor,
+	);
 	return changed;
 }
 
@@ -266,10 +277,19 @@ export default function actions(action, value) {
 		state[action] = value;
 		events[action].forEach((cb) => cb(value));
 		if (Object.values(state).includes(true)) {
-			if (isCodeMirrorEditorInput(input)) {
-				focusQuickToolsModifierInput(editor, $input);
+			const codeMirrorView = getCodeMirrorInputView(input);
+			const shouldCapture =
+				codeMirrorView?.state.readOnly ||
+				shouldCaptureModifierInput(state, Boolean(codeMirrorView));
+			if (shouldCapture) {
+				$input.value = "";
+				if (codeMirrorView?.state.readOnly) {
+					focusQuickToolsModifierInput(codeMirrorView, $input);
+				} else {
+					$input.focus();
+				}
 			} else {
-				$input.focus();
+				if (codeMirrorView) focusEditorIfEditable(codeMirrorView);
 			}
 		} else {
 			restoreQuickToolsTargetFocus();
@@ -411,27 +431,36 @@ function setInput() {
 	input = activeElement;
 }
 
-function isCodeMirrorEditorInput(target) {
-	const { editor, activeFile } = editorManager;
-	if (!editor || activeFile?.type !== "editor") return false;
-	const contentDOM = editor.contentDOM;
-	return target === contentDOM || (contentDOM?.contains?.(target) ?? false);
+function getCodeMirrorInputView(target) {
+	if (!(target instanceof HTMLElement)) return null;
+	const view = EditorView.findFromDOM(target);
+	if (!view?.contentDOM) return null;
+	return target === view.contentDOM || view.contentDOM.contains(target)
+		? view
+		: null;
 }
 
 function runCodeMirrorQuickToolKey(keyCode, keyCombination) {
-	if (!isCodeMirrorEditorInput(input)) return false;
-	return runQuickToolKey(editorManager.editor, keyCode, keyCombination);
+	const view = getCodeMirrorInputView(input);
+	return view ? runQuickToolKey(view, keyCode, keyCombination) : false;
 }
 
-export function handleCodeMirrorQuickToolsTextInput(
-	view,
-	text,
-	modifiers = null,
-) {
+export function handleCodeMirrorQuickToolsTextInput(view, input) {
+	if (!Object.values(state).includes(true)) return false;
 	if (!view?.state || !view.contentDOM) return false;
+	if (isSelectedRangeDeletion(view, input)) {
+		setQuicktoolsUsed();
+		return true;
+	}
+
+	const { text } = input;
 	if (!text || text.length !== 1) return false;
 
-	const keyCombination = modifiers || getKeys({ key: text });
+	const keyCombination = getKeys({ key: text });
+	return runCodeMirrorQuickToolsTextKey(view, text, keyCombination);
+}
+
+function runCodeMirrorQuickToolsTextKey(view, text, keyCombination) {
 	if (!hasQuickToolsModifier(keyCombination)) return false;
 	const canEdit = canQuickToolsEdit(view);
 	resetKeys();
@@ -921,8 +950,7 @@ function blockReadOnlyQuickToolsEdit(view) {
 }
 
 function isReadOnlyCodeMirrorInput(target) {
-	const { editor } = editorManager;
-	return isCodeMirrorEditorInput(target) && !!editor?.state?.readOnly;
+	return !!getCodeMirrorInputView(target)?.state.readOnly;
 }
 
 function dismissReadOnlyQuickToolsInput(view) {
@@ -931,10 +959,10 @@ function dismissReadOnlyQuickToolsInput(view) {
 }
 
 function restoreQuickToolsTargetFocus() {
-	const { editor } = editorManager;
-	if (isCodeMirrorEditorInput(input) && editor) {
-		if (dismissReadOnlyQuickToolsInput(editor)) return;
-		focusEditorIfEditable(editor);
+	const codeMirrorView = getCodeMirrorInputView(input);
+	if (codeMirrorView) {
+		if (dismissReadOnlyQuickToolsInput(codeMirrorView)) return;
+		focusEditorIfEditable(codeMirrorView);
 		return;
 	}
 	if (input) {

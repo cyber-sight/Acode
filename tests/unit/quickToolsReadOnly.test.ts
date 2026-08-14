@@ -91,12 +91,19 @@ describe("read-only QuickTools interaction", () => {
 		const handler = vi.fn(() => false);
 		setQuickToolsModifierInputHandler(handler);
 		const view = createEditor(true, [quickToolsModifierInput()]);
+		view.dispatch({ selection: EditorSelection.range(0, 5) });
 		const inputHandlers = view.state.facet(EditorView.inputHandler);
 		const quickToolsHandler = inputHandlers.at(-1);
 
-		expect(quickToolsHandler?.(view, 0, 0, "X", () => null)).toBe(true);
-		expect(handler).toHaveBeenCalledWith(view, "X");
+		expect(quickToolsHandler?.(view, 0, 5, "X", () => null)).toBe(true);
+		expect(handler).toHaveBeenCalledWith(view, {
+			from: 0,
+			to: 5,
+			text: "X",
+		});
 		expect(view.state.doc.toString()).toBe("alpha beta");
+		expect(view.state.selection.main.from).toBe(0);
+		expect(view.state.selection.main.to).toBe(5);
 	});
 
 	it("the user-change filter prevents selected text replacement", () => {
