@@ -8,6 +8,7 @@ export const DEFAULT_TERMINAL_SETTINGS = {
 	cursorStyle: "block",
 	cursorInactiveStyle: "outline",
 	scrollback: 1000,
+	showScrollbar: true,
 	theme: "dark",
 	tabStopWidth: 4,
 	convertEol: true,
@@ -16,8 +17,9 @@ export const DEFAULT_TERMINAL_SETTINGS = {
 	fontLigatures: false,
 	confirmTabClose: true,
 	failsafeMode: false,
+	prootDebug: false,
 	// Touch selection settings
-	touchSelectionTapHoldDuration: 600,
+	touchSelectionTapHoldDuration: 400,
 	touchSelectionMoveThreshold: 8,
 	touchSelectionHandleSize: 24,
 	touchSelectionHapticFeedback: true,

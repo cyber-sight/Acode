@@ -11,9 +11,9 @@ const actionMap = {
   "get path": "getPath",
   "watch file": "watchFile",
   "unwatch file": "unwatchFile",
-  "list encodings": "listEncodings"
+  "list encodings": "listEncodings",
 };
-const action = (name) => (isIOS && actionMap[name]) ? actionMap[name] : name;
+const action = (name) => (isIOS && actionMap[name] ? actionMap[name] : name);
 
 module.exports = {
   copy: function (srcPathname, destPathname, onSuccess, onFail) {
@@ -61,9 +61,15 @@ module.exports = {
   read: function (filename, onSuccess, onFail) {
     cordova.exec(onSuccess, onFail, 'SDcard', 'read', [filename]);
   },
+  readAsText: function (filename, encoding, onSuccess, onFail) {
+    cordova.exec(onSuccess, onFail, 'SDcard', 'readAsText', [filename, encoding]);
+  },
   write: function (filename, content, onSuccess, onFail) {
     var _isBuffer = content instanceof ArrayBuffer;
     cordova.exec(onSuccess, onFail, 'SDcard', 'write', [filename, content, _isBuffer]);
+  },
+  writeText: function (filename, content, encoding, onSuccess, onFail) {
+    cordova.exec(onSuccess, onFail, 'SDcard', 'writeText', [filename, content, encoding]);
   },
   stats: function (filename, onSuccess, onFail) {
     cordova.exec(onSuccess, onFail, 'SDcard', 'stats', [filename]);
@@ -79,5 +85,26 @@ module.exports = {
   },
   listEncodings: function (onSuccess, onFail) {
     cordova.exec(onSuccess, onFail, 'SDcard', action('list encodings'), []);
+  },
+  workspaceScan: function (options, onEvent, onFail) {
+    cordova.exec(onEvent, onFail, 'SDcard', 'workspace scan', [options || {}]);
+  },
+  workspaceUpdate: function (options, onSuccess, onFail) {
+    cordova.exec(onSuccess, onFail, 'SDcard', 'workspace update', [options || {}]);
+  },
+  workspaceSearch: function (options, onEvent, onFail) {
+    cordova.exec(onEvent, onFail, 'SDcard', 'workspace search', [options || {}]);
+  },
+  workspaceQuery: function (options, onSuccess, onFail) {
+    cordova.exec(onSuccess, onFail, 'SDcard', 'workspace query', [options || {}]);
+  },
+  workspaceCancel: function (id, onSuccess, onFail) {
+    cordova.exec(onSuccess, onFail, 'SDcard', 'workspace cancel', [id]);
+  },
+  workspaceMarkDirty: function (urls, onSuccess, onFail) {
+    cordova.exec(onSuccess, onFail, 'SDcard', 'workspace mark dirty', [urls || []]);
+  },
+  workspaceClear: function (roots, onSuccess, onFail) {
+    cordova.exec(onSuccess, onFail, 'SDcard', 'workspace clear', [roots || []]);
   }
 };

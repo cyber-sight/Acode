@@ -22,6 +22,8 @@ tsconfig.tsbuildinfo
 .dev-cert.pem
 .dev-key.pem
 
+.pnpm-store/
+
 /www/cordova.js
 /www/cordova_plugins.js
 # SQLite runtime sidecars are never distributable rootfs artifacts.

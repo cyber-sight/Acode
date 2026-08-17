@@ -6,7 +6,6 @@ import toast from "components/toast";
 import DOMPurify from "dompurify";
 import Ref from "html-tag-js/ref";
 import actionStack from "lib/actionStack";
-import { hideAd } from "lib/startAd";
 import markdownIt from "markdown-it";
 import markdownItFootnote from "markdown-it-footnote";
 import markdownItTaskLists from "markdown-it-task-lists";
@@ -74,7 +73,6 @@ export default async function Changelog() {
 
 	$page.onhide = function () {
 		actionStack.remove("changelog");
-		hideAd();
 	};
 
 	actionStack.push({
@@ -160,7 +158,7 @@ export default async function Changelog() {
 				`[#$1](${REPO_URL}/pull/$1)`,
 			)
 			// Convert existing #number references to links if they aren't already
-			.replace(/(?<!\[)#(\d+)(?!\])/g, `[#$1](${REPO_URL}/pull/$1)`)
+			.replace(/#(?<!\[#)(\d+)(?!\])/g, `[#$1](${REPO_URL}/pull/$1)`)
 			// Convert @username mentions to GitHub profile links
 			.replace(/@(\w+)/g, "[@$1](https://github.com/$1)");
 

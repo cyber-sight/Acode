@@ -45,6 +45,18 @@ function sanitizeLanguages(languages: string[] = []): string[] {
 		.filter(Boolean);
 }
 
+function sanitizeRuntimeIds(runtimes: unknown): string[] | undefined {
+	if (!Array.isArray(runtimes)) return undefined;
+	const ids = runtimes
+		.map((runtime) =>
+			String(runtime ?? "")
+				.trim()
+				.toLowerCase(),
+		)
+		.filter(Boolean);
+	return ids.length ? Array.from(new Set(ids)) : undefined;
+}
+
 function parsePort(value: unknown): number | null {
 	const num = Number(value);
 	if (!Number.isFinite(num)) return null;
@@ -229,6 +241,10 @@ function sanitizeDefinition(
 			versionCommand: rawLauncher.versionCommand,
 			updateCommand: rawLauncher.updateCommand,
 			uninstallCommand: rawLauncher.uninstallCommand,
+			logOutput:
+				rawLauncher.logOutput === "warnings-and-errors"
+					? "warnings-and-errors"
+					: "all",
 			install:
 				rawLauncher.install && typeof rawLauncher.install === "object"
 					? {
@@ -283,9 +299,15 @@ function sanitizeDefinition(
 		id,
 		label: definition.label ?? id,
 		enabled: definition.enabled !== false,
+		priority:
+			typeof definition.priority === "number" &&
+			Number.isFinite(definition.priority)
+				? definition.priority
+				: 0,
 		languages: sanitizeLanguages(definition.languages),
 		transport: sanitizedTransport,
 		initializationOptions: clone(definition.initializationOptions),
+		workspaceConfiguration: clone(definition.workspaceConfiguration),
 		clientConfig: clone(definition.clientConfig),
 		startupTimeout:
 			typeof definition.startupTimeout === "number"
@@ -303,6 +325,7 @@ function sanitizeDefinition(
 				? definition.resolveLanguageId
 				: null,
 		launcher,
+		runtimes: sanitizeRuntimeIds(definition.runtimes),
 		useWorkspaceFolders: definition.useWorkspaceFolders === true,
 	};
 
@@ -399,10 +422,12 @@ export function getServersForLanguage(
 	const langKey = toKey(languageId);
 	if (!langKey) return [];
 
-	return listServers().filter((server) => {
-		if (!includeDisabled && !server.enabled) return false;
-		return server.languages.includes(langKey);
-	});
+	return listServers()
+		.filter((server) => {
+			if (!includeDisabled && !server.enabled) return false;
+			return server.languages.includes(langKey);
+		})
+		.sort((left, right) => right.priority - left.priority);
 }
 
 export function onRegistryChange(listener: RegistryEventListener): () => void {

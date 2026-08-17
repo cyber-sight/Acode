@@ -1,9 +1,8 @@
-import fsOperation from "fileSystem";
+import fonts from "lib/fonts";
+import settings from "lib/settings";
 import { isDeviceDarkTheme } from "lib/systemConfiguration";
+import { updateActiveTerminals } from "settings/terminalSettings";
 import color from "utils/color";
-import Url from "utils/Url";
-import fonts from "../lib/fonts";
-import settings from "../lib/settings";
 import ThemeBuilder from "./builder";
 import themes, { updateSystemTheme } from "./preInstalled";
 
@@ -12,8 +11,13 @@ const appThemes = new Map();
 let themeApplied = false;
 let firstTime = true;
 
+const darkModeMediaQuery = window.matchMedia("(prefers-color-scheme: dark)");
+let systemThemeWatcherActive = false;
+
 function init() {
 	themes.forEach((theme) => add(theme));
+	updateSystemThemeWatcher(settings.value.appTheme);
+	settings.on("update:appTheme", updateSystemThemeWatcher);
 }
 
 /**
@@ -85,9 +89,6 @@ export async function apply(id, init) {
 	}
 
 	themeApplied = true;
-	const loaderFile = Url.join(ASSETS_DIRECTORY, "res/tail-spin.svg");
-	const svgName = "__tail-spin__.svg";
-	const img = Url.join(DATA_STORAGE, svgName);
 	const theme = get(id);
 	const $style = document.head.get("style#app-theme") ?? (
 		<style id="app-theme"></style>
@@ -112,7 +113,21 @@ export async function apply(id, init) {
 		fonts.setFont(theme.preferredFont);
 	}
 
+	if (init && firstTime && theme.preferredTerminalTheme) {
+		update.terminalSettings = {
+			...(settings.value.terminalSettings || {}),
+			theme: theme.preferredTerminalTheme,
+		};
+	}
+
 	settings.update(update, false);
+
+	if (init && firstTime && theme.preferredTerminalTheme) {
+		if (editorManager != null) {
+			updateActiveTerminals("theme", theme.preferredTerminalTheme);
+		}
+	}
+
 	localStorage.__primary_color = theme.primaryColor;
 	document.body.setAttribute("theme-type", theme.type);
 	$style.textContent = theme.css;
@@ -129,19 +144,6 @@ export async function apply(id, init) {
 			system.setUiTheme(primaryColor, scheme);
 		}, 1000);
 		firstTime = false;
-	}
-
-	try {
-		let fs = fsOperation(loaderFile);
-		const svg = await fs.readFile("utf8");
-
-		fs = fsOperation(img);
-		if (!(await fs.exists())) {
-			await fsOperation(DATA_STORAGE).createFile(svgName);
-		}
-		await fs.writeFile(svg.replace(/#fff/g, theme.primaryColor));
-	} catch (error) {
-		window.log("error", error);
 	}
 }
 
@@ -162,6 +164,45 @@ export function update(theme) {
 	});
 }
 
+function syncSystemTheme(event) {
+	if (settings.value.appTheme.toLowerCase() !== "system") return;
+	const isDark = event ? event.matches : darkModeMediaQuery.matches;
+	updateSystemTheme(isDark);
+}
+
+function startSystemThemeWatcher() {
+	if (systemThemeWatcherActive) return;
+	systemThemeWatcherActive = true;
+	if (typeof darkModeMediaQuery.addEventListener === "function") {
+		darkModeMediaQuery.addEventListener("change", syncSystemTheme);
+	} else {
+		darkModeMediaQuery.addListener(syncSystemTheme);
+	}
+}
+
+function stopSystemThemeWatcher() {
+	if (!systemThemeWatcherActive) return;
+	systemThemeWatcherActive = false;
+	if (typeof darkModeMediaQuery.removeEventListener === "function") {
+		darkModeMediaQuery.removeEventListener("change", syncSystemTheme);
+	} else {
+		darkModeMediaQuery.removeListener(syncSystemTheme);
+	}
+}
+
+/**
+ * Start or stop syncing the app theme with the OS color scheme
+ * @param {string} theme
+ */
+export function updateSystemThemeWatcher(theme) {
+	if (String(theme).toLowerCase() === "system") {
+		startSystemThemeWatcher();
+		syncSystemTheme();
+		return;
+	}
+	stopSystemThemeWatcher();
+}
+
 export default {
 	get applied() {
 		return themeApplied;
@@ -172,4 +213,5 @@ export default {
 	add,
 	apply,
 	update,
+	updateSystemThemeWatcher,
 };

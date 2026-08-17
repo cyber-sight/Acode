@@ -1,5 +1,6 @@
 import fsOperation from "fileSystem";
 import { resetKeyBindings } from "cm/commandRegistry";
+import quickTools from "components/quickTools";
 import settingsPage from "components/settingsPage";
 import loader from "dialogs/loader";
 import select from "dialogs/select";
@@ -14,11 +15,13 @@ import FontManager from "pages/fontManager";
 import QuickToolsSettings from "pages/quickTools";
 import encodings, { getEncoding } from "utils/encodings";
 import helpers from "utils/helpers";
+import { isPlayStoreInstall } from "utils/installSource";
 import Url from "utils/Url";
 
 export default function otherSettings() {
 	const values = appSettings.value;
 	const title = strings["app settings"].capitalize();
+	const installedFromPlayStore = isPlayStoreInstall();
 	const appFontText = strings["app font"] || "App font";
 	const appFontInfo =
 		strings["settings-info-app-font-family"] ||
@@ -29,6 +32,7 @@ export default function otherSettings() {
 		fonts: strings["settings-category-fonts"],
 		filesSessions: strings["settings-category-files-sessions"],
 		advanced: strings["settings-category-advanced"],
+		quickTools: strings["quick tools"],
 	};
 	const items = [
 		{
@@ -105,13 +109,6 @@ export default function otherSettings() {
 			category: categories.interface,
 		},
 		{
-			key: "floatingButton",
-			text: strings["floating button"],
-			checkbox: values.floatingButton,
-			info: strings["settings-info-app-floating-button"],
-			category: categories.interface,
-		},
-		{
 			key: "showSideButtons",
 			text: strings["show side buttons"],
 			checkbox: values.showSideButtons,
@@ -139,31 +136,6 @@ export default function otherSettings() {
 			category: categories.interface,
 		},
 		{
-			key: "quickTools",
-			text: strings["quick tools"],
-			checkbox: !!values.quickTools,
-			info: strings["info-quickTools"],
-			category: categories.interface,
-		},
-		{
-			key: "quickToolsTriggerMode",
-			text: strings["quicktools trigger mode"],
-			value: values.quickToolsTriggerMode,
-			select: [
-				[appSettings.QUICKTOOLS_TRIGGER_MODE_CLICK, "click"],
-				[appSettings.QUICKTOOLS_TRIGGER_MODE_TOUCH, "touch"],
-			],
-			info: strings["settings-info-app-quick-tools-trigger-mode"],
-			category: categories.interface,
-		},
-		{
-			key: "quickToolsSettings",
-			text: strings["shortcut buttons"],
-			info: strings["settings-info-app-quick-tools-settings"],
-			category: categories.interface,
-			chevron: true,
-		},
-		{
 			key: "touchMoveThreshold",
 			text: strings["touch move threshold"],
 			value: values.touchMoveThreshold,
@@ -176,6 +148,65 @@ export default function otherSettings() {
 			},
 			info: strings["settings-info-app-touch-move-threshold"],
 			category: categories.interface,
+		},
+		{
+			key: "floatingButton",
+			text: strings["quick tools toggler"],
+			checkbox: values.floatingButton,
+			info: strings["settings-info-app-floating-button"],
+			category: categories.quickTools,
+		},
+		{
+			key: "quickTools",
+			text: strings["quick tools height"],
+			value: values.quickTools,
+			valueText: (value) => {
+				const height = Number(value) || 0;
+				if (height === 0) return strings.off;
+				if (height === 1) return strings.compact;
+				return strings.full;
+			},
+			select: [
+				[0, strings.off],
+				[1, strings.compact],
+				[2, strings.full],
+			],
+			info: strings["info-quickTools"],
+			category: categories.quickTools,
+		},
+		{
+			key: "quickToolsTriggerMode",
+			text: strings["quicktools trigger mode"],
+			value: values.quickToolsTriggerMode,
+			valueText: (value) => {
+				const options = {
+					[appSettings.QUICKTOOLS_TRIGGER_MODE_CLICK]:
+						strings["quicktools-trigger:click"],
+					[appSettings.QUICKTOOLS_TRIGGER_MODE_TOUCH]:
+						strings["quicktools-trigger:touch"],
+				};
+
+				return options[value] ?? (value != null ? value.capitalize() : value);
+			},
+			select: [
+				[
+					appSettings.QUICKTOOLS_TRIGGER_MODE_CLICK,
+					strings["quicktools-trigger:click"],
+				],
+				[
+					appSettings.QUICKTOOLS_TRIGGER_MODE_TOUCH,
+					strings["quicktools-trigger:touch"],
+				],
+			],
+			info: strings["settings-info-app-quick-tools-trigger-mode"],
+			category: categories.quickTools,
+		},
+		{
+			key: "quickToolsSettings",
+			text: strings["shortcut buttons"],
+			info: strings["settings-info-app-quick-tools-settings"],
+			category: categories.quickTools,
+			chevron: true,
 		},
 		{
 			key: "appFont",
@@ -224,12 +255,24 @@ export default function otherSettings() {
 			promptType: "textarea",
 			promptOptions: {
 				test(value) {
+					if (!value.trim()) return true;
 					return value.split("\n").every((item) => {
 						return item.trim().length > 0;
 					});
 				},
 			},
 			info: strings["settings-info-app-exclude-folders"],
+			category: categories.filesSessions,
+		},
+		{
+			key: "useFileOperationExclusions",
+			text:
+				strings["apply exclusions when copying"] ||
+				"Apply exclusions when copying",
+			checkbox: values.useFileOperationExclusions,
+			info:
+				strings["settings-info-app-use-file-operation-exclusions"] ||
+				"Skip files and folders matching the exclusion patterns during copy and paste operations.",
 			category: categories.filesSessions,
 		},
 		{
@@ -269,18 +312,32 @@ export default function otherSettings() {
 			info: strings["settings-info-app-check-files"],
 			category: categories.advanced,
 		},
-		{
-			key: "checkForAppUpdates",
-			text: strings["check for app updates"],
-			checkbox: values.checkForAppUpdates,
-			info: strings["info-checkForAppUpdates"],
-			category: categories.advanced,
-		},
+		...(!installedFromPlayStore
+			? [
+					{
+						key: "checkForAppUpdates",
+						text: strings["check for app updates"],
+						checkbox: values.checkForAppUpdates,
+						info: strings["info-checkForAppUpdates"],
+						category: categories.advanced,
+					},
+				]
+			: []),
 		{
 			key: "console",
 			text: strings.console,
 			value: values.console,
-			select: [appSettings.CONSOLE_LEGACY, appSettings.CONSOLE_ERUDA],
+			valueText: (value) => {
+				const options = {
+					[appSettings.CONSOLE_LEGACY]: "Legacy",
+					[appSettings.CONSOLE_ERUDA]: "Eruda",
+				};
+				return options[value] ?? (value != null ? value.capitalize() : value);
+			},
+			select: [
+				[appSettings.CONSOLE_LEGACY, "Legacy"],
+				[appSettings.CONSOLE_ERUDA, "Eruda"],
+			],
 			info: strings["settings-info-app-console"],
 			category: categories.advanced,
 		},
@@ -422,7 +479,21 @@ export default function otherSettings() {
 				break;
 
 			case "floatingButton":
-				root.classList.toggle("hide-floating-button");
+				if (value && !editorManager.activeFile?.hideQuickTools) {
+					clearTimeout(quickTools.$toggler._hideTimeout);
+					quickTools.$toggler._hideTimeout = null;
+					quickTools.$toggler.classList.remove("hide");
+					if (!quickTools.$toggler.isConnected) {
+						root.appendOuter(quickTools.$toggler);
+					}
+				} else {
+					clearTimeout(quickTools.$toggler._hideTimeout);
+					quickTools.$toggler.classList.add("hide");
+					quickTools.$toggler._hideTimeout = setTimeout(() => {
+						quickTools.$toggler.remove();
+						quickTools.$toggler._hideTimeout = null;
+					}, 300);
+				}
 				break;
 
 			case "keyboardMode":
@@ -441,13 +512,8 @@ export default function otherSettings() {
 				break;
 
 			case "quickTools":
-				if (value) {
-					value = 1;
-					actions("set-height", 1);
-				} else {
-					value = 0;
-					actions("set-height", 0);
-				}
+				value = Number(value) || 0;
+				actions("set-height", { height: value, save: false });
 				break;
 
 			case "excludeFolders":
@@ -461,7 +527,7 @@ export default function otherSettings() {
 				break;
 		}
 
-		appSettings.update({
+		await appSettings.update({
 			[key]: value,
 		});
 	}
