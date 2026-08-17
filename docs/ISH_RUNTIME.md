@@ -454,10 +454,11 @@ visible inside the guest without an explicit FakeFS import or mount path.
 
 ## 10. Background and Lifecycle Boundaries
 
-The plugin has foreground terminal lifecycle logic and may contain background
-runtime coordination in the current checkout. iOS background execution is
-bounded by system policy; a background task or assertion does not create an
-indefinitely running in-process emulator.
+The plugin has foreground terminal lifecycle logic and native background
+runtime coordination. iOS background execution is bounded by system policy; a
+background task or assertion does not create an indefinitely running in-process
+emulator. The guest is linked into the Acode process, so it has no independent
+process supervisor that can outlive the app.
 
 The reliable lifecycle contract is:
 
@@ -466,7 +467,40 @@ foreground session -> native PTY and WebSocket are active
 socket disconnect -> session may remain available for reconnect
 explicit stop     -> PTY and guest task are cleaned up
 app suspension    -> execution and delivery may be interrupted by iOS policy
+app termination   -> guest task, PTY, WebSocket listener, and reconnect state end
 ~~~
+
+The iOS runtime requests the continued-processing task facility on supported
+OS versions and retains a finite `UIApplication` background assertion as a
+fallback. Registration or submission can fail, the request can expire, or the
+system can suspend or terminate the app. The fallback is deliberately finite;
+it is not an exemption from iOS lifecycle policy. The runtime logs these
+decisions so a scheduler failure is distinguishable from a guest or transport
+failure.
+
+There are two different disconnect cases:
+
+1. **Transport interruption:** the WebView or loopback WebSocket closes while
+   the Acode process and native PTY still exist. The frontend can use the
+   session UUID to request a new listener and recover the same guest session.
+2. **Process or guest termination:** iOS kills Acode, the guest exits, or the
+   user force-quits the app. The native session no longer exists, so reconnect
+   cannot restore it.
+
+Background transitions can cause either case. The visible terminal may stop
+receiving output while the app is suspended, and JavaScript timers are not a
+reliable indication that the guest is still executing. A foreground return
+should check native session existence and reconnect rather than blindly
+creating a second shell.
+
+For this reason, the supported reliability contract is:
+
+- Keep the app foregrounded for long-running builds, package installs, and
+  migrations.
+- Save checkpoints and important output in the guest filesystem.
+- Make commands restartable when possible.
+- Use a remote host, CI runner, or another persistent service for unattended
+  work.
 
 Do not describe a background session as guaranteed merely because a background
 API was requested. Validate behavior on the target iOS version and device.

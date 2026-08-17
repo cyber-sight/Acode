@@ -63,6 +63,35 @@ xterm.js -> Executor.spawnStream() -> local WebSocket -> IshWebSocketServer
 
 The native server binds to loopback on a per-session port, sends terminal output as binary frames, accepts input frames, batches small output writes, and handles resize control messages. JavaScript attaches xterm.js through `AttachAddon` and can reconnect to a live native session if the WebView socket closes. iOS background execution remains subject to platform scheduling and suspension limits.
 
+### iOS limitations and device signing
+
+iOS does not provide an unrestricted background process model. A terminal that
+is left running while Acode is backgrounded may be suspended, have its WebView
+or WebSocket interrupted, or be terminated by the system. A native session can
+survive a short socket interruption and be reconnected while the app process
+is still alive, but a force-quit, process termination, or guest crash ends the
+session. Treat long-running terminal work as interruptible: save checkpoints,
+write important output to files, and keep Acode in the foreground for work that
+cannot be resumed safely. Use a remote host for jobs that must run unattended.
+
+The final iPhone app is signed by the Apple Developer Team ID supplied at build
+time. It is not hardcoded in this repository. The iSH archive build disables
+code signing because it produces static libraries; signing is required when
+Cordova archives the Acode app. Set your own Team ID before a device build:
+
+```bash
+export IOS_TEAM_ID='<10-character-Apple-team-ID>'
+bunx cordova build ios --debug --device -- \
+  --developmentTeam="$IOS_TEAM_ID" \
+  --automaticProvisioning
+```
+
+The Team ID is available in Xcode under **Signing & Capabilities** or in the
+Apple Developer account. It is not the Apple ID email address. The device must
+be paired, trusted, have Developer Mode enabled, and be registered with the
+team. See [`docs/LOCAL_DEVELOPMENT.md`](docs/LOCAL_DEVELOPMENT.md) for the
+complete signing, installation, reconnect, and troubleshooting workflow.
+
 ### Building the iOS Runtime
 
 Install dependencies with Bun, then build the ARM64 iSH archives:
