@@ -67,6 +67,13 @@ function main() {
     if (value.includes(sourceDir)) return match;
     return `HEADER_SEARCH_PATHS = (${value.trim()}, ${headerSearchPath});`;
   });
+  if (!/HEADER_SEARCH_PATHS\s*=/.test(pbxproj)) {
+    const appBundleMarker = 'PRODUCT_BUNDLE_IDENTIFIER = "com.foxdebug.acodeios";';
+    pbxproj = pbxproj.replaceAll(
+      appBundleMarker,
+      `HEADER_SEARCH_PATHS = ("$(inherited)", ${headerSearchPath});\n\t\t\t\t${appBundleMarker}`,
+    );
+  }
   pbxproj = pbxproj.replace(/OTHER_LDFLAGS = \(([\s\S]*?)\);/g, (match, body) => {
     const additions = commonFlags
       .filter((flag) => !body.includes(flag))
