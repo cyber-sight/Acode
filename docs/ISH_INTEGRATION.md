@@ -32,7 +32,16 @@ The active fork branch is `acode-arm64` at `5483be0`. The abandoned experiment i
 
 The JavaScript API remains `start`, `write`, `resize`, `stop`, and `exec`. The executor buffers output or exit events that arrive before Cordova registers the session callback.
 
-Guest CPU pthreads use Apple's utility QoS. Long-running package installs and builds therefore yield scheduler priority to the app UI and other foreground work while continuing to make progress. The iOS guest advertises two CPUs by default to prevent language runtimes from creating a host-sized worker pool; host CLI tests can override this with `ISH_GUEST_CPU_COUNT`. This does not grant background execution: iOS may suspend Acode after the app leaves the foreground.
+Guest CPU pthreads use Apple's utility QoS. Long-running package installs and builds therefore yield scheduler priority to the app UI and other foreground work while continuing to make progress. The iOS guest advertises two CPUs by default to prevent language runtimes from creating a host-sized worker pool; host CLI tests can override this with `ISH_GUEST_CPU_COUNT`.
+
+This does not grant unrestricted background execution. The guest is linked into
+the Acode process, and iOS may suspend, expire, or terminate that process after
+the app leaves the foreground. The native terminal can retain a session across
+a short WebSocket or WebView interruption, but it cannot reconnect after the
+app process or guest task has been killed. Keep important work checkpointed and
+use a remote or CI host for jobs that must continue unattended. See
+[`ISH_RUNTIME.md`](ISH_RUNTIME.md#10-background-and-lifecycle-boundaries) for
+the lifecycle contract and [`LOCAL_DEVELOPMENT.md`](LOCAL_DEVELOPMENT.md#92-apple-lifecycle-restrictions-and-terminal-disconnects) for device troubleshooting.
 
 ## Build
 
