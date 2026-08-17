@@ -35,6 +35,9 @@ export default function terminalSettings() {
 
 	const terminalValues = values.terminalSettings;
 
+	Executor.setProotDebug(terminalValues.prootDebug);
+	Executor.BackgroundExecutor.setProotDebug(terminalValues.prootDebug);
+
 	const items = [
 		{
 			key: "all_file_access",
@@ -69,29 +72,20 @@ export default function terminalSettings() {
 			category: categories.display,
 		},
 		{
-			key: "theme",
-			text: strings["theme"],
-			value: terminalValues.theme,
-			info: strings["info-theme"],
-			get select() {
-				return TerminalThemeManager.getThemeNames().map((name) => [
-					name,
-					name.charAt(0).toUpperCase() + name.slice(1),
-				]);
-			},
-			valueText(value) {
-				const option = this.select.find(([v]) => v === value);
-				return option ? option[1] : value;
-			},
-			category: categories.display,
-		},
-		{
 			key: "fontWeight",
 			text: strings["terminal:font weight"],
 			value: terminalValues.fontWeight,
+			valueText: (value) => {
+				const tuple = [
+					["normal", strings["terminal:normal"]],
+					["bold", strings["terminal:bold"]],
+				].find((item) => item[0] === value);
+
+				return tuple ? tuple[1] : value;
+			},
 			select: [
-				"normal",
-				"bold",
+				["normal", strings["terminal:normal"]],
+				["bold", strings["terminal:bold"]],
 				"100",
 				"200",
 				"300",
@@ -105,6 +99,7 @@ export default function terminalSettings() {
 			info: strings["info-fontWeight"],
 			category: categories.display,
 		},
+
 		{
 			key: "letterSpacing",
 			text: strings["letter spacing"],
@@ -122,10 +117,31 @@ export default function terminalSettings() {
 			category: categories.display,
 		},
 		{
+			key: "showScrollbar",
+			text: strings["terminal:show scrollbar"] || "Show Scrollbar",
+			checkbox: terminalValues.showScrollbar !== false,
+			info:
+				strings["info-terminal-show-scrollbar"] ||
+				"Show the xterm scrollbar beside the terminal.",
+			category: categories.display,
+		},
+		{
 			key: "cursorStyle",
 			text: strings["terminal:cursor style"],
 			value: terminalValues.cursorStyle,
-			select: ["block", "underline", "bar"],
+			valueText: (value) => {
+				const option = [
+					["block", strings["terminal:block"]],
+					["underline", strings["terminal:underline"]],
+					["bar", strings["terminal:bar"]],
+				].find((item) => item[0] === value);
+				return option ? option[1] : value;
+			},
+			select: [
+				["block", strings["terminal:block"]],
+				["underline", strings["terminal:underline"]],
+				["bar", strings["terminal:bar"]],
+			],
 			info: strings["info-cursorStyle"],
 			category: categories.cursor,
 		},
@@ -133,7 +149,24 @@ export default function terminalSettings() {
 			key: "cursorInactiveStyle",
 			text: strings["terminal:cursor inactive style"],
 			value: terminalValues.cursorInactiveStyle,
-			select: ["outline", "block", "bar", "underline", "none"],
+			valueText: (value) => {
+				const options = [
+					["outline", strings["terminal:inactive outline"]],
+					["block", strings["terminal:inactive block"]],
+					["underline", strings["terminal:inactive underline"]],
+					["bar", strings["terminal:inactive bar"]],
+					["none", strings["terminal:inactive none"]],
+				];
+				const option = options.find((item) => item[0] === value);
+				return option ? option[1] : value;
+			},
+			select: [
+				["outline", strings["terminal:inactive outline"]],
+				["block", strings["terminal:inactive block"]],
+				["underline", strings["terminal:inactive underline"]],
+				["bar", strings["terminal:inactive bar"]],
+				["none", strings["terminal:inactive none"]],
+			],
 			info: strings["info-cursorInactiveStyle"],
 			category: categories.cursor,
 		},
@@ -200,6 +233,13 @@ export default function terminalSettings() {
 			text: strings["terminal:failsafe"],
 			checkbox: terminalValues.failsafeMode,
 			info: strings["terminal:failsafe-info"],
+			category: categories.maintenance,
+		},
+		{
+			key: "prootDebug",
+			text: "PRoot Debug",
+			checkbox: terminalValues.prootDebug,
+			info: "Enable verbose PRoot logging (PROOT_VERBOSE=2). Useful for debugging sandbox issues.",
 			category: categories.maintenance,
 		},
 		{
@@ -285,7 +325,7 @@ export default function terminalSettings() {
 			case "uninstall":
 				const confirmation = await confirm(
 					strings.confirm,
-					"Are you sure you want to uninstall the terminal?",
+					strings["settings-info-terminal-uninstall"],
 				);
 				if (confirmation) {
 					loader.showTitleLoader();
@@ -294,7 +334,7 @@ export default function terminalSettings() {
 							loader.removeTitleLoader();
 							alert(
 								strings.success.toUpperCase(),
-								"Terminal uninstalled successfully.",
+								`${strings["uninstalled successfully"]}.`,
 							);
 						})
 						.catch((error) => {
@@ -304,6 +344,17 @@ export default function terminalSettings() {
 						});
 				}
 				return;
+
+			case "prootDebug":
+				appSettings.update({
+					terminalSettings: {
+						...values.terminalSettings,
+						[key]: value,
+					},
+				});
+				Executor.setProotDebug(value);
+				Executor.BackgroundExecutor.setProotDebug(value);
+				break;
 
 			default:
 				appSettings.update({
@@ -375,7 +426,7 @@ export default function terminalSettings() {
 					loader.removeTitleLoader();
 					alert(
 						strings.success.toUpperCase(),
-						"Terminal restored successfully",
+						`${strings["restored successfully"]}.`,
 					);
 				},
 				toast,
@@ -437,6 +488,9 @@ export async function updateActiveTerminals(key, value) {
 				case "scrollback":
 					tab.terminalComponent.terminal.options.scrollback = value;
 					break;
+				case "showScrollbar":
+					tab.terminalComponent.updateScrollbarVisibility(value);
+					break;
 				case "tabStopWidth":
 					tab.terminalComponent.terminal.options.tabStopWidth = value;
 					break;
@@ -449,11 +503,7 @@ export async function updateActiveTerminals(key, value) {
 				case "theme":
 					tab.terminalComponent.terminal.options.theme =
 						TerminalThemeManager.getTheme(value);
-					// Update container background to match new theme
-					if (tab.terminalComponent.container) {
-						tab.terminalComponent.container.style.background =
-							tab.terminalComponent.terminal.options.theme.background;
-					}
+					tab.terminalComponent.updateBackgroundColor();
 					break;
 				case "imageSupport":
 					tab.terminalComponent.updateImageSupport(value);

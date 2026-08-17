@@ -1,8 +1,11 @@
 import {
 	highlightingFor,
 	type Language,
+	LanguageDescription,
 	language as languageFacet,
 } from "@codemirror/language";
+import { languages } from "@codemirror/language-data";
+import type { LSPClient } from "@codemirror/lsp-client";
 import { LSPPlugin } from "@codemirror/lsp-client";
 import {
 	type Extension,
@@ -26,6 +29,7 @@ import {
 import { highlightCode } from "@lezer/highlight";
 import type {
 	HoverParams,
+	ServerCapabilities,
 	SignatureHelpContext,
 	SignatureHelpParams,
 } from "vscode-languageserver-protocol";
@@ -35,16 +39,224 @@ import type {
 	MarkedString,
 	MarkupContent,
 } from "vscode-languageserver-types";
+import { getMode, getModeForPath, type Mode } from "../modelist";
 
 interface LspClientInternals {
 	config?: {
 		highlightLanguage?: (language: string) => Language | null | undefined;
 	};
-	hasCapability?: (name: string) => boolean;
 }
 
 const SIGNATURE_TRIGGER_DELAY = 120;
 const SIGNATURE_RETRIGGER_DELAY = 250;
+const hoverLanguageLoads = new Map<string, Promise<Language | null>>();
+const pluginHoverLanguages = new WeakMap<Mode, Language>();
+const pluginHoverLanguageLoads = new WeakMap<
+	Mode,
+	Promise<Language | null>
+>();
+
+function clientHasCapability(
+	client: LSPClient,
+	name: keyof ServerCapabilities,
+): boolean {
+	return !client.serverCapabilities || !!client.serverCapabilities[name];
+}
+
+function normalizeLanguageName(value: string): string {
+	return String(value ?? "")
+		.trim()
+		.toLowerCase();
+}
+
+function matchingModeName(a: string, b: string): boolean {
+	const normalizedA = normalizeLanguageName(a);
+	const normalizedB = normalizeLanguageName(b);
+	if (!normalizedA || !normalizedB) return false;
+	if (normalizedA === normalizedB) return true;
+
+	const languageA = findLanguageDescription(normalizedA);
+	const languageB = findLanguageDescription(normalizedB);
+	return !!languageA && languageA === languageB;
+}
+
+function getLanguageCandidates(language: string): string[] {
+	const normalized = normalizeLanguageName(language);
+	if (!normalized) return [];
+
+	const candidates = new Set([normalized]);
+	if (normalized.endsWith("react")) {
+		const withoutReact = normalized.slice(0, -"react".length);
+		if (withoutReact) candidates.add(withoutReact);
+	}
+	return [...candidates];
+}
+
+function findLanguageDescription(language: string): LanguageDescription | null {
+	for (const candidate of getLanguageCandidates(language)) {
+		const byName = LanguageDescription.matchLanguageName(
+			languages,
+			candidate,
+			false,
+		);
+		if (byName) return byName;
+
+		const byExtension = LanguageDescription.matchFilename(
+			languages,
+			`file.${candidate}`,
+		);
+		if (byExtension) return byExtension;
+	}
+	return null;
+}
+
+function findPluginMode(language: string): Mode | null {
+	for (const candidate of getLanguageCandidates(language)) {
+		const byName = getMode(candidate);
+		if (byName) return byName;
+
+		const byExtension = getModeForPath(`file.${candidate}`);
+		if (byExtension && byExtension.name !== "text") return byExtension;
+	}
+	return null;
+}
+
+function extractLanguage(value: unknown): Language | null {
+	if (!value) return null;
+	if (Array.isArray(value)) {
+		for (const item of value) {
+			const language = extractLanguage(item);
+			if (language) return language;
+		}
+		return null;
+	}
+	if (typeof value !== "object") return null;
+
+	const record = value as Record<string, unknown>;
+	const language = record.language;
+	if (language && typeof language === "object" && "parser" in language) {
+		return language as Language;
+	}
+	return "parser" in record ? (value as Language) : null;
+}
+
+function startPluginLanguageLoad(mode: Mode): Promise<Language | null> | null {
+	const cached = pluginHoverLanguageLoads.get(mode);
+	if (cached) return cached;
+
+	const loader = mode.getExtension();
+	if (!loader) return null;
+
+	const load = Promise.resolve()
+		.then(() => loader())
+		.then((extension) => {
+			const language = extractLanguage(extension);
+			if (language) pluginHoverLanguages.set(mode, language);
+			return language;
+		})
+		.catch(() => null);
+	pluginHoverLanguageLoads.set(mode, load);
+	return load;
+}
+
+export function resolveLspHoverHighlightLanguage(
+	language: string,
+): Language | null {
+	const description = findLanguageDescription(language);
+	if (description) {
+		if (description.support) return description.support.language;
+
+		const key = description.name.toLowerCase();
+		if (!hoverLanguageLoads.has(key)) {
+			hoverLanguageLoads.set(
+				key,
+				description
+					.load()
+					.then((support) => support.language)
+					.catch(() => null),
+			);
+		}
+		return null;
+	}
+
+	const mode = findPluginMode(language);
+	if (!mode) return null;
+	const loaded = pluginHoverLanguages.get(mode);
+	if (loaded) return loaded;
+	startPluginLanguageLoad(mode);
+	return null;
+}
+
+export async function loadLspHoverHighlightLanguage(
+	language: string,
+): Promise<Language | null> {
+	const description = findLanguageDescription(language);
+	if (description) {
+		if (description.support) return description.support.language;
+
+		const key = description.name.toLowerCase();
+		let load = hoverLanguageLoads.get(key);
+		if (!load) {
+			load = description
+				.load()
+				.then((support) => support.language)
+				.catch(() => null);
+			hoverLanguageLoads.set(key, load);
+		}
+		return load;
+	}
+
+	const mode = findPluginMode(language);
+	if (!mode) return null;
+	return pluginHoverLanguages.get(mode) || startPluginLanguageLoad(mode);
+}
+
+function getFenceLanguage(info: string): string {
+	const trimmed = info.trim();
+	if (!trimmed) return "";
+
+	if (trimmed.startsWith("{")) {
+		return trimmed.match(/\.([\w+#.-]+)/)?.[1] || "";
+	}
+	return trimmed.split(/\s+/, 1)[0] || "";
+}
+
+function collectMarkdownLanguages(markdown: string, result: Set<string>): void {
+	const fencePattern = /^ {0,3}(?:`{3,}|~{3,})[ \t]*([^\n]*)$/gm;
+	for (
+		let match = fencePattern.exec(markdown);
+		match;
+		match = fencePattern.exec(markdown)
+	) {
+		const language = getFenceLanguage(match[1] || "");
+		if (language) result.add(language);
+	}
+}
+
+function collectHoverLanguages(
+	contents: Hover["contents"],
+	result = new Set<string>(),
+): Set<string> {
+	if (Array.isArray(contents)) {
+		contents.forEach((content) => collectHoverLanguages(content, result));
+	} else if (typeof contents === "string") {
+		collectMarkdownLanguages(contents, result);
+	} else if ("language" in contents) {
+		if (contents.language) result.add(contents.language);
+	} else if (contents.kind === "markdown") {
+		collectMarkdownLanguages(contents.value, result);
+	}
+	return result;
+}
+
+async function loadHoverContentLanguages(contents: Hover["contents"]): Promise<void> {
+	const languageTags = collectHoverLanguages(contents);
+	await Promise.all(
+		Array.from(languageTags, (language) =>
+			loadLspHoverHighlightLanguage(language),
+		),
+	);
+}
 
 function fromPosition(
 	doc: EditorView["state"]["doc"],
@@ -83,7 +295,7 @@ function renderCode(plugin: LSPPlugin, code: MarkedString): string {
 
 	if (!lang) {
 		const viewLang = plugin.view.state.facet(languageFacet);
-		if (viewLang && (!language || viewLang.name === language)) {
+		if (viewLang && (!language || matchingModeName(viewLang.name, language))) {
 			lang = viewLang;
 		}
 	}
@@ -145,8 +357,7 @@ function closeHoverIfNeeded(view: EditorView): void {
 }
 
 function hoverRequest(plugin: LSPPlugin, pos: number) {
-	const client = plugin.client as typeof plugin.client & LspClientInternals;
-	if (client.hasCapability?.("hoverProvider") === false) {
+	if (!clientHasCapability(plugin.client, "hoverProvider")) {
 		return Promise.resolve(null);
 	}
 
@@ -164,21 +375,50 @@ function lspTooltipSource(
 	view: EditorView,
 	pos: number,
 ): Promise<Tooltip | null> {
-	const plugin = LSPPlugin.get(view);
-	if (!plugin) return Promise.resolve(null);
+	const plugins = LSPPlugin.getAll(view, "hover").filter(
+		(plugin) => clientHasCapability(plugin.client, "hoverProvider"),
+	);
+	if (!plugins.length) return Promise.resolve(null);
 
-	return hoverRequest(plugin, pos).then((result) => {
-		if (!result) return null;
+	return Promise.allSettled(
+		plugins.map((plugin) => hoverRequest(plugin, pos)),
+	).then(async (settled) => {
+		const results: Array<{ plugin: LSPPlugin; result: Hover }> = [];
+		for (let index = 0; index < settled.length; index++) {
+			const item = settled[index];
+			if (item.status === "fulfilled" && item.value) {
+				results.push({ plugin: plugins[index], result: item.value });
+			} else if (item.status === "rejected") {
+				console.warn("[LSP:Hover] Provider failed", item.reason);
+			}
+		}
+		if (!results.length) return null;
+		await Promise.all(
+			results.map(({ result }) => loadHoverContentLanguages(result.contents)),
+		);
+
+		let from = pos;
+		let to = pos;
+		for (const { result } of results) {
+			if (!result.range) continue;
+			from = Math.min(from, fromPosition(view.state.doc, result.range.start));
+			to = Math.max(to, fromPosition(view.state.doc, result.range.end));
+		}
 
 		return {
-			pos: result.range
-				? fromPosition(view.state.doc, result.range.start)
-				: pos,
-			end: result.range ? fromPosition(view.state.doc, result.range.end) : pos,
+			pos: from,
+			end: to,
 			create() {
 				const dom = document.createElement("div");
 				dom.className = "cm-lsp-hover-tooltip cm-lsp-documentation";
-				dom.innerHTML = renderTooltipContent(plugin, result.contents);
+				for (let index = 0; index < results.length; index++) {
+					if (index) dom.appendChild(document.createElement("hr"));
+					const section = dom.appendChild(document.createElement("div"));
+					section.innerHTML = renderTooltipContent(
+						results[index].plugin,
+						results[index].result.contents,
+					);
+				}
 				return { dom };
 			},
 			above: true,
@@ -213,8 +453,7 @@ function getSignatureHelp(
 	pos: number,
 	context: SignatureHelpContext,
 ) {
-	const client = plugin.client as typeof plugin.client & LspClientInternals;
-	if (client.hasCapability?.("signatureHelpProvider") === false) {
+	if (!clientHasCapability(plugin.client, "signatureHelpProvider")) {
 		return Promise.resolve(null);
 	}
 
@@ -256,6 +495,7 @@ class SignatureState {
 		readonly data: LspSignatureHelp,
 		readonly active: number,
 		readonly tooltip: Tooltip,
+		readonly client: LSPClient,
 	) {}
 }
 
@@ -263,17 +503,19 @@ const signatureEffect = StateEffect.define<{
 	data: LspSignatureHelp;
 	active: number;
 	pos: number;
+	client: LSPClient;
 } | null>();
 
 function signatureTooltip(
 	data: LspSignatureHelp,
 	active: number,
 	pos: number,
+	client: LSPClient,
 ): Tooltip {
 	return {
 		pos,
 		above: true,
-		create: (view) => drawSignatureTooltip(view, data, active),
+		create: (view) => drawSignatureTooltip(view, data, active, client),
 	};
 }
 
@@ -292,7 +534,9 @@ const signatureState = StateField.define<SignatureState | null>({
 							effect.value.data,
 							effect.value.active,
 							effect.value.pos,
+							effect.value.client,
 						),
+						effect.value.client,
 					);
 				}
 				return null;
@@ -300,10 +544,15 @@ const signatureState = StateField.define<SignatureState | null>({
 		}
 
 		if (value && tr.docChanged) {
-			return new SignatureState(value.data, value.active, {
-				...value.tooltip,
-				pos: tr.changes.mapPos(value.tooltip.pos),
-			});
+			return new SignatureState(
+				value.data,
+				value.active,
+				{
+					...value.tooltip,
+					pos: tr.changes.mapPos(value.tooltip.pos),
+				},
+				value.client,
+			);
 		}
 
 		return value;
@@ -316,6 +565,7 @@ function drawSignatureTooltip(
 	view: EditorView,
 	data: LspSignatureHelp,
 	active: number,
+	client: LSPClient,
 ) {
 	const dom = document.createElement("div");
 	dom.className = "cm-lsp-signature-tooltip";
@@ -365,7 +615,7 @@ function drawSignatureTooltip(
 	}
 
 	if (signature.documentation) {
-		const plugin = LSPPlugin.get(view);
+		const plugin = LSPPlugin.get(view, client);
 		if (plugin) {
 			const docs = dom.appendChild(document.createElement("div"));
 			docs.className = "cm-lsp-signature-documentation cm-lsp-documentation";
@@ -397,7 +647,10 @@ const signaturePlugin = ViewPlugin.fromClass(
 				}
 			}
 
-			const plugin = LSPPlugin.get(update.view);
+			const plugin = LSPPlugin.getAll(update.view, "signatureHelp").find(
+				(candidate) =>
+					clientHasCapability(candidate.client, "signatureHelpProvider"),
+			);
 			if (!plugin) return;
 
 			const sigState = update.view.state.field(signatureState);
@@ -495,6 +748,7 @@ const signaturePlugin = ViewPlugin.fromClass(
 								data: result,
 								active,
 								pos: same ? current!.tooltip.pos : request.pos,
+								client: plugin.client,
 							}),
 						});
 					} else if (view.state.field(signatureState, false)) {
@@ -555,7 +809,10 @@ export const showSignatureHelp: Command = (view) => {
 	const field = view.state.field(signatureState);
 	if (!plugin || field === undefined) return false;
 
-	const lspPlugin = LSPPlugin.get(view);
+	const lspPlugin = LSPPlugin.getAll(view, "signatureHelp").find(
+		(candidate) =>
+			clientHasCapability(candidate.client, "signatureHelpProvider"),
+	);
 	if (!lspPlugin) return false;
 
 	plugin.startRequest(lspPlugin, {
@@ -575,6 +832,7 @@ export const nextSignature: Command = (view) => {
 				data: field.data,
 				active: field.active + 1,
 				pos: field.tooltip.pos,
+				client: field.client,
 			}),
 		});
 	}
@@ -590,6 +848,7 @@ export const prevSignature: Command = (view) => {
 				data: field.data,
 				active: field.active - 1,
 				pos: field.tooltip.pos,
+				client: field.client,
 			}),
 		});
 	}
@@ -602,7 +861,13 @@ export const signatureKeymap: readonly KeyBinding[] = [
 	{ key: "Mod-Shift-ArrowDown", run: nextSignature },
 ];
 
+const defaultHoverTooltipsExtension: Extension = [
+	hoverTooltip(lspTooltipSource, { hideOnChange: true }),
+	closeHoverOnInteraction,
+];
+
 export function hoverTooltips(config: { hoverTime?: number } = {}): Extension {
+	if (config.hoverTime == null) return defaultHoverTooltipsExtension;
 	return [
 		hoverTooltip(lspTooltipSource, {
 			hideOnChange: true,

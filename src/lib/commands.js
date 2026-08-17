@@ -1,33 +1,19 @@
 import fsOperation from "fileSystem";
 import { selectAll } from "@codemirror/commands";
+import { focusEditorIfEditable } from "cm/editorReadOnly";
 import Sidebar from "components/sidebar";
-import { TerminalManager } from "components/terminal";
-import color from "dialogs/color";
 import confirm from "dialogs/confirm";
 import prompt from "dialogs/prompt";
 import select from "dialogs/select";
 import actions from "handlers/quickTools";
 import recents from "lib/recents";
-import About from "pages/about";
-import FileBrowser from "pages/fileBrowser";
-import plugins from "pages/plugins";
-import Problems from "pages/problems/problems";
-import openWelcomeTab from "pages/welcome/welcome";
-import changeEncoding from "palettes/changeEncoding";
-import changeMode from "palettes/changeMode";
-import changeTheme from "palettes/changeTheme";
-import commandPalette from "palettes/commandPalette";
-import findFile from "palettes/findFile";
-import browser from "plugins/browser";
-import help from "settings/helpSettings";
-import mainSettings from "settings/mainSettings";
-import { runAllTests } from "test/tester";
 import { getColorRange } from "utils/color/regex";
 import helpers from "utils/helpers";
 import Url from "utils/Url";
 import checkFiles from "./checkFiles";
 import config from "./config";
 import EditorFile from "./editorFile";
+import { loadFileBrowser } from "./lazyImports";
 import openFile from "./openFile";
 import openFolder from "./openFolder";
 import run from "./run";
@@ -65,9 +51,17 @@ function resolveReferenceFile(referenceFile) {
 	return referenceFile;
 }
 
+export function canSaveFile(file = editorManager.activeFile) {
+	return (
+		file?.type === "editor" &&
+		typeof file.save === "function" &&
+		typeof file.saveAs === "function"
+	);
+}
+
 function getTabsRelativeToFile(side, referenceFile) {
-	const { files } = editorManager;
 	const file = resolveReferenceFile(referenceFile);
+	const files = editorManager.getPaneFiles?.(file) || editorManager.files;
 	const activeIndex = files.indexOf(file);
 
 	if (activeIndex === -1) return [];
@@ -132,6 +126,9 @@ async function closeTabs(files, options = {}) {
 
 export default {
 	async "run-tests"() {
+		const { runAllTests } = await import(
+			/* webpackChunkName: "tester" */ "test/tester"
+		);
 		await runAllTests();
 	},
 	async "close-all-tabs"() {
@@ -167,7 +164,46 @@ export default {
 		});
 	},
 	"close-current-tab"() {
-		editorManager.activeFile.remove();
+		editorManager.activeFile?.remove();
+	},
+	"new-pane"() {
+		return editorManager.createPane?.();
+	},
+	"split-pane"() {
+		return editorManager.splitPane?.();
+	},
+	"split-pane-right"() {
+		return editorManager.splitPaneRight?.();
+	},
+	"split-pane-down"() {
+		return editorManager.splitPaneDown?.();
+	},
+	"close-pane"() {
+		return editorManager.closeActivePane?.();
+	},
+	"focus-next-pane"() {
+		return editorManager.focusNextPane?.();
+	},
+	"focus-previous-pane"() {
+		return editorManager.focusPreviousPane?.();
+	},
+	"focus-pane-left"() {
+		return editorManager.focusPaneByDirection?.("left");
+	},
+	"focus-pane-right"() {
+		return editorManager.focusPaneByDirection?.("right");
+	},
+	"focus-pane-up"() {
+		return editorManager.focusPaneByDirection?.("up");
+	},
+	"focus-pane-down"() {
+		return editorManager.focusPaneByDirection?.("down");
+	},
+	"move-tab-to-new-pane"() {
+		return editorManager.moveActiveFileToNewPane?.();
+	},
+	"move-tab-to-new-pane-down"() {
+		return editorManager.moveActiveFileToNewPane?.("vertical");
 	},
 	"toggle-pin-tab"(referenceFile) {
 		resolveReferenceFile(referenceFile)?.togglePinned?.();
@@ -179,7 +215,10 @@ export default {
 		if (!appSettings.value.checkFiles) return;
 		checkFiles();
 	},
-	"command-palette"() {
+	async "command-palette"() {
+		const { default: commandPalette } = await import(
+			/* webpackChunkName: "commandPalette" */ "palettes/commandPalette"
+		);
 		commandPalette();
 	},
 	"disable-fullscreen"() {
@@ -190,19 +229,28 @@ export default {
 		app.classList.add("fullscreen-mode");
 		this["resize-editor"]();
 	},
-	encoding() {
+	async encoding() {
+		const { default: changeEncoding } = await import(
+			/* webpackChunkName: "changeEncoding" */ "palettes/changeEncoding"
+		);
 		changeEncoding();
 	},
 	exit() {
 		navigator.app.exitApp();
 	},
 	"edit-with"() {
-		editorManager.activeFile.editWith();
+		const { activeFile } = editorManager;
+		if (!activeFile?.uri) return;
+		activeFile.editWith?.();
 	},
-	"find-file"() {
+	async "find-file"() {
+		const { default: findFile } = await import(
+			/* webpackChunkName: "findFile" */ "palettes/findFile"
+		);
 		findFile();
 	},
-	files() {
+	async files() {
+		const FileBrowser = await loadFileBrowser();
 		FileBrowser("both", strings["file browser"])
 			.then(FileBrowser.open)
 			.catch(FileBrowser.openError);
@@ -240,38 +288,60 @@ export default {
 		});
 	},
 	"next-file"() {
-		const len = editorManager.files.length;
-		let fileIndex = editorManager.files.indexOf(editorManager.activeFile);
+		const files =
+			editorManager.getPaneFiles?.(editorManager.activeFile) ||
+			editorManager.files;
+		const len = files.length;
+		let fileIndex = files.indexOf(editorManager.activeFile);
+
+		if (!len || fileIndex === -1) return;
 
 		if (fileIndex === len - 1) fileIndex = 0;
 		else ++fileIndex;
 
-		editorManager.files[fileIndex].makeActive();
+		files[fileIndex].makeActive();
 	},
-	open(page) {
+	"next-file-history"() {
+		editorManager.openNextEditorFromHistory?.();
+	},
+	async open(page) {
 		switch (page) {
 			case "settings":
-				mainSettings();
+				(
+					await import(
+						/* webpackChunkName: "mainSettings" */ "settings/mainSettings"
+					)
+				).default();
 				break;
 
 			case "help":
-				help();
+				(
+					await import(
+						/* webpackChunkName: "helpSettings" */ "settings/helpSettings"
+					)
+				).default();
 				break;
 
 			case "problems":
-				Problems();
+				(
+					await import(
+						/* webpackChunkName: "problems" */ "pages/problems/problems"
+					)
+				).default();
 				break;
 
 			case "plugins":
-				plugins();
+				(
+					await import(/* webpackChunkName: "plugins" */ "pages/plugins")
+				).default();
 				break;
 
 			case "file_browser":
-				FileBrowser();
+				(await loadFileBrowser())();
 				break;
 
 			case "about":
-				About();
+				(await import(/* webpackChunkName: "about" */ "pages/about")).default();
 				break;
 
 			default:
@@ -280,28 +350,40 @@ export default {
 		editorManager.editor.contentDOM.blur();
 	},
 	"open-with"() {
-		editorManager.activeFile.openWith();
+		const { activeFile } = editorManager;
+		if (!activeFile?.uri) return;
+		activeFile.openWith?.();
 	},
-	"open-file"() {
+	async "open-file"() {
 		editorManager.editor.contentDOM.blur();
+		const FileBrowser = await loadFileBrowser();
 		FileBrowser("file")
 			.then(FileBrowser.openFile)
 			.catch(FileBrowser.openFileError);
 	},
-	"open-folder"() {
+	async "open-folder"() {
 		editorManager.editor.contentDOM.blur();
+		const FileBrowser = await loadFileBrowser();
 		FileBrowser("folder")
 			.then(FileBrowser.openFolder)
 			.catch(FileBrowser.openFolderError);
 	},
 	"prev-file"() {
-		const len = editorManager.files.length;
-		let fileIndex = editorManager.files.indexOf(editorManager.activeFile);
+		const files =
+			editorManager.getPaneFiles?.(editorManager.activeFile) ||
+			editorManager.files;
+		const len = files.length;
+		let fileIndex = files.indexOf(editorManager.activeFile);
+
+		if (!len || fileIndex === -1) return;
 
 		if (fileIndex === 0) fileIndex = len - 1;
 		else --fileIndex;
 
-		editorManager.files[fileIndex].makeActive();
+		files[fileIndex].makeActive();
+	},
+	"prev-file-history"() {
+		editorManager.openPreviousEditorFromHistory?.();
 	},
 	"read-only"() {
 		const file = editorManager.activeFile;
@@ -330,20 +412,26 @@ export default {
 		// TODO : Codemirror
 		//editorManager.editor.resize(true);
 	},
-	"open-inapp-browser"(url) {
+	async "open-inapp-browser"(url) {
+		const { default: browser } = await import(
+			/* webpackChunkName: "browserPlugin" */ "plugins/browser"
+		);
 		browser.open(url);
 	},
 	run() {
-		editorManager.activeFile[
+		const { activeFile } = editorManager;
+		activeFile?.[
 			appSettings.value.useCurrentFileForPreview ? "runFile" : "run"
 		]?.();
 	},
 	"run-file"() {
-		editorManager.activeFile.runFile?.();
+		editorManager.activeFile?.runFile?.();
 	},
 	async save(showToast) {
 		try {
-			await editorManager.activeFile.save();
+			const { activeFile } = editorManager;
+			if (!canSaveFile(activeFile)) return;
+			await activeFile.save();
 			if (showToast) {
 				toast(strings["file saved"]);
 			}
@@ -353,7 +441,9 @@ export default {
 	},
 	async "save-as"(showToast) {
 		try {
-			await editorManager.activeFile.saveAs();
+			const { activeFile } = editorManager;
+			if (!canSaveFile(activeFile)) return;
+			await activeFile.saveAs();
 			if (showToast) {
 				toast(strings["file saved"]);
 			}
@@ -365,7 +455,9 @@ export default {
 		saveState();
 	},
 	share() {
-		editorManager.activeFile.share();
+		const { activeFile } = editorManager;
+		if (!activeFile?.uri) return;
+		activeFile.share?.();
 	},
 	async "pin-file-shortcut"() {
 		const file = editorManager.activeFile;
@@ -421,13 +513,22 @@ export default {
 			helpers.error(error);
 		}
 	},
-	syntax() {
+	async syntax() {
+		const { default: changeMode } = await import(
+			/* webpackChunkName: "changeMode" */ "palettes/changeMode"
+		);
 		changeMode();
 	},
-	"change-app-theme"() {
+	async "change-app-theme"() {
+		const { default: changeTheme } = await import(
+			/* webpackChunkName: "changeTheme" */ "palettes/changeTheme"
+		);
 		changeTheme("app");
 	},
-	"change-editor-theme"() {
+	async "change-editor-theme"() {
+		const { default: changeTheme } = await import(
+			/* webpackChunkName: "changeTheme" */ "palettes/changeTheme"
+		);
 		changeTheme("editor");
 	},
 	"toggle-fullscreen"() {
@@ -458,11 +559,19 @@ export default {
 
 		editor.contentDOM.blur();
 		const wasFocused = editorManager.activeFile.focused;
-		const res = await color(defaultColor, () => {
-			if (wasFocused) {
-				editor.focus();
-			}
-		});
+		let res;
+		try {
+			const { default: color } = await import(
+				/* webpackChunkName: "colorDialog" */ "dialogs/color"
+			);
+			res = await color(defaultColor, () => {
+				if (wasFocused) {
+					focusEditorIfEditable(editor);
+				}
+			});
+		} catch (_) {
+			return;
+		}
 
 		if (range) {
 			editor.dispatch({
@@ -542,6 +651,7 @@ export default {
 		}
 	},
 	async eol() {
+		if (editorManager.activeFile?.type !== "editor") return;
 		const eol = await select(strings["new line mode"], ["unix", "windows"], {
 			default: editorManager.activeFile.eol,
 		});
@@ -611,7 +721,6 @@ Additional Info:
 				// Copy the info to clipboard
 				if (cordova.plugins.clipboard) {
 					cordova.plugins.clipboard.copy(info);
-					toast(strings["copied to clipboard"]);
 				}
 			})
 			.catch((error) => {
@@ -621,13 +730,25 @@ Additional Info:
 	},
 	async "new-terminal"() {
 		try {
+			const { TerminalManager } = await import(
+				/* webpackChunkName: "terminal" */ "components/terminal"
+			);
 			await TerminalManager.createServerTerminal();
 		} catch (error) {
 			console.error("Failed to create terminal:", error);
 			window.toast("Failed to create terminal");
 		}
 	},
-	welcome() {
+	async "running-processes"() {
+		const { default: RunningProcesses } = await import(
+			"pages/runningProcesses"
+		);
+		RunningProcesses();
+	},
+	async welcome() {
+		const { default: openWelcomeTab } = await import(
+			/* webpackChunkName: "welcome" */ "pages/welcome/welcome"
+		);
 		openWelcomeTab();
 	},
 	async "toggle-inspector"() {

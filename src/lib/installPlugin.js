@@ -6,6 +6,7 @@ import purchaseListener from "handlers/purchase";
 import JSZip from "jszip";
 import helpers from "utils/helpers";
 import Url from "utils/Url";
+import { isVersionGreater } from "utils/version";
 import config from "./config";
 import InstallState from "./installState";
 import { loadPluginWithTimeout } from "./loadPlugins";
@@ -451,7 +452,8 @@ async function resolveDepsManifest(deps) {
 			throw new Error(`Unknown plugin dependency: ${dependency}`);
 
 		const version = await getInstalledPluginVersion(remoteDependency.id);
-		if (remoteDependency?.version === version) continue;
+		if (version && !isVersionGreater(remoteDependency?.version, version))
+			continue;
 
 		const dependencies = normalizeDependencies(remoteDependency.dependencies);
 		if (dependencies.length) {

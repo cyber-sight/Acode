@@ -43,6 +43,7 @@ class Settings {
 	#fileBrowserSettings = {
 		showHiddenFiles: false,
 		sortByName: true,
+		listFiles: true,
 	};
 	#excludeFolders = [
 		"**/node_modules/**",
@@ -79,12 +80,12 @@ class Settings {
 		"**/temp/**",
 		"**/tmp/**",
 		"**/.cache/**",
+		"**/.gradle/**",
 		"**/logs/**",
 		"**/.sass-cache/**",
 		"**/.DS_Store/**",
 		"**/Thumbs.db/**",
 	];
-	#IS_TABLET = innerWidth > 768;
 
 	QUICKTOOLS_ROWS = 2;
 	QUICKTOOLS_GROUP_CAPACITY = 8;
@@ -132,7 +133,7 @@ class Settings {
 			fontSize: "12px",
 			cursorWidth: 2,
 			editorTheme: "one_dark",
-			textWrap: true,
+			textWrap: false,
 			softTab: true,
 			tabSize: 2,
 			retryRemoteFsAfterFail: true,
@@ -141,20 +142,30 @@ class Settings {
 			fadeFoldWidgets: false,
 			autoCorrect: true,
 			openFileListPos: this.OPEN_FILE_LIST_POS_HEADER,
-			quickTools: this.#IS_TABLET ? 0 : 1,
+			quickTools: 2,
 			quickToolsTriggerMode: this.QUICKTOOLS_TRIGGER_MODE_TOUCH,
 			appFont: "",
 			editorFont: "Roboto Mono",
 			vibrateOnTap: true,
 			fullscreen: false,
-			floatingButton: !this.#IS_TABLET,
+			floatingButton: false,
 			liveAutoCompletion: true,
 			localWordCompletion: true,
+			languageCompletion: true,
+			recommendExtensions: true,
+			useEmmet: true,
+			autoIndent: true,
+			codeFolding: true,
+			autoCloseBrackets: true,
+			bracketMatching: true,
+			highlightActiveLine: true,
+			highlightSelectionMatches: false,
 			autoCloseTags: true,
 			autoRenameTags: true,
 			showPrintMargin: false,
 			printMargin: 80,
 			scrollbarSize: 20,
+			scrollbarHeight: 50,
 			showSpaces: false,
 			confirmOnExit: true,
 			lineHeight: 2,
@@ -169,15 +180,19 @@ class Settings {
 			diagonalScrolling: false,
 			reverseScrolling: false,
 			scrollSpeed: config.SCROLL_SPEED_NORMAL,
+			scrollPastEnd: "medium",
 			customTheme: this.#customTheme,
 			relativeLineNumbers: false,
 			elasticTabstops: false,
 			rtlText: false,
-			hardWrap: false,
 			useTextareaForIME: false,
 			touchMoveThreshold: Math.round((1 / devicePixelRatio) * 10) / 20,
-			quicktoolsItems: [...Array(this.#QUICKTOOLS_SIZE).keys()],
+			quicktoolsItems: [
+				2, 1, 5, 3, 4, 18, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 0, 33, 21, 20,
+				16, 19, 17, 23, 24, 25, 26, 27, 28, 29, 30, 31,
+			],
 			excludeFolders: this.#excludeFolders,
+			useFileOperationExclusions: true,
 			defaultFileEncoding: "UTF-8",
 			inlineAutoCompletion: true,
 			colorPreview: true,
@@ -193,9 +208,14 @@ class Settings {
 			lsp: {
 				servers: {},
 				allowNonTerminalWorkspace: false,
+				runtime: {
+					default: "auto",
+					servers: {},
+					workspaces: {},
+				},
 			},
 			developerMode: false,
-			shiftClickSelection: false,
+			shiftClickSelection: true,
 			showShareButton: true,
 		};
 		this.value = structuredClone(this.#defaultSettings);
@@ -253,16 +273,21 @@ class Settings {
 	}
 
 	async #save() {
-		const fs = fsOperation(this.settingsFile);
-		const settingsText = JSON.stringify(this.value, undefined, 4);
+		try {
+			const fs = fsOperation(this.settingsFile);
+			const settingsText = JSON.stringify(this.value, undefined, 4);
 
-		if (!(await fs.exists())) {
-			const dirFs = fsOperation(DATA_STORAGE);
-			await dirFs.createFile("settings.json");
+			if (!(await fs.exists())) {
+				const dirFs = fsOperation(DATA_STORAGE);
+				await dirFs.createFile("settings.json");
+			}
+
+			await fs.writeFile(settingsText);
+			this.#oldSettings = structuredClone(this.value);
+		} catch (error) {
+			toast(strings["settings save failed"] || "Settings save failed");
+			console.error("Settings save failed:", error);
 		}
-
-		await fs.writeFile(settingsText);
-		this.#oldSettings = structuredClone(this.value);
 	}
 
 	/**
@@ -299,7 +324,6 @@ class Settings {
 		});
 
 		if (saveFile) await this.#save();
-		if (showToast) toast(strings["settings saved"]);
 
 		changedSettings.forEach((setting) => {
 			const listeners = this.#on[`update:${setting}:after`];

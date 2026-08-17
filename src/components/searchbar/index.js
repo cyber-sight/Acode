@@ -1,4 +1,5 @@
 import "./style.scss";
+import { updateSwitchHandle } from "components/checkbox";
 import Ref from "html-tag-js/ref";
 import actionStack from "lib/actionStack";
 
@@ -8,8 +9,15 @@ import actionStack from "lib/actionStack";
  * @param {(hide:Function)=>void} setHide
  * @param {()=>void} onhideCb callback to be called when search bar is hidden
  * @param {(value:string)=>HTMLElement[]} searchFunction
+ * @param {boolean} cloneResults whether search results should be cloned
  */
-function searchBar($list, setHide, onhideCb, searchFunction) {
+function searchBar(
+	$list,
+	setHide,
+	onhideCb,
+	searchFunction,
+	cloneResults = true,
+) {
 	let hideOnBlur = true;
 	let timeout = null;
 	const $searchInput = Ref();
@@ -93,7 +101,7 @@ function searchBar($list, setHide, onhideCb, searchFunction) {
 		}
 
 		$list.textContent = "";
-		$list.append(...buildSearchContent(result, val));
+		$list.append(...(cloneResults ? buildSearchContent(result, val) : result));
 	}
 
 	/**
@@ -183,10 +191,65 @@ function searchBar($list, setHide, onhideCb, searchFunction) {
 	 */
 	function cloneSearchItem($item) {
 		const $clone = $item.cloneNode(true);
-		$clone.addEventListener("click", () => {
+		syncCheckboxState($clone, $item);
+		$clone.addEventListener("click", (event) => {
+			// The clone is only a proxy for the backing settings item. In
+			// particular, do not let a cloned label activate its checkbox after
+			// this handler: that would emit a second click and toggle the backing
+			// setting twice.
+			event.preventDefault();
+			$item.addEventListener(
+				"settings-item-interaction-end",
+				(event) => {
+					if (event.detail?.updated) {
+						syncSearchClone($clone, $item);
+					}
+				},
+				{ once: true },
+			);
 			$item.click();
 		});
 		return $clone;
+	}
+
+	/**
+	 * Keep a visible search-result clone in sync after the backing item updates.
+	 * @param {HTMLElement} $clone
+	 * @param {HTMLElement} $item
+	 */
+	function syncSearchClone($clone, $item) {
+		$clone.className = $item.className;
+		$clone.innerHTML = $item.innerHTML;
+		syncCheckboxState($clone, $item, true);
+	}
+
+	/**
+	 * Sync the checked property of checkbox and radio elements, since cloneNode and innerHTML do not copy/preserve dynamic checked state.
+	 * @param {HTMLElement} $clone
+	 * @param {HTMLElement} $item
+	 * @param {boolean} [animateToggle]
+	 */
+	function syncCheckboxState($clone, $item, animateToggle = false) {
+		const $itemCheckbox = $item.querySelector(
+			'input[type="checkbox"], input[type="radio"]',
+		);
+		if ($itemCheckbox) {
+			const $cloneCheckbox = $clone.querySelector(
+				'input[type="checkbox"], input[type="radio"]',
+			);
+			if ($cloneCheckbox) {
+				$cloneCheckbox.checked = $itemCheckbox.checked;
+
+				// Motion animations update the original switch asynchronously.
+				// A clone does not retain the Checkbox component's update
+				// handler, so apply the shared switch transition explicitly.
+				const $checkbox = $cloneCheckbox.closest(".input-checkbox");
+				const $handle = $checkbox?.querySelector(".handle");
+				if ($handle && $checkbox.classList.contains("switch")) {
+					updateSwitchHandle($handle, $cloneCheckbox.checked, animateToggle);
+				}
+			}
+		}
 	}
 }
 

@@ -36,6 +36,54 @@ export default function scrollSettings() {
 			valueText: (size) => `${size}px`,
 			select: [5, 10, 15, 20],
 		},
+		{
+			key: "scrollbarHeight",
+			text: strings["scrollbar height"] || "Scrollbar height",
+			value: values.scrollbarHeight,
+			valueText: (size) => `${size}px`,
+			select: [20, 30, 40, 50, 60],
+		},
+		{
+			key: "scrollPastEnd",
+			text: strings["scroll past end"],
+			value: values.scrollPastEnd ?? "medium",
+			info: strings["settings-info-scroll-past-end"],
+			valueText: (val) => {
+				switch (val) {
+					case "none":
+						return strings.none;
+					case "small":
+						return strings.small;
+					case "medium":
+						return strings.medium;
+					default:
+						return strings.full;
+				}
+			},
+			select: [
+				["none", strings.none],
+				["small", strings.small],
+				["medium", strings.medium],
+				["full", strings.full],
+			],
+		},
+		{
+			key: "leftMargin",
+			text: strings["horizontal scroll margin"],
+			value: values.leftMargin ?? 50,
+			valueText: (size) => `${size}px`,
+			prompt: strings["horizontal scroll margin"],
+			promptType: "number",
+			promptOptions: {
+				required: true,
+				test(value) {
+					if (!/^\d+$/.test(String(value).trim())) return false;
+					const size = Number(value);
+					return Number.isSafeInteger(size) && size >= 0;
+				},
+			},
+			info: strings["settings-info-horizontal-scroll-margin"],
+		},
 	];
 
 	return settingsPage(title, items, callback, undefined, {
@@ -49,7 +97,7 @@ export default function scrollSettings() {
 
 	function callback(key, value) {
 		appSettings.update({
-			[key]: value,
+			[key]: key === "leftMargin" ? Number(value) : value,
 		});
 	}
 }

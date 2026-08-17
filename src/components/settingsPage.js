@@ -5,7 +5,7 @@ import select from "dialogs/select";
 import Ref from "html-tag-js/ref";
 import actionStack from "lib/actionStack";
 import appSettings from "lib/settings";
-import { hideAd } from "lib/startAd";
+import { animate, hover, press } from "motion";
 import FileBrowser from "pages/fileBrowser";
 import { isValidColor } from "utils/color/regex";
 import helpers from "utils/helpers";
@@ -20,6 +20,9 @@ import searchBar from "./searchbar";
  * @property {(key:string)=>HTMLElement[]} search search for a setting
  * @property {(title:string)=>void} setTitle set title of settings page
  * @property {()=>void} restoreList restore list to original state
+ * @property {()=>HTMLDivElement} getListElement get the page's list element
+ * @property {(key:string, visible:boolean)=>boolean} setItemVisibility show or hide one setting
+ * @property {(callback:()=>void)=>()=>void} onClose register cleanup for when the page closes
  */
 
 /**
@@ -51,6 +54,7 @@ export default function settingsPage(
 	options = {},
 ) {
 	let hideSearchBar = () => {};
+	const closeCallbacks = new Set();
 	const $page = Page(title);
 	$page.id = "settings";
 
@@ -71,8 +75,15 @@ export default function settingsPage(
 	/** DISCLAIMER: do not assign hideSearchBar directly because it can change  */
 	$page.ondisconnect = () => hideSearchBar();
 	$page.onhide = () => {
-		hideAd();
 		actionStack.remove(title);
+		for (const callback of closeCallbacks) {
+			try {
+				callback();
+			} catch (error) {
+				console.error("Settings page cleanup failed:", error);
+			}
+		}
+		closeCallbacks.clear();
 	};
 
 	const state = listItems($list, settings, callback, {
@@ -114,6 +125,13 @@ export default function settingsPage(
 
 	return {
 		/**
+		 * Get this page's list element.
+		 * @returns {HTMLDivElement}
+		 */
+		getListElement() {
+			return $list;
+		},
+		/**
 		 * Show settings page
 		 * @param {string} goTo Key of setting to scroll to and select
 		 * @returns {void}
@@ -128,7 +146,7 @@ export default function settingsPage(
 
 			if (goTo) {
 				const $item = $list.get(`[data-key="${goTo}"]`);
-				if (!$item) return;
+				if (!$item || $item.hidden) return;
 
 				$item.scrollIntoView();
 				$item.click();
@@ -146,6 +164,7 @@ export default function settingsPage(
 		 */
 		search(key) {
 			return searchableItems.filter((child) => {
+				if (child.hidden) return false;
 				const text = child.textContent.toLowerCase();
 				return text.match(key, "i");
 			});
@@ -163,6 +182,33 @@ export default function settingsPage(
 		setTitle(title) {
 			$page.settitle(title);
 		},
+		/**
+		 * Show or hide one setting without rebuilding the page.
+		 * @param {string} key
+		 * @param {boolean} visible
+		 */
+		setItemVisibility(key, visible) {
+			const $item = state.itemElements.get(key);
+			if (!$item) return false;
+
+			$item.hidden = !visible;
+			$item.setAttribute("aria-hidden", String(!visible));
+			if ($item.hidden && document.activeElement === $item) {
+				$list.focus();
+			}
+			return true;
+		},
+		/**
+		 * Register cleanup that runs only when this settings page closes.
+		 * @param {()=>void} callback
+		 */
+		onClose(callback) {
+			if (typeof callback !== "function") {
+				throw new TypeError("Settings page close callback must be a function.");
+			}
+			closeCallbacks.add(callback);
+			return () => closeCallbacks.delete(callback);
+		},
 	};
 }
 
@@ -179,6 +225,7 @@ export default function settingsPage(
  * @property {string} [searchGroup]
  * @property {boolean} [checkbox]
  * @property {boolean} [chevron]
+ * @property {boolean} [hidden]
  * @property {string} [prompt]
  * @property {string} [promptType]
  * @property {import('dialogs/prompt').PromptOptions} [promptOptions]
@@ -194,6 +241,7 @@ export default function settingsPage(
 function listItems($list, items, callback, options = {}) {
 	const renderedItems = [];
 	const $searchItems = [];
+	const itemElements = new Map();
 	const useInfoAsDescription =
 		options.infoAsDescription ?? Boolean(options.valueInTail);
 	const itemByKey = new Map(items.map((item) => [item.key, item]));
@@ -210,6 +258,7 @@ function listItems($list, items, callback, options = {}) {
 		insertRenderedItem(renderedItems, item, $item);
 		$item.addEventListener("click", onclick);
 		$searchItems.push($item);
+		itemElements.set(item.key, $item);
 	});
 
 	const topLevelChildren = buildListContent(renderedItems, options);
@@ -218,6 +267,7 @@ function listItems($list, items, callback, options = {}) {
 
 	return {
 		children: topLevelChildren,
+		itemElements,
 		searchItems: $searchItems,
 	};
 
@@ -228,20 +278,36 @@ function listItems($list, items, callback, options = {}) {
 	 */
 	async function onclick(e) {
 		const $target = e.currentTarget;
+		if ($target.hidden) return;
 		const { key } = $target.dataset;
 
 		const item = itemByKey.get(key);
 		if (!item) return;
+		if (isBooleanSetting(item)) e.preventDefault();
 		const result = await resolveItemInteraction(item, $target);
-		if (result.shouldCallCallback === false) return;
-		if (!result.shouldUpdateValue)
+		if (result.shouldCallCallback === false) {
+			dispatchItemInteractionEnd($target, false);
+			return;
+		}
+		if (!result.shouldUpdateValue) {
+			dispatchItemInteractionEnd($target, false);
 			return callback.call($target, key, item.value);
+		}
 
 		item.value = result.value;
 		updateItemValueDisplay($target, item, options, useInfoAsDescription);
+		dispatchItemInteractionEnd($target, true);
 
 		callback.call($target, key, item.value);
 	}
+}
+
+function dispatchItemInteractionEnd($target, updated) {
+	$target.dispatchEvent(
+		new CustomEvent("settings-item-interaction-end", {
+			detail: { updated },
+		}),
+	);
 }
 
 function normalizeSettings(settings) {
@@ -267,26 +333,40 @@ function shouldEnableSearch(type, settingsCount) {
 }
 
 function restoreAllSettingsPages() {
-	Object.values(appSettings.uiSettings).forEach((page) => {
+	getSettingsPages().forEach((page) => {
 		page.restoreList();
 	});
 }
 
 function createSearchHandler(type, searchItems) {
+	let settingsPages;
+
 	return (key) => {
 		if (type === "united") {
 			const $items = [];
-			Object.values(appSettings.uiSettings).forEach((page) => {
+			settingsPages ??= getSettingsPages(true);
+			settingsPages.forEach((page) => {
 				$items.push(...page.search(key));
 			});
 			return $items;
 		}
 
 		return searchItems.filter((item) => {
+			if (item.hidden) return false;
 			const text = item.textContent.toLowerCase();
 			return text.match(key, "i");
 		});
 	};
+}
+
+function getSettingsPages(includeLazyPages = false) {
+	const keys = includeLazyPages
+		? Object.getOwnPropertyNames(appSettings.uiSettings)
+		: Object.keys(appSettings.uiSettings);
+
+	return keys
+		.map((key) => appSettings.uiSettings[key])
+		.filter((page) => page?.search && page?.restoreList);
 }
 
 function createNote(note) {
@@ -339,13 +419,25 @@ function createListItemElement(item, options, useInfoAsDescription) {
 	);
 	const searchGroup =
 		item.searchGroup || item.category || options.defaultSearchGroup;
+	$item.hidden = item.hidden === true;
+	$item.setAttribute("aria-hidden", String($item.hidden));
 
 	if (searchGroup) {
 		$item.dataset.searchGroup = searchGroup;
 	}
 
 	if (isCheckboxItem) {
-		const $checkbox = Checkbox("", item.checkbox || item.value);
+		const $checkbox = Checkbox(
+			"",
+			item.checkbox || item.value,
+			undefined,
+			undefined,
+			undefined,
+			undefined,
+			undefined,
+			true,
+		);
+		$checkbox.classList.add("switch");
 		$tail.el.appendChild($checkbox);
 	}
 
@@ -378,7 +470,55 @@ function createListItemElement(item, options, useInfoAsDescription) {
 		$tail.el.remove();
 	}
 
+	// Register high-performance press transitions
+	press($item, (element) => {
+		if (document.body.classList.contains("no-animation")) return;
+		animate(
+			element,
+			{ scale: 0.985 },
+			{ type: "spring", stiffness: 450, damping: 25 },
+		);
+		return () => {
+			animate(
+				element,
+				{ scale: 1 },
+				{ type: "spring", stiffness: 450, damping: 25 },
+			);
+		};
+	});
+
+	if (supportsPrimaryHoverInput()) {
+		hover($item, (element) => {
+			if (document.body.classList.contains("no-animation")) {
+				element.style.backgroundColor =
+					"color-mix(in srgb, var(--secondary-color), var(--popup-text-color) 4%)";
+				return () => {
+					element.style.backgroundColor = "transparent";
+				};
+			}
+			animate(
+				element,
+				{
+					backgroundColor:
+						"color-mix(in srgb, var(--secondary-color), var(--popup-text-color) 4%)",
+				},
+				{ duration: 0.15 },
+			);
+			return () => {
+				animate(
+					element,
+					{ backgroundColor: "transparent" },
+					{ duration: 0.15 },
+				);
+			};
+		});
+	}
+
 	return $item;
+}
+
+function supportsPrimaryHoverInput() {
+	return globalThis.matchMedia?.("(hover: hover)").matches === true;
 }
 
 function isBooleanSetting(item) {
@@ -574,11 +714,18 @@ async function resolveItemInteraction(item, $target) {
 		}
 
 		if (selectColor) {
-			const color = await colorPicker(value);
-			return {
-				shouldUpdateValue: true,
-				value: color,
-			};
+			try {
+				const color = await colorPicker(value);
+				return {
+					shouldUpdateValue: true,
+					value: color,
+				};
+			} catch (_) {
+				return {
+					shouldUpdateValue: false,
+					shouldCallCallback: false,
+				};
+			}
 		}
 
 		if (link) {

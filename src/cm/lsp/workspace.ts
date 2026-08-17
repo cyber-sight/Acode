@@ -3,6 +3,11 @@ import { LSPPlugin, Workspace } from "@codemirror/lsp-client";
 import type { Text, TransactionSpec } from "@codemirror/state";
 import type { EditorView } from "@codemirror/view";
 import { getModeForPath } from "cm/modelist";
+import {
+	forgetPullDiagnostics,
+	schedulePullDiagnostics,
+} from "./diagnostics";
+import { addLspLogFor, type LspLogLevel } from "./logs";
 import type { WorkspaceFileUpdate, WorkspaceOptions } from "./types";
 
 class AcodeWorkspaceFile implements WorkspaceFile {
@@ -53,6 +58,10 @@ export default class AcodeWorkspace extends Workspace {
 		this.#versions = Object.create(null) as Record<string, number>;
 		this.#workspaceFolders = new Set();
 		this.options = options;
+	}
+
+	#log(level: LspLogLevel, message: string, details?: unknown): void {
+		addLspLogFor(this.client, level, message, details);
 	}
 
 	#getOrCreateFile(
@@ -110,6 +119,11 @@ export default class AcodeWorkspace extends Workspace {
 				return String(mode.name).toLowerCase();
 			}
 		} catch (error) {
+			this.#log(
+				"warn",
+				`Workspace failed to resolve language id for ${uri}`,
+				error,
+			);
 			console.warn(
 				`[LSP:Workspace] Failed to resolve language id for ${uri}`,
 				error,
@@ -123,7 +137,7 @@ export default class AcodeWorkspace extends Workspace {
 		for (const file of this.files) {
 			const view = file.getView();
 			if (!view) continue;
-			const plugin = LSPPlugin.get(view);
+			const plugin = LSPPlugin.get(view, this.client);
 			if (!plugin) continue;
 			const { unsyncedChanges } = plugin;
 			if (unsyncedChanges.empty) continue;
@@ -151,6 +165,7 @@ export default class AcodeWorkspace extends Workspace {
 
 		if (!file.views.size) {
 			this.client.didClose(uri);
+			forgetPullDiagnostics(this.client, uri);
 			this.#removeFileEntry(file);
 		}
 	}
@@ -166,6 +181,7 @@ export default class AcodeWorkspace extends Workspace {
 	connected(): void {
 		for (const file of this.files) {
 			this.client.didOpen(file);
+			schedulePullDiagnostics(this.client, file.uri, 0);
 		}
 	}
 
@@ -182,6 +198,7 @@ export default class AcodeWorkspace extends Workspace {
 
 		// File is not open - try to open it and apply the update
 		this.#applyUpdateToClosedFile(uri, update).catch((error) => {
+			this.#log("warn", `Workspace failed to apply update: ${uri}`, error);
 			console.warn(`[LSP:Workspace] Failed to apply update: ${uri}`, error);
 		});
 	}
@@ -202,6 +219,7 @@ export default class AcodeWorkspace extends Workspace {
 				fileView.dispatch(update);
 			}
 		} catch (error) {
+			this.#log("error", `Workspace failed to apply update: ${uri}`, error);
 			console.error(`[LSP:Workspace] Failed to apply update: ${uri}`, error);
 		}
 	}
@@ -211,6 +229,7 @@ export default class AcodeWorkspace extends Workspace {
 			try {
 				return await this.options.displayFile(uri);
 			} catch (error) {
+				this.#log("error", "Workspace failed to display file", error);
 				console.error("[LSP:Workspace] Failed to display file", error);
 			}
 		}
@@ -234,6 +253,7 @@ export default class AcodeWorkspace extends Workspace {
 		};
 
 		if (!client.connected || !client.transport) {
+			this.#log("warn", "Workspace cannot send notification: not connected");
 			console.warn(`[LSP:Workspace] Cannot send notification: not connected`);
 			return;
 		}
@@ -268,6 +288,7 @@ export default class AcodeWorkspace extends Workspace {
 			},
 		});
 		console.info(`[LSP:Workspace] Added workspace folder: ${uri}`);
+		this.#log("info", `Workspace folder added: ${uri}`);
 		return true;
 	}
 
@@ -284,6 +305,7 @@ export default class AcodeWorkspace extends Workspace {
 			},
 		});
 		console.info(`[LSP:Workspace] Removed workspace folder: ${uri}`);
+		this.#log("info", `Workspace folder removed: ${uri}`);
 		return true;
 	}
 }

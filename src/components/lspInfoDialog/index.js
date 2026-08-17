@@ -1,171 +1,21 @@
 import "./styles.scss";
 import lspClientManager from "cm/lsp/clientManager";
 import {
-	checkServerInstallation,
-	getServerStats,
-	installServer,
-} from "cm/lsp/serverLauncher";
-import serverRegistry from "cm/lsp/serverRegistry";
+	getCurrentFileLanguage,
+	getServersForCurrentFile,
+	hasConnectedServers,
+} from "cm/lsp/connectionState";
+import { addLspLog, clearLspLogs, getLspLogs } from "cm/lsp/logs";
+import { getServerStats } from "cm/lsp/serverLauncher";
 import toast from "components/toast";
 import actionStack from "lib/actionStack";
 import restoreTheme from "lib/restoreTheme";
 
 let dialogInstance = null;
 
-const lspLogs = new Map();
-const MAX_LOGS = 200;
-const logListeners = new Set();
-const IGNORED_LOG_PATTERNS = [
-	/\$\/progress\b/i,
-	/\bProgress:/i,
-	/\bwindow\/workDoneProgress\/create\b/i,
-	/\bAuto-responded to window\/workDoneProgress\/create\b/i,
-];
-
-function shouldIgnoreLog(message) {
-	if (typeof message !== "string") return false;
-	return IGNORED_LOG_PATTERNS.some((pattern) => pattern.test(message));
-}
-
-function addLspLog(serverId, level, message, details = null) {
-	if (shouldIgnoreLog(message)) {
-		return;
-	}
-
-	if (!lspLogs.has(serverId)) {
-		lspLogs.set(serverId, []);
-	}
-	const logs = lspLogs.get(serverId);
-	const entry = {
-		timestamp: new Date(),
-		level,
-		message,
-		details,
-	};
-	logs.push(entry);
-	if (logs.length > MAX_LOGS) {
-		logs.shift();
-	}
-	logListeners.forEach((fn) => fn(serverId, entry));
-}
-
-function getLspLogs(serverId) {
-	return lspLogs.get(serverId) || [];
-}
-
-function clearLspLogs(serverId) {
-	lspLogs.delete(serverId);
-}
-
-const originalConsoleInfo = console.info;
-const originalConsoleWarn = console.warn;
-const originalConsoleError = console.error;
-
-function stripAnsi(str) {
-	if (typeof str !== "string") return str;
-	return str.replace(/\x1b\[[0-9;]*m/g, "");
-}
-
-function extractServerId(message) {
-	const cleaned = stripAnsi(message);
-	// Match [LSP:serverId] format
-	const lspMatch = cleaned?.match?.(/\[LSP:([^\]]+)\]/);
-	if (lspMatch) return lspMatch[1];
-
-	// Match [LSP-STDERR:program] format from axs proxy
-	const stderrMatch = cleaned?.match?.(/\[LSP-STDERR:([^\]]+)\]/);
-	if (stderrMatch) {
-		const program = stderrMatch[1];
-		return program;
-	}
-
-	return null;
-}
-
-function extractLogMessage(message) {
-	const cleaned = stripAnsi(message);
-	// Strip [LSP:...] and [LSP-STDERR:...] prefixes
-	// Strip ISO timestamps like 2026-02-05T08:26:24.745443Z
-	// Strip log levels like INFO, WARN, ERROR and the source like axs::lsp:
-	return (
-		cleaned
-			?.replace?.(/\[LSP:[^\]]+\]\s*/, "")
-			?.replace?.(/\[LSP-STDERR:[^\]]+\]\s*/, "")
-			?.replace?.(/\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?Z?\s*/g, "")
-			?.replace?.(/\s*(INFO|WARN|ERROR|DEBUG|TRACE)\s+/gi, "")
-			?.replace?.(/[a-z_]+::[a-z_]+:\s*/gi, "")
-			?.trim() || cleaned
-	);
-}
-
-console.info = function (...args) {
-	originalConsoleInfo.apply(console, args);
-	const msg = args[0];
-	if (
-		typeof msg === "string" &&
-		(msg.includes("[LSP:") || msg.includes("[LSP-STDERR:"))
-	) {
-		const serverId = extractServerId(msg);
-		if (serverId) {
-			addLspLog(serverId, "info", extractLogMessage(msg));
-		}
-	}
-};
-
-console.warn = function (...args) {
-	originalConsoleWarn.apply(console, args);
-	const msg = args[0];
-	if (
-		typeof msg === "string" &&
-		(msg.includes("[LSP:") || msg.includes("[LSP-STDERR:"))
-	) {
-		const serverId = extractServerId(msg);
-		if (serverId) {
-			// stderr from axs is logged as warn, mark it appropriately
-			const isStderr = msg.includes("[LSP-STDERR:");
-			addLspLog(serverId, isStderr ? "stderr" : "warn", extractLogMessage(msg));
-		}
-	}
-};
-
-console.error = function (...args) {
-	originalConsoleError.apply(console, args);
-	const msg = args[0];
-	if (
-		typeof msg === "string" &&
-		(msg.includes("[LSP:") || msg.includes("[LSP-STDERR:"))
-	) {
-		const serverId = extractServerId(msg);
-		if (serverId) {
-			addLspLog(serverId, "error", extractLogMessage(msg));
-		}
-	}
-};
-
 function getActiveClients() {
 	try {
 		return lspClientManager.getActiveClients();
-	} catch {
-		return [];
-	}
-}
-
-function getCurrentFileLanguage() {
-	try {
-		const file = window.editorManager?.activeFile;
-		if (!file || file.type !== "editor") return null;
-		return file.currentMode?.toLowerCase() || null;
-	} catch {
-		return null;
-	}
-}
-
-function getServersForCurrentFile() {
-	const language = getCurrentFileLanguage();
-	if (!language) return [];
-
-	try {
-		return serverRegistry.getServersForLanguage(language);
 	} catch {
 		return [];
 	}
@@ -198,49 +48,6 @@ function getStatusColor(status) {
 	}
 }
 
-function getInstallStatusLabel(result) {
-	if (!result) return "Checking installation...";
-	switch (result.status) {
-		case "present":
-			return result.version ? `Installed (${result.version})` : "Installed";
-		case "missing":
-			return "Not installed";
-		case "failed":
-			return "Installation check failed";
-		default:
-			return "Installation status unavailable";
-	}
-}
-
-function getInstallIcon(result) {
-	if (!result) return "hourglass_empty";
-	switch (result.status) {
-		case "present":
-			return "check_circle";
-		case "missing":
-			return "download";
-		case "failed":
-			return "error_outline";
-		default:
-			return "help_outline";
-	}
-}
-
-function getInstallAction(result) {
-	if (!result) return null;
-	if (result.status === "present" && result.canUpdate) {
-		return { mode: "update", label: "Update", icon: "system_update" };
-	}
-	if ((result.status === "missing" || result.status === "failed") && result.canInstall) {
-		return {
-			mode: "install",
-			label: result.status === "failed" ? "Repair" : "Install",
-			icon: result.status === "failed" ? "build" : "download",
-		};
-	}
-	return null;
-}
-
 function copyLogsToClipboard(serverId, serverLabel) {
 	const logs = getLspLogs(serverId);
 	if (logs.length === 0) {
@@ -263,17 +70,11 @@ function copyLogsToClipboard(serverId, serverLabel) {
 	const header = `=== ${serverLabel} LSP Logs ===\n`;
 
 	if (navigator.clipboard?.writeText) {
-		navigator.clipboard
-			.writeText(header + text)
-			.then(() => {
-				toast("Logs copied");
-			})
-			.catch(() => {
-				toast("Failed to copy");
-			});
+		navigator.clipboard.writeText(header + text).catch(() => {
+			toast("Failed to copy");
+		});
 	} else if (cordova?.plugins?.clipboard) {
 		cordova.plugins.clipboard.copy(header + text);
-		toast("Logs copied");
 	} else {
 		toast("Clipboard not available");
 	}
@@ -380,9 +181,6 @@ function showLspInfoDialog() {
 
 	let currentView = "list";
 	let selectedServer = null;
-	const installStatuses = new Map();
-	let installingServerId = null;
-	let detailsRenderVersion = 0;
 
 	const $mask = <span className="mask" onclick={hide} />;
 	const $dialog = (
@@ -458,10 +256,8 @@ function showLspInfoDialog() {
 			const errorCount = logs.filter((l) => l.level === "error").length;
 
 			const $item = (
-				<li>
-					<button
-						type="button"
-						className="lsp-server-item"
+				<li
+					className="lsp-server-item"
 					onclick={() => {
 						selectedServer = server;
 						currentView = "details";
@@ -480,7 +276,6 @@ function showLspInfoDialog() {
 						<span className="lsp-error-badge">{errorCount}</span>
 					)}
 					<span className="icon keyboard_arrow_right lsp-arrow" />
-					</button>
 				</li>
 			);
 			$list.appendChild($item);
@@ -491,7 +286,6 @@ function showLspInfoDialog() {
 
 	function renderDetails() {
 		if (!selectedServer) return;
-		const renderVersion = ++detailsRenderVersion;
 		$body.innerHTML = "";
 
 		const server = selectedServer;
@@ -519,9 +313,6 @@ function showLspInfoDialog() {
 		}
 
 		const logs = getLspLogs(server.id);
-		const installStatus = installStatuses.get(server.id);
-		const isInstalling = installingServerId === server.id;
-		const installAction = getInstallAction(installStatus);
 
 		const $details = (
 			<div className="lsp-details">
@@ -634,43 +425,6 @@ function showLspInfoDialog() {
 						</div>
 					</div>
 				)}
-
-				<div className="lsp-section lsp-install-section">
-					<div className="lsp-section-label">Installation</div>
-					<div className="lsp-install-row" aria-live="polite">
-						<span className={`icon ${getInstallIcon(installStatus)}`} />
-						<span className="lsp-install-status">
-							{getInstallStatusLabel(installStatus)}
-						</span>
-						{installAction && (
-							<button
-								type="button"
-								className="lsp-install-btn"
-								disabled={isInstalling}
-								aria-busy={isInstalling ? "true" : "false"}
-								onclick={async () => {
-									installingServerId = server.id;
-									renderDetails();
-									try {
-										await installServer(server, installAction.mode);
-										installStatuses.delete(server.id);
-									} catch (error) {
-										addLspLog(server.id, "error", error.message || String(error));
-									} finally {
-										installingServerId = null;
-										renderDetails();
-									}
-								}}
-							>
-								<span className={`icon ${installAction.icon}`} />
-								<span>{installAction.label}</span>
-							</button>
-						)}
-					</div>
-					{installStatus?.message && (
-						<div className="lsp-install-message">{installStatus.message}</div>
-					)}
-				</div>
 			</div>
 		);
 
@@ -764,30 +518,6 @@ function showLspInfoDialog() {
 				if ($pid) $pid.textContent = stats.pid ? String(stats.pid) : "—";
 			});
 		}
-
-		if (!installStatuses.has(server.id)) {
-			checkServerInstallation(server)
-				.then((result) => {
-					installStatuses.set(server.id, result);
-				})
-				.catch((error) => {
-					installStatuses.set(server.id, {
-						status: "failed",
-						canInstall: false,
-						canUpdate: false,
-						message: error.message || String(error),
-					});
-				})
-				.finally(() => {
-					if (
-						currentView === "details" &&
-						selectedServer?.id === server.id &&
-						renderVersion === detailsRenderVersion
-					) {
-						renderDetails();
-					}
-				});
-		}
 	}
 
 	function hide() {
@@ -815,11 +545,6 @@ function showLspInfoDialog() {
 	if (currentView === "list") {
 		renderList();
 	}
-}
-
-function hasConnectedServers() {
-	const relevantServers = getServersForCurrentFile();
-	return relevantServers.length > 0;
 }
 
 export { addLspLog, getLspLogs, hasConnectedServers, showLspInfoDialog };

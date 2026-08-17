@@ -68,13 +68,6 @@ export default function editorSettings() {
 			category: categories.textLayout,
 		},
 		{
-			key: "hardWrap",
-			text: strings["hard wrap"],
-			checkbox: values.hardWrap,
-			info: strings["settings-info-editor-hard-wrap"],
-			category: categories.textLayout,
-		},
-		{
 			key: "autosave",
 			text: strings.autosave,
 			value: values.autosave,
@@ -131,6 +124,26 @@ export default function editorSettings() {
 			text: strings["local word completion"],
 			checkbox: values.localWordCompletion,
 			info: strings["settings-info-editor-local-word-completion"],
+			category: categories.assistance,
+		},
+		{
+			key: "languageCompletion",
+			text: strings["language package completion"],
+			checkbox: values.languageCompletion ?? true,
+			info: strings["settings-info-editor-language-completion"],
+			category: categories.assistance,
+		},
+		{
+			key: "recommendExtensions",
+			text: strings["recommend extensions"],
+			checkbox: values.recommendExtensions ?? true,
+			info: strings["settings-info-editor-recommend-extensions"],
+			category: categories.assistance,
+		},
+		{
+			key: "useEmmet",
+			text: strings["use emmet"],
+			checkbox: values.useEmmet ?? true,
 			category: categories.assistance,
 		},
 		{
@@ -204,17 +217,17 @@ export default function editorSettings() {
 			category: categories.guidesIndicators,
 		},
 		{
-			key: "shiftClickSelection",
-			text: strings["shift click selection"],
-			checkbox: values.shiftClickSelection,
-			info: strings["settings-info-editor-shift-click-selection"],
-			category: categories.cursorSelection,
-		},
-		{
 			key: "showShareButton",
 			text: strings["show share button"],
 			checkbox: values.showShareButton ?? true,
 			info: strings["settings-info-editor-show-share-button"],
+			category: categories.cursorSelection,
+		},
+		{
+			key: "shiftClickSelection",
+			text: strings["shift click selection"],
+			checkbox: values.shiftClickSelection !== false,
+			info: strings["settings-info-editor-shift-click-selection"],
 			category: categories.cursorSelection,
 		},
 		{

@@ -66,6 +66,12 @@ function createLanguageLoader(name: string, lang: LanguageDescription) {
 	const normalizedName = normalizeModeKey(name);
 
 	switch (normalizedName) {
+		case "javascript":
+			return async () => {
+				const { javascript } = await import("@codemirror/lang-javascript");
+				return javascript({ jsx: true });
+			};
+
 		case "html":
 			return async () => {
 				const { html } = await import("@codemirror/lang-html");
@@ -124,7 +130,7 @@ function createLanguageLoader(name: string, lang: LanguageDescription) {
 }
 
 // 1) Always register a plain text fallback
-addMode("Text", "txt|text|log|plain", "Plain Text", () => []);
+addMode("Text", "txt|text|log|plain|lock|pub|gitkeep|keep|mk|^makefile", "Plain Text", () => []);
 
 // 2) Register all languages provided by @codemirror/language-data
 //    We convert extensions like [".js", ".mjs"] into a modelist pattern: "js|mjs"
@@ -136,24 +142,90 @@ for (const lang of languages as readonly LanguageDescription[]) {
 
 		const aliases = collectAliases(name, lang.alias);
 		const modeId = getModeId(name, aliases);
-		const parts: string[] = [];
-		const filenameMatchers: RegExp[] = [];
 
-		// File extensions
-		if (Array.isArray(lang.extensions)) {
-			for (const e of lang.extensions) {
-				if (typeof e !== "string") continue;
-				const cleaned = e.replace(/^\./, "").trim();
-				if (cleaned) parts.push(cleaned);
-			}
+		// File extensions & filenames
+		const langExtensions = [...(lang.extensions || [])];
+		const filenames = [
+			...(Array.isArray(lang.filenames)
+				? lang.filenames
+				: lang.filename
+					? [lang.filename]
+					: []),
+		];
+
+		// Merge custom mappings to make language detection robust
+		const normalizedName = name.toLowerCase();
+		if (normalizedName === "shell" || modeId === "shell") {
+			langExtensions.push(
+				"zsh",
+				"zshrc",
+				"bashrc",
+				"bash_profile",
+				"zprofile",
+				"zlogin",
+				"zlogout",
+				"zshenv",
+				"profile",
+				"bash_login",
+				"bash_logout",
+				"zunit",
+				"ztst",
+				"zsh-theme",
+				"bash_history",
+				"zsh_history",
+			);
+			filenames.push(
+				".bashrc",
+				".zshrc",
+				".bash_profile",
+				".zprofile",
+				".zlogin",
+				".zlogout",
+				".zshenv",
+				".profile",
+				".bash_login",
+				".bash_logout",
+				".bash_history",
+				".zsh_history",
+			);
+		} else if (
+			normalizedName === "properties files" ||
+			normalizedName === "properties" ||
+			modeId === "ini"
+		) {
+			langExtensions.push(
+				"gitconfig",
+				"gitmodules",
+				"editorconfig",
+				"npmrc",
+				"yarnrc",
+			);
+			filenames.push(
+				".gitconfig",
+				".gitmodules",
+				".editorconfig",
+				".npmrc",
+				".yarnrc",
+			);
+		} else if (normalizedName === "json" || modeId === "json") {
+			langExtensions.push("prettierrc", "hintrc", "eslintrc", "babelrc");
+			filenames.push(".prettierrc", ".hintrc", ".eslintrc", ".babelrc", "bun.lock");
+		} else if (normalizedName === "yaml" || modeId === "yaml") {
+			filenames.push("yarn.lock");
+		} else if (normalizedName === "toml" || modeId === "toml") {
+			filenames.push("Cargo.lock", "poetry.lock");
+		} else if (normalizedName === "protobuf" || modeId === "protobuf") {
+			langExtensions.push("pb");
 		}
 
-		// Exact filenames / filename regexes (Dockerfile, PKGBUILD, nginx*.conf, etc.)
-		const filenames = Array.isArray(lang.filenames)
-			? lang.filenames
-			: lang.filename
-				? [lang.filename]
-				: [];
+		const parts: string[] = [];
+		for (const e of langExtensions) {
+			if (typeof e !== "string") continue;
+			const cleaned = e.replace(/^\./, "").trim();
+			if (cleaned) parts.push(cleaned);
+		}
+
+		const filenameMatchers: RegExp[] = [];
 		for (const fn of filenames) {
 			if (typeof fn === "string") {
 				const cleaned = fn.trim();
@@ -187,4 +259,11 @@ for (const lang of languages as readonly LanguageDescription[]) {
 addMode("Luau", "luau", "Luau", async () => {
 	const { luau } = await import("./modes/luau");
 	return luau();
+});
+
+// Astro isn't bundled in @codemirror/language-data. Register it with HTML as
+// the structural parser plus Astro frontmatter and expression highlighting.
+addMode("Astro", "astro", "Astro", async () => {
+	const { astro } = await import("./modes/astro");
+	return astro({ autoCloseTags: await shouldAutoCloseTags() });
 });

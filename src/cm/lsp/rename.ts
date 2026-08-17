@@ -7,6 +7,7 @@ import {
 } from "@codemirror/view";
 import prompt from "dialogs/prompt";
 import type * as lsp from "vscode-languageserver-protocol";
+import { addLspLogFor } from "./logs";
 import type AcodeWorkspace from "./workspace";
 
 interface RenameParams {
@@ -54,7 +55,9 @@ function getPrepareRename(plugin: LSPPlugin, pos: number) {
 
 async function performRename(view: EditorView): Promise<boolean> {
 	const wordRange = view.state.wordAt(view.state.selection.main.head);
-	const plugin = LSPPlugin.get(view);
+	const plugin = LSPPlugin.getAll(view, "rename").find(
+		(candidate) => !!candidate.client.serverCapabilities?.renameProvider,
+	);
 
 	if (!plugin) {
 		return false;
@@ -106,6 +109,7 @@ async function performRename(view: EditorView): Promise<boolean> {
 				}
 			}
 		} catch (error) {
+			addLspLogFor(plugin, "warn", "Rename prepare failed; using word", error);
 			console.warn("[LSP:Rename] prepareRename failed, using word:", error);
 		}
 	}
@@ -131,8 +135,9 @@ async function performRename(view: EditorView): Promise<boolean> {
 	}
 
 	try {
-		await doRename(view, String(newName), wordRange.from);
+		await doRename(plugin, String(newName), wordRange.from);
 	} catch (error) {
+		addLspLogFor(plugin, "error", "Rename failed", error);
 		console.error("[LSP:Rename] Rename failed:", error);
 		const errorMessage =
 			error instanceof Error ? error.message : "Failed to rename symbol";
@@ -176,6 +181,7 @@ async function applyChangesToFile(
 
 	const displayedView = await workspace.displayFile(uri);
 	if (!displayedView?.state?.doc) {
+		addLspLogFor(workspace.client, "warn", `Rename could not open file: ${uri}`);
 		console.warn(`[LSP:Rename] Could not open file: ${uri}`);
 		return false;
 	}
@@ -194,13 +200,10 @@ async function applyChangesToFile(
 }
 
 async function doRename(
-	view: EditorView,
+	plugin: LSPPlugin,
 	newName: string,
 	position: number,
 ): Promise<void> {
-	const plugin = LSPPlugin.get(view);
-	if (!plugin) return;
-
 	plugin.client.sync();
 
 	const response = await plugin.client.withMapping((mapping) =>
@@ -211,6 +214,7 @@ async function doRename(
 	);
 
 	if (!response) {
+		addLspLogFor(plugin, "info", "Rename returned no changes");
 		console.info("[LSP:Rename] No changes returned from server");
 		return;
 	}
@@ -255,10 +259,13 @@ async function doRename(
 	console.info(
 		`[LSP:Rename] Renamed to "${newName}" in ${filesChanged} file(s)`,
 	);
+	addLspLogFor(plugin, "info", `Renamed to "${newName}" in ${filesChanged} file(s)`);
 }
 
 export const renameSymbol: Command = (view) => {
 	performRename(view).catch((error) => {
+		const plugin = LSPPlugin.getForFeature(view, "rename");
+		addLspLogFor(plugin, "error", "Rename command failed", error);
 		console.error("[LSP:Rename] Rename command failed:", error);
 	});
 	return true;

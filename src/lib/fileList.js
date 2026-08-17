@@ -2,16 +2,22 @@ import fsOperation from "fileSystem";
 import toast from "components/toast";
 import picomatch from "picomatch/posix";
 import Url from "utils/Url";
+import fileIndex from "./fileIndex";
 import { addedFolder } from "./openFolder";
 import settings from "./settings";
 
 /**
+ * @deprecated Native SAF and file:// workspaces are available through fileIndex.
+ * This module now maintains the compatibility index for non-native providers.
+ *
  * @typedef {import('fileSystem').File} File
  */
 
 const filesTree = {};
+const pendingScans = new Set();
 const events = {
 	"add-file": [],
+	"push-file": [],
 	"remove-file": [],
 	"add-folder": [],
 	"remove-folder": [],
@@ -19,7 +25,7 @@ const events = {
 };
 
 export function initFileList() {
-	if (editorManager?.activeFile.loading) {
+	if (editorManager?.activeFile?.loading) {
 		editorManager.activeFile.on("loadend", initFileList);
 		return;
 	}
@@ -34,12 +40,22 @@ export function initFileList() {
  * @param {string} child file url
  */
 export async function append(parent, child) {
+	const nativeRoot = findNativeRoot(parent);
+	if (nativeRoot) {
+		fileIndex
+			.update(nativeRoot, {
+				added: [{ url: child, parentUrl: parent }],
+			})
+			.catch(logNativeIndexError);
+		return;
+	}
+
 	const tree = getTree(Object.values(filesTree), parent);
 	if (!tree || !tree.children) return;
 
 	const childTree = await Tree.create(child);
 	tree.children.push(childTree);
-	getAllFiles(childTree);
+	trackScan(getAllFiles(childTree));
 	emit("add-file", childTree);
 }
 
@@ -48,8 +64,26 @@ export async function append(parent, child) {
  * @param {string} item url
  */
 export function remove(item) {
+	const nativeRoot = findNativeRoot(item);
+	if (nativeRoot) {
+		if (nativeRoot.url === item) {
+			fileIndex.clear([item]).then(
+				() => emit("remove-folder", { url: item, native: true }),
+				(error) => {
+					logNativeIndexError(error);
+					emit("remove-folder", { url: item, native: true });
+				},
+			);
+		} else {
+			fileIndex
+				.update(nativeRoot, { removed: [item] })
+				.catch(logNativeIndexError);
+		}
+		return;
+	}
+
 	if (filesTree[item]) {
-		delete filesTree[item];
+		removeRootTree(item);
 		emit("remove-file", item);
 		return;
 	}
@@ -62,6 +96,15 @@ export function remove(item) {
 	emit("remove-file", tree);
 }
 
+function removeRootTree(url) {
+	const rootUrl = url.endsWith("/") ? url : `${url}/`;
+	Object.keys(filesTree).forEach((key) => {
+		if (key === url || key.startsWith(rootUrl)) {
+			delete filesTree[key];
+		}
+	});
+}
+
 /**
  * Refresh file list
  */
@@ -71,14 +114,24 @@ export async function refresh() {
 	});
 
 	await Promise.all(
-		addedFolder.map(async ({ url, title }) => {
-			const tree = await Tree.createRoot(url, title);
-			filesTree[url] = tree;
-			getAllFiles(tree);
-		}),
+		addedFolder
+			.filter(({ listFiles }) => listFiles)
+			.map(async ({ url, title }) => {
+				if (fileIndex.supports(url)) {
+					await fileIndex.scan({ url, name: title });
+					return;
+				}
+				const tree = await Tree.createRoot(url, title);
+				filesTree[url] = tree;
+				trackScan(getAllFiles(tree));
+			}),
 	);
 
 	emit("refresh", filesTree);
+}
+
+export async function whenReady() {
+	await Promise.allSettled([...pendingScans, fileIndex.whenReady()]);
 }
 
 /**
@@ -88,6 +141,17 @@ export async function refresh() {
  * @returns
  */
 export function rename(oldUrl, newUrl) {
+	const nativeRoot = findNativeRoot(oldUrl) || findNativeRoot(newUrl);
+	if (nativeRoot) {
+		fileIndex
+			.update(nativeRoot, {
+				removed: [oldUrl],
+				added: [{ url: newUrl, parentUrl: Url.dirname(newUrl) }],
+			})
+			.catch(logNativeIndexError);
+		return;
+	}
+
 	const tree = getTree(Object.values(filesTree), oldUrl);
 	if (!tree) return;
 
@@ -103,7 +167,11 @@ export default function files(dir) {
 	const listedDirs = [];
 	let transform = (item) => item;
 	if (typeof dir === "string") {
-		return Object.values(filesTree).find((item) => getFile(dir, item));
+		for (const item of Object.values(filesTree)) {
+			const found = getFile(dir, item);
+			if (found) return found;
+		}
+		return null;
 	} else if (typeof dir === "function") {
 		transform = dir;
 	}
@@ -116,7 +184,7 @@ export default function files(dir) {
 }
 
 /**
- * @typedef {'add-file'|'remove-file'|'add-folder'|'remove-folder'|'refresh'} FileListEvent
+ * @typedef {'add-file'|'push-file'|'remove-file'|'add-folder'|'remove-folder'|'refresh'} FileListEvent
  */
 
 /**
@@ -215,10 +283,15 @@ export async function addRoot({ url, name }) {
 			"content://com.termux.documents/tree/%2Fdata%2Fdata%2Fcom.termux%2Ffiles%2Fhome::/data/data/com.termux/files/home/storage/shared";
 		if (url === TERMUX_STORAGE) return;
 		if (url === TERMUX_SHARED) return;
+		if (fileIndex.supports(url)) {
+			await fileIndex.scan({ url, name });
+			emit("add-folder", { url, name, native: true });
+			return;
+		}
 
 		const tree = await Tree.createRoot(url, name);
 		filesTree[url] = tree;
-		getAllFiles(tree);
+		trackScan(getAllFiles(tree, null, { indexContent: false }));
 		emit("add-folder", tree);
 	} catch (error) {
 		// ignore
@@ -233,7 +306,7 @@ export async function addRoot({ url, name }) {
 function onRemoveFolder({ url }) {
 	const tree = filesTree[url];
 	if (!tree) return;
-	delete filesTree[url];
+	removeRootTree(url);
 	emit("remove-folder", tree);
 }
 
@@ -242,7 +315,7 @@ function onRemoveFolder({ url }) {
  * @param {Tree} parent - An array to store files
  * @param {Tree} [root] - Root path
  */
-async function getAllFiles(parent, root) {
+async function getAllFiles(parent, root, options = {}) {
 	root = root || parent.root;
 	if (!parent.children || !root.isConnected) return;
 
@@ -267,7 +340,7 @@ async function getAllFiles(parent, root) {
 			// why not outside? because parent may be removed
 			if (!root.isConnected) return;
 			parent.children.length = 0;
-			getAllFiles(parent);
+			getAllFiles(parent, root, options);
 		}, 3000);
 	}
 }
@@ -283,6 +356,13 @@ function emit(event, ...args) {
 	list.forEach((fn) => fn(...args));
 }
 
+function trackScan(scan) {
+	pendingScans.add(scan);
+	const cleanup = () => pendingScans.delete(scan);
+	scan.then(cleanup, cleanup);
+	return scan;
+}
+
 /**
  * Create a child tree
  * @param {Tree} parent
@@ -291,13 +371,20 @@ function emit(event, ...args) {
  */
 async function createChildTree(parent, item, root) {
 	if (!root.isConnected) return;
-	const { name, url, isDirectory } = item;
-	const exists = parent.children.findIndex(({ value }) => value === url);
+	const { name, url, isDirectory, mime, type, size, modifiedDate } = item;
+	const exists = parent.children.findIndex((child) => child.url === url);
 	if (exists > -1) {
 		return;
 	}
 
-	const file = await Tree.create(url, name, isDirectory);
+	const file = await Tree.create(
+		url,
+		name,
+		isDirectory,
+		mime || type,
+		size,
+		modifiedDate,
+	);
 	if (!root.isConnected) return;
 
 	const existingTree = getTree(Object.values(filesTree), file.url);
@@ -317,11 +404,12 @@ async function createChildTree(parent, item, root) {
 		);
 		if (ignore) return;
 
-		getAllFiles(file, root);
+		await getAllFiles(file, root);
 		return;
 	}
 
 	emit("push-file", file);
+	emit("add-file", file);
 }
 
 export class Tree {
@@ -345,9 +433,12 @@ export class Tree {
 	 * @param {string} url
 	 * @param {boolean} isDirectory
 	 */
-	constructor(name, url, isDirectory) {
+	constructor(name, url, isDirectory, mime, size, modifiedDate) {
 		this.#name = name;
 		this.#url = url;
+		this.mime = mime || null;
+		this.size = size || 0;
+		this.modifiedDate = normalizeModifiedDate(modifiedDate);
 		this.#children = isDirectory ? this.#childrenArray() : null;
 		this.#parent = null;
 	}
@@ -371,14 +462,17 @@ export class Tree {
 	 * @param {string} [name] file name
 	 * @param {boolean} [isDirectory] if the file is a directory
 	 */
-	static async create(url, name, isDirectory) {
+	static async create(url, name, isDirectory, mime, size, modifiedDate) {
 		if (!name && !isDirectory) {
 			const stat = await fsOperation(url).stat();
 			name = stat.name;
 			isDirectory = stat.isDirectory;
+			mime = stat.mime || stat.type;
+			size = stat.size;
+			modifiedDate = stat.modifiedDate;
 		}
 
-		return new Tree(name, url, isDirectory);
+		return new Tree(name, url, isDirectory, mime, size, modifiedDate);
 	}
 
 	/**
@@ -463,7 +557,7 @@ export class Tree {
 		this.#url = url;
 		this.#name = name;
 		this.#path = Url.join(this.#parent.path, name);
-		getAllFiles(this);
+		trackScan(getAllFiles(this));
 	}
 
 	/**
@@ -485,6 +579,9 @@ export class Tree {
 			url: this.#url,
 			path: this.#path,
 			parent: this.#parent?.url,
+			mime: this.mime,
+			size: this.size,
+			modifiedDate: this.modifiedDate,
 			isDirectory: !!this.#children,
 		};
 	}
@@ -495,10 +592,36 @@ export class Tree {
 	 * @returns {Tree}
 	 */
 	static fromJSON(json) {
-		const { name, url, path, parent, isDirectory } = json;
-		const tree = new Tree(name, url, isDirectory);
+		const { name, url, path, parent, mime, size, modifiedDate, isDirectory } =
+			json;
+		const tree = new Tree(name, url, isDirectory, mime, size, modifiedDate);
 		tree.#parent = getTree(Object.values(filesTree), parent);
 		tree.#path = path;
 		return tree;
 	}
+}
+
+function normalizeModifiedDate(value) {
+	if (!value) return 0;
+	if (typeof value === "number") return value;
+	const time = new Date(value).getTime();
+	return Number.isNaN(time) ? 0 : time;
+}
+
+function findNativeRoot(url) {
+	if (!url) return null;
+	return addedFolder.find(({ url: rootUrl, listFiles }) => {
+		if (!listFiles) return false;
+		if (!fileIndex.supports(rootUrl)) return false;
+		const prefix = rootUrl.endsWith("/") ? rootUrl : `${rootUrl}/`;
+		return (
+			url === rootUrl ||
+			url.startsWith(prefix) ||
+			url.startsWith(`${rootUrl}::`)
+		);
+	});
+}
+
+function logNativeIndexError(error) {
+	console.error("Native workspace index update failed:", error);
 }

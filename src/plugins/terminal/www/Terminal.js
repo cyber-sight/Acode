@@ -27,6 +27,8 @@ const Terminal = {
             readAsset("init-sandbox.sh"),
         ]);
 
+        await this.migrateLegacyHome();
+
         const isFdroid = await Executor.execute("echo $FDROID");
 
         if(isFdroid !== "true"){
@@ -74,12 +76,17 @@ const Terminal = {
                 });
             });
         } else {
-            Executor.start("sh", (type, data) => {
-                //console[type === "stderr" ? "error" : "log"](`[AXS] ${data}`);
-                logger(`${type} ${data}`);
-            }).then(async (uuid) => {
+            try {
+                const uuid = await Executor.start("sh", (type, data) => {
+                    //console[type === "stderr" ? "error" : "log"](`[AXS] ${data}`);
+                    logger(`${type} ${data}`);
+                });
                 await Executor.write(uuid, `source ${filesDir}/init-sandbox.sh ${installing ? "--installing" : ""} ${failsafeArg}; exit`);
-            });
+            } catch (error) {
+                const message = `Failed to start AXS: ${formatError(error)}`;
+                err_logger(message);
+                throw new Error(message);
+            }
         }
     },
 
@@ -530,7 +537,7 @@ const Terminal = {
             echo "ok"
             `;
 
-            const result = await Executor.execute(cmd);
+            const result = await Executor.BackgroundExecutor.execute(cmd);
             if (result === "ok") {
                 resolve(result);
             } else {
@@ -576,13 +583,63 @@ const Terminal = {
 
             echo "ok"
             `;
-            const result = await Executor.execute(cmd);
+            const result = await Executor.BackgroundExecutor.execute(cmd);
             if (result === "ok") {
                 resolve(result);
             } else {
                 reject(result);
             }
         });
+    },
+
+    /**
+     * Migrates the legacy terminal home directories into public/MIGRATE.
+     * Older builds stored user files under alpine/home and alpine/root.
+     * After /home, /root and /public were merged into a single public
+     * directory, any files still left in the old locations are copied
+     * into public/MIGRATE (keeping their source structure) so nothing is
+     * hidden or lost. This is a no-op once the migration has run.
+     * @returns {Promise<void>}
+     */
+    async migrateLegacyHome() {
+        if (this._legacyHomeMigrated) return;
+        try {
+            const cmd = `
+                MIGRATE="$PREFIX/public/MIGRATE"
+
+                # Already migrated
+                [ -e "$MIGRATE/.migrated" ] && exit 0
+
+                COPIED=false
+
+                if [ -d "$PREFIX/alpine/home" ] && [ -n "$(find "$PREFIX/alpine/home" -mindepth 1 -maxdepth 1 2>/dev/null | head -n 1)" ]; then
+                    mkdir -p "$MIGRATE/home"
+                    if cp -a "$PREFIX/alpine/home/." "$MIGRATE/home/"; then
+                        COPIED=true
+                    else
+                        exit 1
+                    fi
+                fi
+
+                if [ -d "$PREFIX/alpine/root" ] && [ -n "$(find "$PREFIX/alpine/root" -mindepth 1 -maxdepth 1 2>/dev/null | head -n 1)" ]; then
+                    mkdir -p "$MIGRATE/root"
+                    if cp -a "$PREFIX/alpine/root/." "$MIGRATE/root/"; then
+                        COPIED=true
+                    else
+                        exit 1
+                    fi
+                fi
+
+                # Mark as migrated so this only runs once
+                if [ "$COPIED" = "true" ]; then
+                    touch "$MIGRATE/.migrated"
+                fi
+            `;
+            await Executor.BackgroundExecutor.execute(cmd);
+            this._legacyHomeMigrated = true;
+        } catch (error) {
+            console.error("Failed to migrate legacy terminal home:", formatError(error));
+        }
     },
 
     formatError

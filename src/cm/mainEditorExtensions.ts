@@ -1,5 +1,5 @@
 import type { Extension } from "@codemirror/state";
-import { EditorView, scrollPastEnd } from "@codemirror/view";
+import { EditorView } from "@codemirror/view";
 
 interface MainEditorExtensionOptions {
 	emmetExtensions?: Extension[];
@@ -8,7 +8,9 @@ interface MainEditorExtensionOptions {
 	themeExtension?: Extension;
 	pointerCursorVisibilityExtension?: Extension;
 	shiftClickSelectionExtension?: Extension;
+	multiCursorSelectionExtension?: Extension;
 	touchSelectionUpdateExtension?: Extension;
+	quickToolsModifierInputExtension?: Extension;
 	searchExtension?: Extension;
 	readOnlyExtension?: Extension;
 	optionExtensions?: Extension[];
@@ -21,7 +23,12 @@ function pushExtension(target: Extension[], extension?: Extension): void {
 
 export const fixedHeightTheme = EditorView.theme({
 	"&": { height: "100%" },
-	".cm-scroller": { height: "100%", overflow: "auto" },
+	".cm-scroller": {
+		height: "100%",
+		overflow: "auto",
+		willChange: "transform",
+		contentVisibility: "auto",
+	},
 });
 
 export function createMainEditorExtensions(
@@ -39,10 +46,11 @@ export function createMainEditorExtensions(
 	pushExtension(extensions, options.commandKeymapExtension);
 	pushExtension(extensions, options.themeExtension);
 	extensions.push(fixedHeightTheme);
-	extensions.push(scrollPastEnd());
 	pushExtension(extensions, options.pointerCursorVisibilityExtension);
 	pushExtension(extensions, options.shiftClickSelectionExtension);
+	pushExtension(extensions, options.multiCursorSelectionExtension);
 	pushExtension(extensions, options.touchSelectionUpdateExtension);
+	pushExtension(extensions, options.quickToolsModifierInputExtension);
 	pushExtension(extensions, options.searchExtension);
 	pushExtension(extensions, options.readOnlyExtension);
 

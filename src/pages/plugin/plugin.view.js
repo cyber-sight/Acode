@@ -80,6 +80,7 @@ export default (props) => {
 	if (votesUp || votesDown) {
 		rating = `${Math.round((votesUp / (votesUp + votesDown)) * 100)}%`;
 	}
+	const showPurchaseWarning = !helpers.shouldAllowExternalPurchase();
 
 	const formatUpdatedDate = (dateString) => {
 		if (!dateString) return null;
@@ -176,7 +177,9 @@ export default (props) => {
 					{Array.isArray(keywords) && keywords.length ? (
 						<div className="keywords">
 							{keywords.map((keyword) => (
-								<span className="keyword">{keyword}</span>
+								<span className="keyword" title={keyword}>
+									{keyword}
+								</span>
 							))}
 						</div>
 					) : null}
@@ -186,14 +189,18 @@ export default (props) => {
 				</div>
 				<div className="action-buttons">
 					<Buttons {...props} />
-					{!helpers.shouldAllowExternalPurchase() && (
-						<small className="info">
-							<span className="icon info" />
-							{strings["iap-plugin-purchase-warning"]}
-						</small>
-					)}
 				</div>
-				<MoreInfo {...props} />
+				{showPurchaseWarning || props.purchased ? (
+					<div className="plugin-action-details">
+						{showPurchaseWarning ? (
+							<small className="info">
+								<span className="icon info" />
+								{strings["iap-plugin-purchase-warning"]}
+							</small>
+						) : null}
+						<MoreInfo {...props} />
+					</div>
+				) : null}
 			</div>
 			<TabView id="plugin-tab" disableSwipe={true}>
 				<div className="options" onclick={handleTabClick}>
@@ -208,11 +215,11 @@ export default (props) => {
 					</span>
 				</div>
 				<div className="tab-content">
-					<div
-						id="overview"
-						className="content-section active md"
-						innerHTML={DOMPurify.sanitize(body, { FORBID_TAGS: ["style"] })}
-					></div>
+					<div id="overview" className="content-section active md">
+						<section
+							innerHTML={DOMPurify.sanitize(body, { FORBID_TAGS: ["style"] })}
+						/>
+					</div>
 					<div id="contributors" className="content-section">
 						{(() => {
 							let contributorsList = contributors?.length

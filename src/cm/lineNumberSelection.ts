@@ -1,5 +1,6 @@
 import { EditorSelection } from "@codemirror/state";
 import type { BlockInfo, EditorView } from "@codemirror/view";
+import { focusEditorIfEditable } from "cm/editorReadOnly";
 
 type LineInfo = Pick<BlockInfo, "from" | "to"> | null | undefined;
 
@@ -13,6 +14,10 @@ type LineNumberClickEvent = Pick<
 	| "preventDefault"
 	| "defaultPrevented"
 >;
+
+interface LineNumberClickOptions {
+	shiftClickSelection?: boolean;
+}
 
 function toDocumentOffset(
 	value: number | null | undefined,
@@ -91,6 +96,7 @@ export function handleLineNumberClick(
 	view: EditorView | null | undefined,
 	line: LineInfo,
 	event: LineNumberClickEvent | null | undefined,
+	options: LineNumberClickOptions = {},
 ): boolean {
 	if (!view || !event || event.defaultPrevented) return false;
 	if ((event.button ?? 0) !== 0) return false;
@@ -100,15 +106,17 @@ export function handleLineNumberClick(
 
 	const range = getLineSelectionRange(view.state, line);
 	if (!range) return false;
+	const extendSelection =
+		event.shiftKey && options.shiftClickSelection !== false;
 
 	event.preventDefault();
 	view.dispatch({
-		selection: event.shiftKey
+		selection: extendSelection
 			? createExtendedLineSelection(view.state, range)
 			: createLineSelection(range),
-		userEvent: event.shiftKey ? "select.extend.pointer" : "select.pointer",
+		userEvent: extendSelection ? "select.extend.pointer" : "select.pointer",
 	});
-	view.focus();
+	focusEditorIfEditable(view);
 	return true;
 }
 
