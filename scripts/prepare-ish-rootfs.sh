@@ -140,7 +140,11 @@ cat > /etc/profile.d/acode.sh <<'PROFILE'
 export HOME=/home/acode
 export USER=acode
 export LOGNAME=acode
-export PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
+export PATH=/home/acode/.bun/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
+
+vite() {
+	command vite --host 0.0.0.0 "\$@"
+}
 PROFILE
 {
   printf '%s\n' '#!/bin/sh' ''

@@ -20,6 +20,7 @@ import toast from "components/toast";
 import confirm from "dialogs/confirm";
 import fonts from "lib/fonts";
 import appSettings from "lib/settings";
+import browser from "plugins/browser";
 import LigaturesAddon from "./ligatures";
 import {
 	DEFAULT_TERMINAL_SETTINGS,
@@ -109,7 +110,27 @@ export default class TerminalComponent {
 				`Do you want to open ${uri} in browser?`,
 			);
 			if (linkOpenConfirm) {
-				system.openInBrowser(uri);
+				let localPreview = false;
+				try {
+					const hostname = new URL(uri).hostname;
+					localPreview =
+						hostname === "localhost" ||
+						hostname === "127.0.0.1" ||
+						hostname === "::1" ||
+						hostname === "0.0.0.0";
+				} catch {
+					// Keep malformed or non-HTTP links on the existing path.
+				}
+
+				if (localPreview) {
+					const previewUrl = uri.replace(
+						/^(https?:\/\/)0\.0\.0\.0(?=[:/]|$)/,
+						"$1127.0.0.1",
+					);
+					browser.open(previewUrl);
+				} else {
+					system.openInBrowser(uri);
+				}
 			}
 		});
 		this.webglAddon = null;

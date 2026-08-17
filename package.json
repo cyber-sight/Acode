@@ -18,7 +18,11 @@
     "format": "biome format --write",
     "check": "biome check --write",
     "typecheck": "tsc --noEmit",
-    "updateAce": "node ./utils/updateAce.js"
+    "updateAce": "node ./utils/updateAce.js",
+    "build:ish": "ISH_GUEST_ARCH=arm64 ./scripts/build-ish.sh",
+    "build:ish:cli": "cd third_party/ish-arm64 && meson setup build-arm64-release -Dguest_arch=arm64 --buildtype=release && ninja -C build-arm64-release",
+    "ish": "./third_party/ish-arm64/build-arm64-release/ish -f ./third_party/ish-arm64/alpine-arm64-fakefs /bin/sh",
+    "ish:rootfs": "ISH_GUEST_ARCH=arm64 ./scripts/prepare-ish-rootfs.sh"
   },
   "keywords": [
     "ecosystem:cordova"
