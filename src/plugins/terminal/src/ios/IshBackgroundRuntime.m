@@ -8,6 +8,7 @@ static NSString *const IshContinuedTaskWildcard = @"com.foxdebug.acodeios.termin
 @interface IshBackgroundRuntime ()
 @property (nonatomic) NSMutableSet<NSString *> *activeSessions;
 @property (nonatomic) UIBackgroundTaskIdentifier backgroundTask;
+@property (nonatomic) BOOL continuedTaskRegistered;
 @property (nonatomic, copy, nullable) NSString *continuedRequestIdentifier;
 @property (nonatomic, strong, nullable) BGContinuedProcessingTask *continuedTask API_AVAILABLE(ios(26.0));
 @property (nonatomic, strong, nullable) NSTimer *progressTimer;
@@ -29,6 +30,7 @@ static NSString *const IshContinuedTaskWildcard = @"com.foxdebug.acodeios.termin
     if (self) {
         _activeSessions = [NSMutableSet set];
         _backgroundTask = UIBackgroundTaskInvalid;
+        _continuedTaskRegistered = NO;
         NSNotificationCenter *notifications = NSNotificationCenter.defaultCenter;
         [notifications addObserver:self
                           selector:@selector(applicationDidEnterBackground:)
@@ -46,6 +48,7 @@ static NSString *const IshContinuedTaskWildcard = @"com.foxdebug.acodeios.termin
                                 launchHandler:^(__kindof BGTask *task) {
                 [[IshBackgroundRuntime shared] beginContinuedTask:(BGContinuedProcessingTask *)task];
             }];
+            self.continuedTaskRegistered = registered;
             if (!registered) NSLog(@"iSH background: continued-processing handler was not registered");
         }
     }
@@ -111,6 +114,10 @@ static NSString *const IshContinuedTaskWildcard = @"com.foxdebug.acodeios.termin
 - (void)submitContinuedTask API_AVAILABLE(ios(26.0)) {
     if (self.continuedRequestIdentifier || self.continuedTask) return;
     if (UIApplication.sharedApplication.applicationState == UIApplicationStateBackground) return;
+    if (!self.continuedTaskRegistered) {
+        NSLog(@"iSH background: continued-processing task is unavailable; using finite background assertion");
+        return;
+    }
 
     NSString *identifier = [NSString stringWithFormat:@"com.foxdebug.acodeios.terminal.%@", NSUUID.UUID.UUIDString];
     BGContinuedProcessingTaskRequest *request = [[BGContinuedProcessingTaskRequest alloc]
@@ -120,11 +127,16 @@ static NSString *const IshContinuedTaskWildcard = @"com.foxdebug.acodeios.termin
     request.strategy = BGContinuedProcessingTaskRequestSubmissionStrategyFail;
     request.requiredResources = BGContinuedProcessingTaskRequestResourcesDefault;
 
-    NSError *error = nil;
-    if ([[BGTaskScheduler sharedScheduler] submitTaskRequest:request error:&error]) {
-        self.continuedRequestIdentifier = identifier;
-    } else {
-        NSLog(@"iSH background: continued-processing request failed: %@", error.localizedDescription);
+    self.continuedRequestIdentifier = identifier;
+    @try {
+        NSError *error = nil;
+        if (![[BGTaskScheduler sharedScheduler] submitTaskRequest:request error:&error]) {
+            self.continuedRequestIdentifier = nil;
+            NSLog(@"iSH background: continued-processing request failed: %@", error.localizedDescription);
+        }
+    } @catch (NSException *exception) {
+        self.continuedRequestIdentifier = nil;
+        NSLog(@"iSH background: continued-processing request raised %@: %@", exception.name, exception.reason);
     }
 }
 

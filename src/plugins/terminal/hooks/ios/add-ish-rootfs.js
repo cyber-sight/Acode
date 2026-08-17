@@ -22,8 +22,12 @@ function copyDir(src, dest) {
 function main() {
   const projectRoot = process.cwd();
   const pluginRoot = path.join(projectRoot, "plugins", "com.foxdebug.acode.rk.exec.terminal");
-  const srcRootfs = path.join(pluginRoot, "src", "ios", "ish-rootfs");
-  if (!fs.existsSync(srcRootfs)) {
+  const rootfsCandidates = [
+    path.join(projectRoot, "src", "plugins", "terminal", "src", "ios", "ish-rootfs"),
+    path.join(pluginRoot, "src", "ios", "ish-rootfs"),
+  ];
+  const srcRootfs = rootfsCandidates.find((candidate) => fs.existsSync(candidate));
+  if (!srcRootfs) {
     console.log("iSH rootfs hook: src/ios/ish-rootfs not found, skipping.");
     return;
   }
