@@ -1,5 +1,6 @@
 #import "IshBridge.h"
 #import "AcodeIshTerminal.h"
+#import "IshBackgroundRuntime.h"
 #import "RootfsManager.h"
 #include <arpa/inet.h>
 #include <netdb.h>
@@ -146,8 +147,7 @@ static void AcodeIshProcessExited(struct task *task, int status) {
             @"HOME=/home/acode",
             @"USER=acode",
             @"LOGNAME=acode",
-            @"PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin",
-            @"PYTHONMALLOC=malloc",
+            @"PATH=/home/acode/.bun/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin",
         ]);
         errorCode = do_execve("/bin/sh", arguments.count, argv.bytes, envp.bytes);
         if (errorCode < 0) {
@@ -161,6 +161,7 @@ static void AcodeIshProcessExited(struct task *task, int status) {
         int pid = current->pid;
         self.sessions[sessionId] = terminal;
         self.sessionIdsByPid[@(pid)] = sessionId;
+        [[IshBackgroundRuntime shared] sessionDidStart:sessionId];
 
         __weak IshBridge *weakSelf = self;
         terminal.outputHandler = ^(NSData *data) {
@@ -234,6 +235,7 @@ static void AcodeIshProcessExited(struct task *task, int status) {
             [self.sessions removeObjectForKey:sessionId];
             NSArray<NSNumber *> *pids = [self.sessionIdsByPid allKeysForObject:sessionId];
             [self.sessionIdsByPid removeObjectsForKeys:pids];
+            [[IshBackgroundRuntime shared] sessionDidEnd:sessionId];
         }
         if (completion) dispatch_async(dispatch_get_main_queue(), ^{ completion(error); });
     });
@@ -251,6 +253,7 @@ static void AcodeIshProcessExited(struct task *task, int status) {
         AcodeIshTerminal *terminal = self.sessions[sessionId];
         terminal.outputHandler = nil;
         [self.sessions removeObjectForKey:sessionId];
+        [[IshBackgroundRuntime shared] sessionDidEnd:sessionId];
 
         int exitCode = (status & 0x7f) == 0 ? ((status >> 8) & 0xff) : 128 + (status & 0x7f);
         dispatch_async(dispatch_get_main_queue(), ^{
@@ -317,8 +320,7 @@ static void AcodeIshProcessExited(struct task *task, int status) {
     NSData *envp = IshStringVector(@[
         @"TERM=xterm-256color",
         @"HOME=/root",
-        @"PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin",
-        @"PYTHONMALLOC=malloc",
+        @"PATH=/home/acode/.bun/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin",
     ]);
     NSString *configuredInit = AcodeIshActiveRootInitPath();
     NSArray<NSString *> *initCandidates = [configuredInit isEqualToString:@"/bin/sh"]

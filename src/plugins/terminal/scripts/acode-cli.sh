@@ -19,6 +19,7 @@ Commands:
   version                         Print the Acode version
   info                            Print environment information
   reload                          Reload Acode
+  vite [arguments...]             Run Vite on all interfaces for LAN preview
 EOF
 }
 
@@ -98,6 +99,15 @@ case "$command_name" in
 		;;
 	version|info|reload)
 		request "$command_name"
+		;;
+	vite)
+		if command -v vite >/dev/null 2>&1; then
+			exec vite --host 0.0.0.0 "$@"
+		fi
+		if command -v bunx >/dev/null 2>&1; then
+			exec bunx vite --host 0.0.0.0 "$@"
+		fi
+		exec bun x vite --host 0.0.0.0 "$@"
 		;;
 	*)
 		echo "acode: unknown command: $command_name" >&2

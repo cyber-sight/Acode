@@ -1,0 +1,11 @@
+2026-07-26T06:57:47.930864Z  INFO codex_cli::login: starting device code login flow
+2026-07-26T06:57:47.936304Z  INFO codex_http_client::custom_ca: using system root certificates because no CA override environment variable was selected codex_ca_certificate_configured=false ssl_cert_file_configured=false
+2026-07-26T06:57:48.252530Z TRACE hyper_util::client::legacy::pool: checkout waiting for idle connection: ("https", auth.openai.com)
+2026-07-26T06:57:48.253335Z DEBUG reqwest::connect: starting new connection: https://auth.openai.com/
+2026-07-26T06:57:48.254247Z TRACE hyper_util::client::legacy::connect::http: Http::connect; scheme=Some("https"), host=Some("auth.openai.com"), port=None
+2026-07-26T06:57:48.939877Z DEBUG hyper_util::client::legacy::connect::http: connecting to 172.64.146.15:443
+2026-07-26T06:57:48.942150Z TRACE mio::poll: registering event source with poller: token=Token(3849451264), interests=READABLE | WRITABLE
+2026-07-26T06:57:49.122249Z DEBUG hyper_util::client::legacy::connect::http: connected to 172.64.146.15:443
+2026-07-26T06:57:49.348761Z TRACE mio::poll: deregistering event source from poller
+2026-07-26T06:57:49.350521Z TRACE hyper_util::client::legacy::pool: checkout dropped for ("https", auth.openai.com)
+2026-07-26T06:57:49.351344Z TRACE reqwest::retry: shouldn't retry!

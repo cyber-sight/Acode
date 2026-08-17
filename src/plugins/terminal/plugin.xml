@@ -99,6 +99,8 @@
         <source-file src="src/ios/BackgroundExecutor.m" />
         <header-file src="src/ios/IshBridge.h" />
         <source-file src="src/ios/IshBridge.m" />
+        <header-file src="src/ios/IshBackgroundRuntime.h" />
+        <source-file src="src/ios/IshBackgroundRuntime.m" />
         <header-file src="src/ios/AcodeIshTerminal.h" />
         <source-file src="src/ios/IshTerminalBridge.m" />
         <header-file src="src/ios/RootfsManager.h" />
@@ -107,6 +109,18 @@
         <source-file src="src/ios/IshWebSocketServer.m" />
         <resource-file src="scripts/acode-cli.sh" target="acode-cli.sh" />
         <framework src="libresolv.tbd" />
+        <framework src="BackgroundTasks.framework" />
+
+        <edit-config file="*-Info.plist" mode="merge" target="BGTaskSchedulerPermittedIdentifiers">
+            <array>
+                <string>com.foxdebug.acodeios.terminal.*</string>
+            </array>
+        </edit-config>
+        <edit-config file="*-Info.plist" mode="merge" target="UIBackgroundModes">
+            <array>
+                <string>processing</string>
+            </array>
+        </edit-config>
 
         <hook type="after_prepare" src="hooks/ios/add-ish-lib.js" />
         <hook type="after_prepare" src="hooks/ios/add-ish-rootfs.js" />
