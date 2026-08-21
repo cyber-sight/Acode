@@ -32,7 +32,11 @@ The active fork branch is `acode-arm64` at `5483be0`. The abandoned experiment i
 
 The JavaScript API remains `start`, `write`, `resize`, `stop`, and `exec`. The executor buffers output or exit events that arrive before Cordova registers the session callback.
 
-Guest CPU pthreads use Apple's utility QoS. Long-running package installs and builds therefore yield scheduler priority to the app UI and other foreground work while continuing to make progress. The iOS guest advertises two CPUs by default to prevent language runtimes from creating a host-sized worker pool; host CLI tests can override this with `ISH_GUEST_CPU_COUNT`.
+Guest CPU pthreads use Apple's utility QoS. The iOS guest advertises a single
+CPU by default: concurrent guest threads trip futex wait/wake races in the
+emulator that hang Bun, opencode and Go runtimes in permanent spins. Single-CPU
+scheduling is stable, and host CLI tests can still override this with
+`ISH_GUEST_CPU_COUNT`.
 
 This does not grant unrestricted background execution. The guest is linked into
 the Acode process, and iOS may suspend, expire, or terminate that process after
