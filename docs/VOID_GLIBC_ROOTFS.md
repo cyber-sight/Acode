@@ -97,13 +97,14 @@ Rules learned the hard way:
 | Binary | Flavor | State under iSH-A64 |
 |---|---|---|
 | bun 1.3.14 / 1.4.0 stable | musl | ✅ full JS, fetch, crypto |
-| OpenCode v1.18.x (`opencode`) | musl | ✅ boots, `--version`, `--help`; network commands OK at 1 CPU |
-| OpenCode v2 beta (`opencode2`) | GNU | ❌ subprocess probe segfaults (Bun 1.4.0-canary) |
-| OpenCode v2 beta (`opencode2`) | musl | ⚠️ boots to JS, dies in module-define recursion |
+| OpenCode v1.18.x (`opencode`) | musl | ✅ version/help/models/ACP-initialize verified |
+| OpenCode v2 2.0-branch (`opencode2`), **built with Bun 1.3.14 toolchain** | musl | ✅ version/help/ACP-initialize verified |
+| OpenCode v2 built with Bun ≥1.4 toolchain | any | ❌ memory corruption in $bunfs boot — MUST pin builder to Bun ≤1.3.14 |
 
-v2 uses a Bun *canary*. Re-test new betas periodically — when 2.0 ships on
-stable Bun it should inherit the working baseline. The builder takes any npm
-version so re-baking is one command.
+**Toolchain pin is the critical constraint**: opencode2 source builds fine,
+but only binaries produced by a Bun ≤1.3.14 `bun build --compile` run under
+this emulator (garbage-pointer TypeErrors/segfaults otherwise). Re-baking is
+one builder command; pass `use-local:` for locally-built binaries.
 
 ## Known emulator gaps hit during this work
 

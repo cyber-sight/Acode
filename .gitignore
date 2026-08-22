@@ -29,3 +29,4 @@ tsconfig.tsbuildinfo
 # SQLite runtime sidecars are never distributable rootfs artifacts.
 src/plugins/terminal/src/ios/ish-rootfs/meta.db-shm
 src/plugins/terminal/src/ios/ish-rootfs/meta.db-wal
+build/
