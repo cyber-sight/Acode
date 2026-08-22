@@ -1,0 +1,2 @@
+#!/bin/sh
+exec /opt/ocv1/bin/opencode "$@"

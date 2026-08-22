@@ -1,0 +1,41 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple Computer//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+	<key>dirs</key>
+	<array>
+		<dict>
+			<key>file</key>
+			<string>/usr</string>
+		</dict>
+		<dict>
+			<key>file</key>
+			<string>/usr/lib</string>
+		</dict>
+	</array>
+	<key>files</key>
+	<array>
+		<dict>
+			<key>file</key>
+			<string>/usr/lib/liblastlog2.so.2.0.0</string>
+			<key>mtime</key>
+			<integer>1730151090</integer>
+			<key>sha256</key>
+			<string>407d66610dbe2ba2e9ba1c0c3382d3ec3ab56ded4f1a17134cbc06e4cc42bfe6</string>
+			<key>size</key>
+			<integer>67504</integer>
+		</dict>
+	</array>
+	<key>links</key>
+	<array>
+		<dict>
+			<key>file</key>
+			<string>/usr/lib/liblastlog2.so.2</string>
+			<key>mtime</key>
+			<integer>1730151090</integer>
+			<key>target</key>
+			<string>/usr/lib/liblastlog2.so.2.0.0</string>
+		</dict>
+	</array>
+</dict>
+</plist>

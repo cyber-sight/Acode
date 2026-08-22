@@ -1,0 +1,223 @@
+.\" Man page generated from reStructuredText.
+.
+.
+.nr rst2man-indent-level 0
+.
+.de1 rstReportMargin
+\\$1 \\n[an-margin]
+level \\n[rst2man-indent-level]
+level margin: \\n[rst2man-indent\\n[rst2man-indent-level]]
+-
+\\n[rst2man-indent0]
+\\n[rst2man-indent1]
+\\n[rst2man-indent2]
+..
+.de1 INDENT
+.\" .rstReportMargin pre:
+. RS \\$1
+. nr rst2man-indent\\n[rst2man-indent-level] \\n[an-margin]
+. nr rst2man-indent-level +1
+.\" .rstReportMargin post:
+..
+.de UNINDENT
+. RE
+.\" indent \\n[an-margin]
+.\" old: \\n[rst2man-indent\\n[rst2man-indent-level]]
+.nr rst2man-indent-level -1
+.\" new: \\n[rst2man-indent\\n[rst2man-indent-level]]
+.in \\n[rst2man-indent\\n[rst2man-indent-level]]u
+..
+.TH "BTRFS" "8" "Oct 01, 2024" "6.11" "BTRFS"
+.SH NAME
+btrfs \- a toolbox to manage btrfs filesystems
+.SH SYNOPSIS
+.sp
+\fBbtrfs\fP [global] <group> [<group>...] <command> [<args>]
+.SH DESCRIPTION
+.sp
+The \fBbtrfs\fP utility is a toolbox for managing btrfs filesystems.  There are
+command groups to work with subvolumes, devices, for whole filesystem or other
+specific actions. See section \fI\%COMMANDS\fP\&.
+.sp
+There are also standalone tools for some tasks like \fI\%btrfs\-convert(8)\fP or
+\fI\%btrfstune(8)\fP that were separate historically and/or haven\(aqt been merged to the
+main utility. See section \fI\%STANDALONE TOOLS\fP
+for more details.
+.sp
+For other topics (mount options, etc) please refer to the separate manual
+page \fI\%btrfs(5)\fP\&.
+.SH COMMAND SYNTAX
+.sp
+Any command name can be shortened so long as the shortened form is unambiguous,
+however, it is recommended to use full command names in scripts.  All command
+groups have their manual page named \fBbtrfs\-<group>\fP\&.
+.sp
+For example: it is possible to run \fBbtrfs sub snaps\fP instead of
+\fBbtrfs subvolume snapshot\fP\&.
+But \fBbtrfs file s\fP is not allowed, because \fBfile s\fP may be interpreted
+both as \fBfilesystem show\fP and as \fBfilesystem sync\fP\&.
+.sp
+If the command name is ambiguous, the list of conflicting options is
+printed.
+.sp
+\fISizes\fP, both upon input and output, can be expressed in either SI or IEC\-I
+units (see \fI\%numfmt(1)\fP)
+with the suffix \fIB\fP appended.
+All numbers will be formatted according to the rules of the \fIC\fP locale
+(ignoring the shell locale, see \fI\%locale(7)\fP).
+.sp
+For an overview of a given command use \fBbtrfs command \-\-help\fP
+or \fBbtrfs [command...] \-\-help \-\-full\fP to print all available options.
+.sp
+There are global options that are passed between \fIbtrfs\fP and the \fIgroup\fP name
+and affect behaviour not specific to the command, e.g. verbosity or the type
+of the output.
+.INDENT 0.0
+.TP
+.BI \-\-format \ <format>
+if supported by the command, print subcommand output in that format (text, json)
+.UNINDENT
+.INDENT 0.0
+.TP
+.B \-v|\-\-verbose
+increase verbosity of the subcommand
+.TP
+.B \-q|\-\-quiet
+print only errors
+.UNINDENT
+.INDENT 0.0
+.TP
+.BI \-\-log \ <level>
+set log level (default, info, verbose, debug, quiet)
+.UNINDENT
+.sp
+The remaining options are relevant only for the main tool:
+.INDENT 0.0
+.TP
+.B  \-\-help
+print condensed help for all subcommands
+.TP
+.B  \-\-version
+print version string
+.UNINDENT
+.SH COMMANDS
+.INDENT 0.0
+.TP
+.B balance
+Balance btrfs filesystem chunks across single or several devices.
+See \fI\%btrfs\-balance(8)\fP for details.
+.TP
+.B check
+Do off\-line check on a btrfs filesystem.
+See \fI\%btrfs\-check(8)\fP for details.
+.TP
+.B device
+Manage devices managed by btrfs, including add/delete/scan and so
+on.  See \fI\%btrfs\-device(8)\fP for details.
+.TP
+.B filesystem
+Manage a btrfs filesystem, including label setting/sync and so on.
+See \fI\%btrfs\-filesystem(8)\fP for details.
+.TP
+.B inspect\-internal
+Debug tools for developers/hackers.
+See \fI\%btrfs\-inspect\-internal(8)\fP for details.
+.TP
+.B property
+Get/set a property from/to a btrfs object.
+See \fI\%btrfs\-property(8)\fP for details.
+.TP
+.B qgroup
+Manage quota group(qgroup) for btrfs filesystem.
+See \fI\%btrfs\-qgroup(8)\fP for details.
+.TP
+.B quota
+Manage quota on btrfs filesystem like enabling/rescan and etc.
+See \fI\%btrfs\-quota(8)\fP and \fI\%btrfs\-qgroup(8)\fP for details.
+.TP
+.B receive
+Receive subvolume data from stdin/file for restore and etc.
+See \fI\%btrfs\-receive(8)\fP for details.
+.TP
+.B replace
+Replace btrfs devices.
+See \fI\%btrfs\-replace(8)\fP for details.
+.TP
+.B rescue
+Try to rescue damaged btrfs filesystem.
+See \fI\%btrfs\-rescue(8)\fP for details.
+.TP
+.B restore
+Try to restore files from a damaged btrfs filesystem.
+See \fI\%btrfs\-restore(8)\fP for details.
+.TP
+.B scrub
+Scrub a btrfs filesystem.
+See \fI\%btrfs\-scrub(8)\fP for details.
+.TP
+.B send
+Send subvolume data to stdout/file for backup and etc.
+See \fI\%btrfs\-send(8)\fP for details.
+.TP
+.B subvolume
+Create/delete/list/manage btrfs subvolume.
+See \fI\%btrfs\-subvolume(8)\fP for details.
+.UNINDENT
+.SH STANDALONE TOOLS
+.sp
+New functionality could be provided using a standalone tool. If the functionality
+proves to be useful, then the standalone tool is declared obsolete and its
+functionality is copied to the main tool. Obsolete tools are removed after a
+long (years) depreciation period.
+.sp
+Tools that are still in active use without an equivalent in \fBbtrfs\fP:
+.INDENT 0.0
+.TP
+.B btrfs\-convert
+in\-place conversion from ext2/3/4 filesystems to btrfs
+.TP
+.B btrfstune
+tweak some filesystem properties on a unmounted filesystem
+.TP
+.B btrfs\-select\-super
+rescue tool to overwrite primary superblock from a spare copy
+.TP
+.B btrfs\-find\-root
+rescue helper to find tree roots in a filesystem
+.UNINDENT
+.sp
+For space\-constrained environments, it\(aqs possible to build a single binary with
+functionality of several standalone tools. This is following the concept of
+busybox where the file name selects the functionality. This works for symlinks
+or hardlinks. The full list can be obtained by \fBbtrfs help \-\-box\fP\&.
+.SH EXIT STATUS
+.sp
+\fBbtrfs\fP returns a zero exit status if it succeeds. Non zero is returned in
+case of failure.
+.SH AVAILABILITY
+.sp
+\fBbtrfs\fP is part of btrfs\-progs.  Please refer to the documentation at
+\fI\%https://btrfs.readthedocs.io\fP\&.
+.SH SEE ALSO
+.sp
+\fI\%btrfs(5)\fP,
+\fI\%btrfs\-balance(8)\fP,
+\fI\%btrfs\-check(8)\fP,
+\fI\%btrfs\-convert(8)\fP,
+\fI\%btrfs\-device(8)\fP,
+\fI\%btrfs\-filesystem(8)\fP,
+\fI\%btrfs\-inspect\-internal(8)\fP,
+\fI\%btrfs\-property(8)\fP,
+\fI\%btrfs\-qgroup(8)\fP,
+\fI\%btrfs\-quota(8)\fP,
+\fI\%btrfs\-receive(8)\fP,
+\fI\%btrfs\-replace(8)\fP,
+\fI\%btrfs\-rescue(8)\fP,
+\fI\%btrfs\-restore(8)\fP,
+\fI\%btrfs\-scrub(8)\fP,
+\fI\%btrfs\-send(8)\fP,
+\fI\%btrfs\-subvolume(8)\fP,
+\fI\%btrfstune(8)\fP,
+\fI\%mkfs.btrfs(8)\fP
+.\" Generated by docutils manpage writer.
+.

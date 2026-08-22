@@ -1,24 +1,34 @@
-export PATH="/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
+# /etc/profile
 
-export PAGER=less
+# System wide environment and startup programs.
+
+appendpath () {
+    case ":$PATH:" in
+        *:"$1":*)
+            ;;
+        *)
+            PATH="${PATH:+$PATH:}$1"
+    esac
+}
+
+# Set our default path (/usr/sbin:/sbin:/bin included for non-Void chroots)
+appendpath '/usr/local/sbin'
+appendpath '/usr/local/bin'
+appendpath '/usr/bin'
+appendpath '/usr/sbin'
+appendpath '/sbin'
+appendpath '/bin'
+unset appendpath
+
+export PATH
+
+# Set default umask
 umask 022
 
-# use nicer PS1 for bash and busybox ash
-if [ -n "$BASH_VERSION" -o "$BB_ASH_VERSION" ]; then
-	PS1='\h:\w\$ '
-# use nicer PS1 for zsh
-elif [ -n "$ZSH_VERSION" ]; then
-	PS1='%m:%~%# '
-# set up fallback default PS1
-else
-	: "${HOSTNAME:=$(hostname)}"
-	PS1='${HOSTNAME%%.*}:$PWD'
-	[ "$(id -u)" -eq 0 ] && PS1="${PS1}# " || PS1="${PS1}\$ "
+# Load profiles from /etc/profile.d
+if [ -d /etc/profile.d/ ]; then
+	for f in /etc/profile.d/*.sh; do
+		[ -r "$f" ] && . "$f"
+	done
+	unset f
 fi
-
-for script in /etc/profile.d/*.sh ; do
-	if [ -r "$script" ] ; then
-		. "$script"
-	fi
-done
-unset script

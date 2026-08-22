@@ -1,0 +1,41 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple Computer//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+	<key>dirs</key>
+	<array>
+		<dict>
+			<key>file</key>
+			<string>/usr</string>
+		</dict>
+		<dict>
+			<key>file</key>
+			<string>/usr/lib</string>
+		</dict>
+	</array>
+	<key>files</key>
+	<array>
+		<dict>
+			<key>file</key>
+			<string>/usr/lib/libreadline.so.8.2</string>
+			<key>mtime</key>
+			<integer>1714135928</integer>
+			<key>sha256</key>
+			<string>e4c696470f0468cc5d773eb785e7047c3c7fca204ade1b887345cbf4f34d3f2d</string>
+			<key>size</key>
+			<integer>416648</integer>
+		</dict>
+	</array>
+	<key>links</key>
+	<array>
+		<dict>
+			<key>file</key>
+			<string>/usr/lib/libreadline.so.8</string>
+			<key>mtime</key>
+			<integer>1714135928</integer>
+			<key>target</key>
+			<string>/usr/lib/libreadline.so.8.2</string>
+		</dict>
+	</array>
+</dict>
+</plist>

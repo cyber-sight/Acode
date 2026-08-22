@@ -1,0 +1,62 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple Computer//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+	<key>dirs</key>
+	<array>
+		<dict>
+			<key>file</key>
+			<string>/usr</string>
+		</dict>
+		<dict>
+			<key>file</key>
+			<string>/usr/lib</string>
+		</dict>
+		<dict>
+			<key>file</key>
+			<string>/usr/share</string>
+		</dict>
+		<dict>
+			<key>file</key>
+			<string>/usr/share/licenses</string>
+		</dict>
+		<dict>
+			<key>file</key>
+			<string>/usr/share/licenses/libgcc</string>
+		</dict>
+	</array>
+	<key>files</key>
+	<array>
+		<dict>
+			<key>file</key>
+			<string>/usr/lib/libgcc_s.so</string>
+			<key>mtime</key>
+			<integer>1737467260</integer>
+			<key>sha256</key>
+			<string>69a56a9993b7729b29b274e65016031c81f2397f176ed5ad44d59bd50425e0bd</string>
+			<key>size</key>
+			<integer>132</integer>
+		</dict>
+		<dict>
+			<key>file</key>
+			<string>/usr/lib/libgcc_s.so.1</string>
+			<key>mtime</key>
+			<integer>1737467260</integer>
+			<key>sha256</key>
+			<string>726956cf5af4037ee928887d7d7d561738369ff0e0b1fbe87d387b966ba371f6</string>
+			<key>size</key>
+			<integer>133544</integer>
+		</dict>
+		<dict>
+			<key>file</key>
+			<string>/usr/share/licenses/libgcc/RUNTIME.LIBRARY.EXCEPTION</string>
+			<key>mtime</key>
+			<integer>1737467260</integer>
+			<key>sha256</key>
+			<string>9d6b43ce4d8de0c878bf16b54d8e7a10d9bd42b75178153e3af6a815bdc90f74</string>
+			<key>size</key>
+			<integer>3324</integer>
+		</dict>
+	</array>
+</dict>
+</plist>

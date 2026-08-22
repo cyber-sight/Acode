@@ -1,2 +1,5 @@
-/dev/cdrom	/media/cdrom	iso9660	noauto,ro 0 0
-/dev/usbdisk	/media/usb	vfat	noauto,ro 0 0
+#
+# See fstab(5).
+#
+# <file system>	<dir>	<type>	<options>		<dump>	<pass>
+tmpfs		/tmp	tmpfs	defaults,nosuid,nodev   0       0

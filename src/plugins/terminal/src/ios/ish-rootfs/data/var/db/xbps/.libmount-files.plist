@@ -1,0 +1,41 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple Computer//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+	<key>dirs</key>
+	<array>
+		<dict>
+			<key>file</key>
+			<string>/usr</string>
+		</dict>
+		<dict>
+			<key>file</key>
+			<string>/usr/lib</string>
+		</dict>
+	</array>
+	<key>files</key>
+	<array>
+		<dict>
+			<key>file</key>
+			<string>/usr/lib/libmount.so.1.1.0</string>
+			<key>mtime</key>
+			<integer>1730151090</integer>
+			<key>sha256</key>
+			<string>045c5f49de176b5788298ff8d2dae71fd77bfc7f7f79c3c8e70432e4a5b61db0</string>
+			<key>size</key>
+			<integer>527008</integer>
+		</dict>
+	</array>
+	<key>links</key>
+	<array>
+		<dict>
+			<key>file</key>
+			<string>/usr/lib/libmount.so.1</string>
+			<key>mtime</key>
+			<integer>1730151090</integer>
+			<key>target</key>
+			<string>/usr/lib/libmount.so.1.1.0</string>
+		</dict>
+	</array>
+</dict>
+</plist>

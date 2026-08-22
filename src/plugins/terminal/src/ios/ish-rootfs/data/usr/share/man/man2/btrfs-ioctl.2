@@ -1,0 +1,1508 @@
+.\" Man page generated from reStructuredText.
+.
+.
+.nr rst2man-indent-level 0
+.
+.de1 rstReportMargin
+\\$1 \\n[an-margin]
+level \\n[rst2man-indent-level]
+level margin: \\n[rst2man-indent\\n[rst2man-indent-level]]
+-
+\\n[rst2man-indent0]
+\\n[rst2man-indent1]
+\\n[rst2man-indent2]
+..
+.de1 INDENT
+.\" .rstReportMargin pre:
+. RS \\$1
+. nr rst2man-indent\\n[rst2man-indent-level] \\n[an-margin]
+. nr rst2man-indent-level +1
+.\" .rstReportMargin post:
+..
+.de UNINDENT
+. RE
+.\" indent \\n[an-margin]
+.\" old: \\n[rst2man-indent\\n[rst2man-indent-level]]
+.nr rst2man-indent-level -1
+.\" new: \\n[rst2man-indent\\n[rst2man-indent-level]]
+.in \\n[rst2man-indent\\n[rst2man-indent-level]]u
+..
+.TH "BTRFS-IOCTL" "2" "Oct 01, 2024" "6.11" "BTRFS"
+.SH NAME
+btrfs-ioctl \- documentation about btrfs ioctls
+.SH NAME
+.sp
+btrfs\-ioctl \- documentation for the ioctl interface to btrfs
+.SH DESCRIPTION
+.sp
+The ioctl() system call is a way how to request custom actions performed on a
+filesystem beyond the standard interfaces (like syscalls).  An ioctl is
+specified by a number and an associated data structure that implement a
+feature, usually not available in other filesystems. The number of ioctls grows
+over time and in some cases get promoted to a VFS\-level ioctl once other
+filesystems adopt the functionality. Backward compatibility is maintained
+and a formerly private ioctl number could become available on the VFS level.
+.SH DATA STRUCTURES AND DEFINITIONS
+.INDENT 0.0
+.INDENT 3.5
+.sp
+.nf
+.ft C
+struct btrfs_ioctl_vol_args {
+        __s64 fd;
+        char name[BTRFS_PATH_NAME_MAX + 1];
+};
+.ft P
+.fi
+.UNINDENT
+.UNINDENT
+.INDENT 0.0
+.INDENT 3.5
+.sp
+.nf
+.ft C
+#define BTRFS_SUBVOL_RDONLY                  (1ULL << 1)
+#define BTRFS_SUBVOL_QGROUP_INHERIT          (1ULL << 2)
+#define BTRFS_DEVICE_SPEC_BY_ID              (1ULL << 3)
+#define BTRFS_SUBVOL_SPEC_BY_ID              (1ULL << 4)
+
+struct btrfs_ioctl_vol_args_v2 {
+        __s64 fd;
+        __u64 transid;
+        __u64 flags;
+        union {
+                struct {
+                        __u64 size;
+                        struct btrfs_qgroup_inherit __user *qgroup_inherit;
+                };
+                __u64 unused[4];
+        };
+        union {
+                char name[BTRFS_SUBVOL_NAME_MAX + 1];
+                __u64 devid;
+                __u64 subvolid;
+        };
+};
+.ft P
+.fi
+.UNINDENT
+.UNINDENT
+.INDENT 0.0
+.INDENT 3.5
+.sp
+.nf
+.ft C
+struct btrfs_ioctl_get_subvol_info_args {
+        /* Id of this subvolume */
+        __u64 treeid;
+
+        /* Name of this subvolume, used to get the real name at mount point */
+        char name[BTRFS_VOL_NAME_MAX + 1];
+
+        /*
+         * Id of the subvolume which contains this subvolume.
+         * Zero for top\-level subvolume or a deleted subvolume.
+         */
+        __u64 parent_id;
+
+        /*
+         * Inode number of the directory which contains this subvolume.
+         * Zero for top\-level subvolume or a deleted subvolume
+         */
+        __u64 dirid;
+
+        /* Latest transaction id of this subvolume */
+        __u64 generation;
+
+        /* Flags of this subvolume */
+        __u64 flags;
+
+        /* UUID of this subvolume */
+        __u8 uuid[BTRFS_UUID_SIZE];
+
+        /*
+         * UUID of the subvolume of which this subvolume is a snapshot.
+         * All zero for a non\-snapshot subvolume.
+         */
+        __u8 parent_uuid[BTRFS_UUID_SIZE];
+
+        /*
+         * UUID of the subvolume from which this subvolume was received.
+         * All zero for non\-received subvolume.
+         */
+        __u8 received_uuid[BTRFS_UUID_SIZE];
+
+        /* Transaction id indicating when change/create/send/receive happened */
+        __u64 ctransid;
+        __u64 otransid;
+        __u64 stransid;
+        __u64 rtransid;
+        /* Time corresponding to c/o/s/rtransid */
+        struct btrfs_ioctl_timespec ctime;
+        struct btrfs_ioctl_timespec otime;
+        struct btrfs_ioctl_timespec stime;
+        struct btrfs_ioctl_timespec rtime;
+
+        /* Must be zero */
+        __u64 reserved[8];
+};
+.ft P
+.fi
+.UNINDENT
+.UNINDENT
+.INDENT 0.0
+.INDENT 3.5
+.sp
+.nf
+.ft C
+#define BTRFS_QGROUP_INHERIT_SET_LIMITS         (1ULL << 0)
+
+struct btrfs_qgroup_inherit {
+        __u64 flags;
+        __u64 num_qgroups;
+        __u64 num_ref_copies;
+        __u64 num_excl_copies;
+        struct btrfs_qgroup_limit lim;
+        __u64 qgroups[];
+};
+.ft P
+.fi
+.UNINDENT
+.UNINDENT
+.INDENT 0.0
+.INDENT 3.5
+.sp
+.nf
+.ft C
+#define BTRFS_QGROUP_LIMIT_MAX_RFER             (1ULL << 0)
+#define BTRFS_QGROUP_LIMIT_MAX_EXCL             (1ULL << 1)
+#define BTRFS_QGROUP_LIMIT_RSV_RFER             (1ULL << 2)
+#define BTRFS_QGROUP_LIMIT_RSV_EXCL             (1ULL << 3)
+#define BTRFS_QGROUP_LIMIT_RFER_CMPR            (1ULL << 4)
+#define BTRFS_QGROUP_LIMIT_EXCL_CMPR            (1ULL << 5)
+
+struct btrfs_qgroup_limit {
+        __u64 flags;
+        __u64 max_rfer;
+        __u64 max_excl;
+        __u64 rsv_rfer;
+        __u64 rsv_excl;
+};
+.ft P
+.fi
+.UNINDENT
+.UNINDENT
+.INDENT 0.0
+.INDENT 3.5
+.sp
+.nf
+.ft C
+/* Request information about checksum type and size */
+#define BTRFS_FS_INFO_FLAG_CSUM_INFO                    (1U << 0)
+/* Request information about filesystem generation */
+#define BTRFS_FS_INFO_FLAG_GENERATION                   (1U << 1)
+/* Request information about filesystem metadata UUID */
+#define BTRFS_FS_INFO_FLAG_METADATA_UUID                (1U << 2)
+
+struct btrfs_ioctl_fs_info_args {
+        __u64 max_id;                           /* out */
+        __u64 num_devices;                      /* out */
+        __u8 fsid[BTRFS_FSID_SIZE];             /* out */
+        __u32 nodesize;                         /* out */
+        __u32 sectorsize;                       /* out */
+        __u32 clone_alignment;                  /* out */
+        /* See BTRFS_FS_INFO_FLAG_* */
+        __u16 csum_type;                        /* out */
+        __u16 csum_size;                        /* out */
+        __u64 flags;                            /* in/out */
+        __u64 generation;                       /* out */
+        __u8 metadata_uuid[BTRFS_FSID_SIZE];    /* out */
+        __u8 reserved[944];                     /* pad to 1k */
+};
+.ft P
+.fi
+.UNINDENT
+.UNINDENT
+.INDENT 0.0
+.INDENT 3.5
+.sp
+.nf
+.ft C
+#define BTRFS_INO_LOOKUP_PATH_MAX               4080
+
+struct btrfs_ioctl_ino_lookup_args {
+        __u64 treeid;
+        __u64 objectid;
+        char name[BTRFS_INO_LOOKUP_PATH_MAX];
+};
+.ft P
+.fi
+.UNINDENT
+.UNINDENT
+.TS
+center;
+|l|l|.
+_
+T{
+Constant name
+T}	T{
+Value
+T}
+_
+T{
+BTRFS_UUID_SIZE
+T}	T{
+16
+T}
+_
+T{
+BTRFS_FSID_SIZE
+T}	T{
+16
+T}
+_
+T{
+BTRFS_SUBVOL_NAME_MAX
+T}	T{
+4039
+T}
+_
+T{
+BTRFS_PATH_NAME_MAX
+T}	T{
+4087
+T}
+_
+T{
+BTRFS_VOL_NAME_MAX
+T}	T{
+255
+T}
+_
+T{
+BTRFS_LABEL_SIZE
+T}	T{
+256
+T}
+_
+T{
+BTRFS_FIRST_FREE_OBJECTID
+T}	T{
+256
+T}
+_
+.TE
+.SH OVERVIEW
+.sp
+The ioctls are defined by a number and associated with a data structure that
+contains further information. All ioctls use file descriptor (fd) as a reference
+point, it could be the filesystem or a directory inside the filesystem.
+.sp
+An ioctl can be used in the following schematic way:
+.INDENT 0.0
+.INDENT 3.5
+.sp
+.nf
+.ft C
+struct btrfs_ioctl_args args;
+
+memset(&args, 0, sizeof(args));
+args.key = value;
+ret = ioctl(fd, BTRFS_IOC_NUMBER, &args);
+.ft P
+.fi
+.UNINDENT
+.UNINDENT
+.sp
+The \(aqfd\(aq is the entry point to the filesystem and for most ioctls it does not
+matter which file or directory is that. Where it matters it\(aqs explicitly
+mentioned. The \(aqargs\(aq is the associated data structure for the request. It\(aqs
+strongly recommended to initialize the whole structure to zeros as this is
+future\-proof when the ioctl gets further extensions. Not doing that could lead
+to mismatch of old userspace and new kernel versions, or vice versa.
+The \(aqBTRFS_IOC_NUMBER\(aq is says which operation should be done on the given
+arguments. Some ioctls take a specific data structure, some of them share a
+common one, no argument structure ioctls exist too.
+.sp
+The library \fIlibbtrfsutil\fP wraps a few ioctls for convenience. Using raw ioctls
+is not discouraged but may be cumbersome though it does not need additional
+library dependency. Backward compatibility is guaranteed and incompatible
+changes usually lead to a new version of the ioctl. Enhancements of existing
+ioctls can happen and depend on additional flags to be set. Zeroed unused
+space is commonly understood as a mechanism to communicate the compatibility
+between kernel and userspace and thus \fIzeroing is really important\fP\&. In exceptional
+cases this is not enough and further flags need to be passed to distinguish
+between zero as implicit unused initialization and a valid zero value. Such
+cases are documented.
+.sp
+File descriptors of regular files are obtained by \fBint fd = open()\fP, directories
+opened as \fBDIR *dir = opendir()\fP can be converted to the corresponding
+file descriptor by \fBfd = dirfd(dir)\fP\&.
+.SH LIST OF IOCTLS
+.TS
+center;
+|l|l|l|.
+_
+T{
+Name
+T}	T{
+Description
+T}	T{
+Data
+T}
+_
+T{
+\fI\%BTRFS_IOC_SNAP_CREATE\fP
+T}	T{
+(obsolete) create a snapshot of a subvolume
+T}	T{
+\fI\%struct btrfs_ioctl_vol_args\fP
+T}
+_
+T{
+BTRFS_IOC_DEFRAG
+T}	T{
+T}	T{
+T}
+_
+T{
+BTRFS_IOC_RESIZE
+T}	T{
+T}	T{
+T}
+_
+T{
+\fI\%BTRFS_IOC_SCAN_DEV\fP
+T}	T{
+scan and register a given device path with filesystem module
+T}	T{
+\fI\%struct btrfs_ioctl_vol_args\fP
+T}
+_
+T{
+\fI\%BTRFS_IOC_SYNC\fP
+T}	T{
+Sync the filesystem, possibly process queued up work
+T}	T{
+NULL
+T}
+_
+T{
+BTRFS_IOC_CLONE
+T}	T{
+T}	T{
+T}
+_
+T{
+\fI\%BTRFS_IOC_ADD_DEV\fP
+T}	T{
+add a device to the filesystem by path
+T}	T{
+\fI\%struct btrfs_ioctl_vol_args\fP
+T}
+_
+T{
+\fI\%BTRFS_IOC_RM_DEV\fP
+T}	T{
+delete a device from the filesystem by path
+T}	T{
+\fI\%struct btrfs_ioctl_vol_args\fP
+T}
+_
+T{
+BTRFS_IOC_BALANCE
+T}	T{
+T}	T{
+T}
+_
+T{
+BTRFS_IOC_CLONE_RANGE
+T}	T{
+T}	T{
+T}
+_
+T{
+\fI\%BTRFS_IOC_SUBVOL_CREATE\fP
+T}	T{
+(obsolete) create a subvolume
+T}	T{
+\fI\%struct btrfs_ioctl_vol_args\fP
+T}
+_
+T{
+\fI\%BTRFS_IOC_SNAP_DESTROY\fP
+T}	T{
+(obsolete) delete a subvolume
+T}	T{
+\fI\%struct btrfs_ioctl_vol_args\fP
+T}
+_
+T{
+BTRFS_IOC_DEFRAG_RANGE
+T}	T{
+T}	T{
+T}
+_
+T{
+BTRFS_IOC_TREE_SEARCH
+T}	T{
+T}	T{
+T}
+_
+T{
+BTRFS_IOC_TREE_SEARCH_V2
+T}	T{
+T}	T{
+T}
+_
+T{
+\fI\%BTRFS_IOC_INO_LOOKUP\fP
+T}	T{
+resolve inode number to path, or lookup containing subvolume id
+T}	T{
+\fI\%struct btrfs_ioctl_ino_lookup_args\fP
+T}
+_
+T{
+\fI\%BTRFS_IOC_DEFAULT_SUBVOL\fP
+T}	T{
+set the default subvolume id
+T}	T{
+uint64_t
+T}
+_
+T{
+BTRFS_IOC_SPACE_INFO
+T}	T{
+T}	T{
+T}
+_
+T{
+BTRFS_IOC_START_SYNC
+T}	T{
+T}	T{
+T}
+_
+T{
+BTRFS_IOC_WAIT_SYNC
+T}	T{
+T}	T{
+T}
+_
+T{
+\fI\%BTRFS_IOC_SNAP_CREATE_V2\fP
+T}	T{
+create a snapshot of a subvolume
+T}	T{
+\fI\%struct btrfs_ioctl_vol_args_v2\fP
+T}
+_
+T{
+\fI\%BTRFS_IOC_SUBVOL_CREATE_V2\fP
+T}	T{
+create a subvolume
+T}	T{
+\fI\%struct btrfs_ioctl_vol_args_v2\fP
+T}
+_
+T{
+\fI\%BTRFS_IOC_SUBVOL_GETFLAGS\fP
+T}	T{
+get flags of a subvolume
+T}	T{
+uint64_t
+T}
+_
+T{
+\fI\%BTRFS_IOC_SUBVOL_SETFLAGS\fP
+T}	T{
+set flags of a subvolume
+T}	T{
+uint64_t
+T}
+_
+T{
+BTRFS_IOC_SCRUB
+T}	T{
+T}	T{
+T}
+_
+T{
+BTRFS_IOC_SCRUB_CANCEL
+T}	T{
+T}	T{
+T}
+_
+T{
+BTRFS_IOC_SCRUB_PROGRESS
+T}	T{
+T}	T{
+T}
+_
+T{
+BTRFS_IOC_DEV_INFO
+T}	T{
+T}	T{
+T}
+_
+T{
+\fI\%BTRFS_IOC_FS_INFO\fP
+T}	T{
+get information about filesystem (device count, fsid, ...)
+T}	T{
+\fI\%struct btrfs_ioctl_fs_info_args\fP
+T}
+_
+T{
+BTRFS_IOC_BALANCE_V2
+T}	T{
+T}	T{
+T}
+_
+T{
+BTRFS_IOC_BALANCE_CTL
+T}	T{
+T}	T{
+T}
+_
+T{
+BTRFS_IOC_BALANCE_PROGRESS
+T}	T{
+T}	T{
+T}
+_
+T{
+BTRFS_IOC_INO_PATHS
+T}	T{
+T}	T{
+T}
+_
+T{
+BTRFS_IOC_LOGICAL_INO
+T}	T{
+T}	T{
+T}
+_
+T{
+BTRFS_IOC_SET_RECEIVED_SUBVOL
+T}	T{
+T}	T{
+T}
+_
+T{
+BTRFS_IOC_SEND
+T}	T{
+T}	T{
+T}
+_
+T{
+BTRFS_IOC_DEVICES_READY
+T}	T{
+T}	T{
+T}
+_
+T{
+BTRFS_IOC_QUOTA_CTL
+T}	T{
+T}	T{
+T}
+_
+T{
+BTRFS_IOC_QGROUP_ASSIGN
+T}	T{
+T}	T{
+T}
+_
+T{
+BTRFS_IOC_QGROUP_CREATE
+T}	T{
+T}	T{
+T}
+_
+T{
+BTRFS_IOC_QGROUP_LIMIT
+T}	T{
+T}	T{
+T}
+_
+T{
+BTRFS_IOC_QUOTA_RESCAN
+T}	T{
+T}	T{
+T}
+_
+T{
+BTRFS_IOC_QUOTA_RESCAN_STATUS
+T}	T{
+T}	T{
+T}
+_
+T{
+BTRFS_IOC_QUOTA_RESCAN_WAIT
+T}	T{
+T}	T{
+T}
+_
+T{
+\fI\%BTRFS_IOC_GET_FSLABEL\fP
+T}	T{
+read filesystem label
+T}	T{
+char buffer[\fI\%BTRFS_LABEL_SIZE\fP]
+T}
+_
+T{
+\fI\%BTRFS_IOC_SET_FSLABEL\fP
+T}	T{
+set the filesystem label
+T}	T{
+char buffer[\fI\%BTRFS_LABEL_SIZE\fP]
+T}
+_
+T{
+BTRFS_IOC_GET_DEV_STATS
+T}	T{
+T}	T{
+T}
+_
+T{
+BTRFS_IOC_DEV_REPLACE
+T}	T{
+T}	T{
+T}
+_
+T{
+BTRFS_IOC_FILE_EXTENT_SAME
+T}	T{
+T}	T{
+T}
+_
+T{
+BTRFS_IOC_GET_FEATURES
+T}	T{
+T}	T{
+T}
+_
+T{
+BTRFS_IOC_SET_FEATURES
+T}	T{
+T}	T{
+T}
+_
+T{
+BTRFS_IOC_GET_SUPPORTED_FEATURES
+T}	T{
+T}	T{
+T}
+_
+T{
+BTRFS_IOC_RM_DEV_V2
+T}	T{
+T}	T{
+T}
+_
+T{
+BTRFS_IOC_LOGICAL_INO_V2
+T}	T{
+T}	T{
+T}
+_
+T{
+\fI\%BTRFS_IOC_GET_SUBVOL_INFO\fP
+T}	T{
+get information about a subvolume
+T}	T{
+\fI\%struct btrfs_ioctl_get_subvol_info_args\fP
+T}
+_
+T{
+BTRFS_IOC_GET_SUBVOL_ROOTREF
+T}	T{
+T}	T{
+T}
+_
+T{
+BTRFS_IOC_INO_LOOKUP_USER
+T}	T{
+T}	T{
+T}
+_
+T{
+\fI\%BTRFS_IOC_SNAP_DESTROY_V2\fP
+T}	T{
+destroy a (snapshot or regular) subvolume
+T}	T{
+\fI\%struct btrfs_ioctl_vol_args_v2\fP
+T}
+_
+T{
+BTRFS_IOC_ENCODED_READ
+T}	T{
+T}	T{
+T}
+_
+T{
+BTRFS_IOC_ENCODED_WRITE
+T}	T{
+T}	T{
+T}
+_
+.TE
+.SH DETAILED DESCRIPTION
+.SS BTRFS_IOC_SNAP_CREATE
+.sp
+\fBNOTE:\fP
+.INDENT 0.0
+.INDENT 3.5
+obsoleted by \fI\%BTRFS_IOC_SNAP_CREATE_V2\fP
+.UNINDENT
+.UNINDENT
+.sp
+\fI(since: 3.0, obsoleted: 4.0)\fP Create a snapshot of a subvolume.
+.TS
+center;
+|l|l|.
+_
+T{
+Field
+T}	T{
+Description
+T}
+_
+T{
+ioctl fd
+T}	T{
+file descriptor of the parent directory of the new subvolume
+T}
+_
+T{
+ioctl args
+T}	T{
+\fI\%struct btrfs_ioctl_vol_args\fP
+T}
+_
+T{
+args.fd
+T}	T{
+file descriptor of any directory inside the subvolume to snapshot,
+must be on the same filesystem
+T}
+_
+T{
+args.name
+T}	T{
+name of the subvolume, although the buffer can be almost 4KiB, the file
+size is limited by Linux VFS to 255 characters and must not contain a slash
+(\(aq/\(aq)
+T}
+_
+.TE
+.SS BTRFS_IOC_SCAN_DEV
+.sp
+Scan and register a given device in the filesystem module, which can be later
+used for automatic device and filesystem association at mount time. This
+operates on the control device, not files from a mounted filesystem.
+Can be safely called repeatedly with same device path.
+.TS
+center;
+|l|l|.
+_
+T{
+Field
+T}	T{
+Description
+T}
+_
+T{
+ioctl fd
+T}	T{
+file descriptor of the control device \fB/dev/btrfs\-control\fP
+T}
+_
+T{
+ioctl args
+T}	T{
+\fI\%struct btrfs_ioctl_vol_args\fP
+T}
+_
+T{
+args.fd
+T}	T{
+ignored
+T}
+_
+T{
+args.name
+T}	T{
+full path of the device
+T}
+_
+.TE
+.SS BTRFS_IOC_SYNC
+.sp
+Sync the filesystem data as would \fBsync()\fP syscall do, additionally
+wake up the internal transaction thread that may trigger actions like
+subvolume cleaning or queued defragmentation.
+.TS
+center;
+|l|l|.
+_
+T{
+Field
+T}	T{
+Description
+T}
+_
+T{
+ioctl fd
+T}	T{
+file descriptor of any file or directory in the filesystem
+T}
+_
+T{
+ioctl args
+T}	T{
+NULL
+T}
+_
+.TE
+.SS BTRFS_IOC_ADD_DEV
+.sp
+Add a given block device to the filesystem. Unlike the command \fBbtrfs device add\fP
+there\(aqs are no safety checks (like existence of another filesystem on the
+device), device preparataion (like TRIM or zone reset), so use it with care.
+.sp
+This is a filesystem\-exclusive operation and it will fail if there\(aqs another
+one already running, with one exception, when there\(aqs a paused balance.
+.sp
+Required permissions: CAP_SYS_ADMIN
+.TS
+center;
+|l|l|.
+_
+T{
+Field
+T}	T{
+Description
+T}
+_
+T{
+ioctl fd
+T}	T{
+file descriptor of any file or directory in the filesystem
+T}
+_
+T{
+ioctl args
+T}	T{
+\fI\%struct btrfs_ioctl_vol_args\fP
+T}
+_
+T{
+args.fd
+T}	T{
+ignored
+T}
+_
+T{
+args.name
+T}	T{
+full path of the block device to be added
+T}
+_
+.TE
+.SS BTRFS_IOC_RM_DEV
+.sp
+Remove a device from the filesystem specified by it\(aqs path, or cancel
+a running device deletion by special path \fBcancel\fP\&.
+.sp
+This is a filesystem\-exclusive operation and it will fail if there\(aqs another
+one already running.
+.sp
+Required permissions: CAP_SYS_ADMIN
+.TS
+center;
+|l|l|.
+_
+T{
+Field
+T}	T{
+Description
+T}
+_
+T{
+ioctl fd
+T}	T{
+file descriptor of any file or directory in the filesystem
+T}
+_
+T{
+ioctl args
+T}	T{
+\fI\%struct btrfs_ioctl_vol_args\fP
+T}
+_
+T{
+args.fd
+T}	T{
+ignored
+T}
+_
+T{
+args.name
+T}	T{
+full path of the block device to be deleted or string \fI\(dqcancel\(dq\fP
+T}
+_
+.TE
+.SS BTRFS_IOC_SUBVOL_CREATE
+.sp
+\fBNOTE:\fP
+.INDENT 0.0
+.INDENT 3.5
+obsoleted by \fI\%BTRFS_IOC_SUBVOL_CREATE_V2\fP
+.UNINDENT
+.UNINDENT
+.sp
+\fI(since: 3.0, obsoleted: 4.0)\fP Create a subvolume.
+.TS
+center;
+|l|l|.
+_
+T{
+Field
+T}	T{
+Description
+T}
+_
+T{
+ioctl fd
+T}	T{
+file descriptor of the parent directory of the new subvolume
+T}
+_
+T{
+ioctl args
+T}	T{
+\fI\%struct btrfs_ioctl_vol_args\fP
+T}
+_
+T{
+args.fd
+T}	T{
+ignored
+T}
+_
+T{
+args.name
+T}	T{
+name of the subvolume, although the buffer can be almost 4KiB, the file
+size is limited by Linux VFS to 255 characters and must not contain a slash
+(\(aq/\(aq)
+T}
+_
+.TE
+.SS BTRFS_IOC_SNAP_DESTROY
+.sp
+\fBNOTE:\fP
+.INDENT 0.0
+.INDENT 3.5
+obsoleted by \fI\%BTRFS_IOC_SNAP_DESTROY_V2\fP
+.UNINDENT
+.UNINDENT
+.sp
+\fI(since: 2.6.33, obsoleted: 5.7)\fP Delete a subvolume.
+.TS
+center;
+|l|l|.
+_
+T{
+Field
+T}	T{
+Description
+T}
+_
+T{
+ioctl fd
+T}	T{
+file descriptor of the parent directory of the new subvolume
+T}
+_
+T{
+ioctl args
+T}	T{
+\fI\%struct btrfs_ioctl_vol_args\fP
+T}
+_
+T{
+args.fd
+T}	T{
+ignored
+T}
+_
+T{
+args.name
+T}	T{
+name of the subvolume, although the buffer can be almost 4KiB, the file
+size is limited by Linux VFS to 255 characters and must not contain a slash
+(\(aq/\(aq)
+T}
+_
+.TE
+.SS BTRFS_IOC_INO_LOOKUP
+.sp
+Resolve inode number to a path (requires CAP_SYS_ADMIN), or read a containing
+subvolume id of the given file (unrestricted, special case).  The size of the
+path name buffer is shorter than \fIPATH_MAX\fP (4096), it\(aqs possible that the path
+is trimmed due to that. Also implemented by
+\fI\%btrfs inspect\-internal rootid\fP\&.
+.sp
+The general case needs CAP_SYS_ADMIN and can resolve any file to its path.
+The special case for reading the containing subvolume is not restricted:
+.INDENT 0.0
+.INDENT 3.5
+.sp
+.nf
+.ft C
+struct btrfs_ioctl_ino_lookup_args args;
+
+fd = open(\(dqfile\(dq, ...);
+args.treeid = 0;
+args.objectid = BTRFS_FIRST_FREE_OBJECTID;
+ioctl(fd, BTRFS_IOC_INO_LOOKUP, &args);
+/* args.treeid now contains the subvolume id */
+.ft P
+.fi
+.UNINDENT
+.UNINDENT
+.TS
+center;
+|l|l|.
+_
+T{
+Field
+T}	T{
+Description
+T}
+_
+T{
+ioctl fd
+T}	T{
+file descriptor of the file or directory to lookup the subvolumeid
+T}
+_
+T{
+ioctl args
+T}	T{
+\fI\%struct btrfs_ioctl_ino_lookup_args\fP
+T}
+_
+T{
+args.treeid
+T}	T{
+subvolume id against which the path should be resolved (needs
+CAP_SYS_ADMIN), or 0 so the subvolume containing \fIfd\fP will be used
+T}
+_
+T{
+args.objectid
+T}	T{
+inode number to lookup, \fIINODE_REF_KEY\fP with that key.objectid, or
+\fI\%BTRFS_FIRST_FREE_OBJECTID\fP as special case to
+read only the tree id and clear the \fIargs.name\fP buffer
+T}
+_
+T{
+args.name
+T}	T{
+path relative to the toplevel subvolume, or empty string
+T}
+_
+.TE
+.SS BTRFS_IOC_DEFAULT_SUBVOL
+.sp
+Set the given subvolume id as the default one when mounting the filesystem
+without \fIsubvol=path\fP or \fIsubvolid=id\fP options.
+.TS
+center;
+|l|l|.
+_
+T{
+Field
+T}	T{
+Description
+T}
+_
+T{
+ioctl fd
+T}	T{
+file descriptor of the directory inside which to create the new snapshot
+T}
+_
+T{
+ioctl args
+T}	T{
+numeric value of subvolume to become default (uint64_t)
+T}
+_
+.TE
+.SS BTRFS_IOC_SNAP_CREATE_V2
+.sp
+Create a snapshot of a subvolume.
+.TS
+center;
+|l|l|.
+_
+T{
+Field
+T}	T{
+Description
+T}
+_
+T{
+ioctl fd
+T}	T{
+file descriptor of the directory inside which to create the new snapshot
+T}
+_
+T{
+ioctl args
+T}	T{
+\fI\%struct btrfs_ioctl_vol_args_v2\fP
+T}
+_
+T{
+args.fd
+T}	T{
+file descriptor of any directory inside the subvolume to snapshot,
+must be on the filesystem
+T}
+_
+T{
+args.transid
+T}	T{
+ignored
+T}
+_
+T{
+args.flags
+T}	T{
+any subset of \fIBTRFS_SUBVOL_RDONLY\fP to make the new snapshot read\-only,
+or \fIBTRFS_SUBVOL_QGROUP_INHERIT\fP to apply the \fIqgroup_inherit\fP field
+T}
+_
+T{
+args.name
+T}	T{
+the name, under the ioctl fd, for the new subvolume
+T}
+_
+.TE
+.SS BTRFS_IOC_SUBVOL_CREATE_V2
+.sp
+\fI(since: 3.6)\fP Create a subvolume, qgroup inheritance and limits can be specified.
+.TS
+center;
+|l|l|.
+_
+T{
+Field
+T}	T{
+Description
+T}
+_
+T{
+ioctl fd
+T}	T{
+file descriptor of the parent directory of the new subvolume
+T}
+_
+T{
+ioctl args
+T}	T{
+\fI\%struct btrfs_ioctl_vol_args_v2\fP
+T}
+_
+T{
+args.fd
+T}	T{
+ignored
+T}
+_
+T{
+args.transid
+T}	T{
+ignored
+T}
+_
+T{
+args.flags
+T}	T{
+flags to set on the subvolume, \fBBTRFS_SUBVOL_RDONLY\fP for readonly,
+\fBBTRFS_SUBVOL_QGROUP_INHERIT\fP if the qgroup related fields should be
+processed
+T}
+_
+T{
+args.size
+T}	T{
+number of entries in \fBargs.qgroup_inherit\fP
+T}
+_
+T{
+args.qgroup_inherit
+T}	T{
+inherit the given qgroups
+(\fI\%struct btrfs_qgroup_inherit\fP) and
+limits (\fI\%struct btrfs_qgroup_limit\fP)
+T}
+_
+T{
+name
+T}	T{
+name of the subvolume, although the buffer can be almost 4KiB, the file
+size is limited by Linux VFS to 255 characters and must not contain a
+slash (\(aq/\(aq)
+T}
+_
+.TE
+.SS BTRFS_IOC_SUBVOL_GETFLAGS
+.sp
+Read the flags of a subvolume. The returned flags are either 0 or
+\fIBTRFS_SUBVOL_RDONLY\fP\&.
+.TS
+center;
+|l|l|.
+_
+T{
+Field
+T}	T{
+Description
+T}
+_
+T{
+ioctl fd
+T}	T{
+file descriptor of the subvolume to examine
+T}
+_
+T{
+ioctl args
+T}	T{
+uint64_t
+T}
+_
+.TE
+.SS BTRFS_IOC_SUBVOL_SETFLAGS
+.sp
+Change the flags of a subvolume.
+.TS
+center;
+|l|l|.
+_
+T{
+Field
+T}	T{
+Description
+T}
+_
+T{
+ioctl fd
+T}	T{
+file descriptor of the subvolume to modify
+T}
+_
+T{
+ioctl args
+T}	T{
+uint64_t, either 0 or \fIBTRFS_SUBVOL_RDONLY\fP
+T}
+_
+.TE
+.SS BTRFS_IOC_GET_FSLABEL
+.sp
+Read the label of the filesystem into a given buffer. Alternatively it
+can be read from \fB/sys/fs/btrfs/FSID/label\fP though it requires to
+know the FSID of the filesystem.
+.TS
+center;
+|l|l|.
+_
+T{
+Field
+T}	T{
+Description
+T}
+_
+T{
+ioctl fd
+T}	T{
+file descriptor of any file/directory in the filesystem
+T}
+_
+T{
+ioctl args
+T}	T{
+char buffer[\fI\%BTRFS_LABEL_SIZE\fP]
+T}
+_
+.TE
+.SS BTRFS_IOC_SET_FSLABEL
+.sp
+Set the label of filesystem from given buffer. The maximum length also accounts
+for terminating NUL character. Alternatively it can be also set by writing to
+\fB/sys/fs/btrfs/FSID/label\fP though it requires to know the FSID of the
+filesystem (and an explicit commit before the change is permanent).
+.sp
+Required permissions: CAP_SYS_ADMIN
+.TS
+center;
+|l|l|.
+_
+T{
+Field
+T}	T{
+Description
+T}
+_
+T{
+ioctl fd
+T}	T{
+file descriptor of any file/directory in the filesystem
+T}
+_
+T{
+ioctl args
+T}	T{
+char buffer[\fI\%BTRFS_LABEL_SIZE\fP]
+T}
+_
+.TE
+.SS BTRFS_IOC_FS_INFO
+.sp
+Read internal information about the filesystem. The data can be exchanged
+both ways and part of the structure could be optionally filled. The reserved
+bytes can be used to get new kind of information in the future, always
+depending on the flags set.
+.TS
+center;
+|l|l|.
+_
+T{
+Field
+T}	T{
+Description
+T}
+_
+T{
+ioctl fd
+T}	T{
+file descriptor of any file/directory in the filesystem
+T}
+_
+T{
+ioctl args
+T}	T{
+\fI\%struct btrfs_ioctl_fs_info_args\fP
+T}
+_
+.TE
+.SS BTRFS_IOC_GET_SUBVOL_INFO
+.sp
+Get information about a subvolume.
+.TS
+center;
+|l|l|.
+_
+T{
+Field
+T}	T{
+Description
+T}
+_
+T{
+ioctl fd
+T}	T{
+file descriptor of the subvolume to examine
+T}
+_
+T{
+ioctl args
+T}	T{
+\fI\%struct btrfs_ioctl_get_subvol_info_args\fP
+T}
+_
+.TE
+.SS BTRFS_IOC_SNAP_DESTROY_V2
+.sp
+Destroy a subvolume, which may or may not be a snapshot.
+.TS
+center;
+|l|l|.
+_
+T{
+Field
+T}	T{
+Description
+T}
+_
+T{
+ioctl fd
+T}	T{
+if \fIflags\fP does not include \fIBTRFS_SUBVOL_SPEC_BY_ID\fP, or if executing
+in a non\-root user namespace, file descriptor of the parent directory
+containing the subvolume to delete; otherwise, file descriptor of any
+directory on the same filesystem as the subvolume to delete, but not
+within the same subvolume
+T}
+_
+T{
+ioctl args
+T}	T{
+\fI\%struct btrfs_ioctl_vol_args_v2\fP
+T}
+_
+T{
+args.fd
+T}	T{
+ignored
+T}
+_
+T{
+args.transid
+T}	T{
+ignored
+T}
+_
+T{
+args.flags
+T}	T{
+0 if the \fIname\fP field identifies the subvolume by name in the specified
+directory, or \fIBTRFS_SUBVOL_SPEC_BY_ID\fP if the \fIsubvolid\fP field
+specifies the ID of the subvolume
+T}
+_
+T{
+args.name
+T}	T{
+only if \fIflags\fP does not contain \fIBTRFS_SUBVOL_SPEC_BY_ID\fP, the name
+(within the directory identified by \fIfd\fP) of the subvolume to delete
+T}
+_
+T{
+args.subvolid
+T}	T{
+only if \fIflags\fP contains \fIBTRFS_SUBVOL_SPEC_BY_ID\fP, the subvolume ID of
+the subvolume to delete
+T}
+_
+.TE
+.SH AVAILABILITY
+.sp
+\fBbtrfs\fP is part of btrfs\-progs.  Please refer to the documentation at
+\fI\%https://btrfs.readthedocs.io\fP\&.
+.SH SEE ALSO
+.sp
+\fI\%ioctl(2)\fP
+.\" Generated by docutils manpage writer.
+.

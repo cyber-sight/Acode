@@ -1,0 +1,59 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple Computer//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+	<key>dirs</key>
+	<array>
+		<dict>
+			<key>file</key>
+			<string>/usr</string>
+		</dict>
+		<dict>
+			<key>file</key>
+			<string>/usr/lib</string>
+		</dict>
+	</array>
+	<key>files</key>
+	<array>
+		<dict>
+			<key>file</key>
+			<string>/usr/lib/libcap-ng.so.0.0.0</string>
+			<key>mtime</key>
+			<integer>1734280770</integer>
+			<key>sha256</key>
+			<string>97467bf46bee657372ec930d98df3374120fae520bd119578620260c6ec952d3</string>
+			<key>size</key>
+			<integer>67488</integer>
+		</dict>
+		<dict>
+			<key>file</key>
+			<string>/usr/lib/libdrop_ambient.so.0.0.0</string>
+			<key>mtime</key>
+			<integer>1734280770</integer>
+			<key>sha256</key>
+			<string>4f44cf86ba29f7430a3e328601216992580d6b61ae1be734a245f2a4f61c9a26</string>
+			<key>size</key>
+			<integer>67352</integer>
+		</dict>
+	</array>
+	<key>links</key>
+	<array>
+		<dict>
+			<key>file</key>
+			<string>/usr/lib/libcap-ng.so.0</string>
+			<key>mtime</key>
+			<integer>1734280770</integer>
+			<key>target</key>
+			<string>/usr/lib/libcap-ng.so.0.0.0</string>
+		</dict>
+		<dict>
+			<key>file</key>
+			<string>/usr/lib/libdrop_ambient.so.0</string>
+			<key>mtime</key>
+			<integer>1734280770</integer>
+			<key>target</key>
+			<string>/usr/lib/libdrop_ambient.so.0.0.0</string>
+		</dict>
+	</array>
+</dict>
+</plist>

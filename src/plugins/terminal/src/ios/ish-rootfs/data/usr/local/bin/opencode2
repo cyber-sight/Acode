@@ -1,0 +1,2 @@
+#!/bin/sh
+exec /opt/oc/package/bin/opencode2 "$@"

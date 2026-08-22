@@ -1,0 +1,63 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple Computer//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+	<key>dirs</key>
+	<array>
+		<dict>
+			<key>file</key>
+			<string>/usr</string>
+		</dict>
+		<dict>
+			<key>file</key>
+			<string>/usr/lib</string>
+		</dict>
+		<dict>
+			<key>file</key>
+			<string>/usr/share</string>
+		</dict>
+		<dict>
+			<key>file</key>
+			<string>/usr/share/licenses</string>
+		</dict>
+		<dict>
+			<key>file</key>
+			<string>/usr/share/licenses/libsasl</string>
+		</dict>
+	</array>
+	<key>files</key>
+	<array>
+		<dict>
+			<key>file</key>
+			<string>/usr/lib/libsasl2.so.3.0.0</string>
+			<key>mtime</key>
+			<integer>1694977053</integer>
+			<key>sha256</key>
+			<string>bbafe478e4c83a2f125a9a82d3ea3423a1f0b8fa373574e571e5ae0bed6d9cde</string>
+			<key>size</key>
+			<integer>133848</integer>
+		</dict>
+		<dict>
+			<key>file</key>
+			<string>/usr/share/licenses/libsasl/COPYING</string>
+			<key>mtime</key>
+			<integer>1694977053</integer>
+			<key>sha256</key>
+			<string>9d6e5d1632140a6c135b251260953650d17d87cd1124f87aaf72192aa4580d4b</string>
+			<key>size</key>
+			<integer>1861</integer>
+		</dict>
+	</array>
+	<key>links</key>
+	<array>
+		<dict>
+			<key>file</key>
+			<string>/usr/lib/libsasl2.so.3</string>
+			<key>mtime</key>
+			<integer>1694977053</integer>
+			<key>target</key>
+			<string>/usr/lib/libsasl2.so.3.0.0</string>
+		</dict>
+	</array>
+</dict>
+</plist>

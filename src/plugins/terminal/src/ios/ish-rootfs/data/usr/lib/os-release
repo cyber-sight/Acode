@@ -1,6 +1,9 @@
-NAME="Alpine Linux"
-ID=alpine
-VERSION_ID=3.21.0
-PRETTY_NAME="Alpine Linux v3.21"
-HOME_URL="https://alpinelinux.org/"
-BUG_REPORT_URL="https://gitlab.alpinelinux.org/alpine/aports/-/issues"
+NAME="Void"
+ID="void"
+PRETTY_NAME="Void Linux"
+HOME_URL="https://voidlinux.org/"
+DOCUMENTATION_URL="https://docs.voidlinux.org/"
+LOGO="void-logo"
+ANSI_COLOR="0;38;2;71;128;97"
+
+DISTRIB_ID="void"

@@ -57,13 +57,37 @@ print(f"dropped {dropped} entries")
 EOF
 fi
 
+echo "== fetching opencode v1 (stable) =="
+V1_VERSION="${OC1_VERSION:-latest}"
+if [[ ! -f oc-v1.tgz ]]; then
+  if [[ "$V1_VERSION" == latest ]]; then
+    curl -fL --max-time 900 -o oc-v1.tgz \
+      "https://github.com/anomalyco/opencode/releases/latest/download/opencode-linux-arm64-musl.tar.gz"
+  else
+    curl -fL --max-time 900 -o oc-v1.tgz \
+      "https://github.com/anomalyco/opencode/releases/download/v${V1_VERSION}/opencode-linux-arm64-musl.tar.gz"
+  fi
+fi
+
 echo "== fetching opencode2 GNU artifact ($VER) =="
-[[ -f "oc-gnu-$VER.tgz" ]] || curl -fL --max-time 900 -o "oc-gnu-$VER.tgz" \
-  "https://registry.npmjs.org/@opencode-ai/cli-linux-arm64/-/cli-linux-arm64-$VER.tgz"
-EXPECTED=$(curl -fsSL "https://registry.npmjs.org/@opencode-ai/cli-linux-arm64/$VER" |
-           python3 -c 'import json,sys; print(json.load(sys.stdin)["dist"]["integrity"])')
-ACTUAL="sha512-$(shasum -a 512 "oc-gnu-$VER.tgz" | awk '{print $1}' | xxd -r -p | base64)"
-[[ "$ACTUAL" == "$EXPECTED" ]] || { echo "opencode2 integrity mismatch"; exit 1; }
+# VER may be an npm version ("0.0.0-beta-17823") or "use-local:/path" for a
+# locally-built binary (e.g. the 2.0 branch compiled with the Bun 1.3.14
+# toolchain — required: Bun 1.4.x output crashes under iSH-A64).
+OC2_TGZ_MODE=npm
+if [[ "$VER" == use-local:* ]]; then
+  OC2_LOCAL_BIN="${VER#use-local:}"
+  [[ -x "$OC2_LOCAL_BIN" ]] || { echo "local binary not executable: $OC2_LOCAL_BIN"; exit 1; }
+  OC2_TGZ_MODE=local
+else
+  [[ -f "oc-gnu-$VER.tgz" ]] || curl -fL --max-time 900 -o "oc-gnu-$VER.tgz" \
+    "https://registry.npmjs.org/@opencode-ai/cli-linux-arm64/-/cli-linux-arm64-$VER.tgz"
+  EXPECTED=$(curl -fsSL "https://registry.npmjs.org/@opencode-ai/cli-linux-arm64/$VER" |
+             python3 -c 'import json,sys; print(json.load(sys.stdin)["dist"]["integrity"])')
+  ACTUAL="sha512-$(shasum -a 512 "oc-gnu-$VER.tgz" | awk '{print $1}' | xxd -r -p | base64)"
+  [[ "$ACTUAL" == "$EXPECTED" ]] || { echo "opencode2 integrity mismatch"; exit 1; }
+fi
+TAG=$VER
+[[ "$OC2_TGZ_MODE" == "local" ]] && TAG="local"
 
 if [[ ! -f busybox.bin ]]; then
   echo "== fetching static busybox (Alpine busybox-static) =="
@@ -157,13 +181,12 @@ EOF
 done
 
 echo "== baking image =="
-python3 - "$VER" <<'EOF'
-import sys, io, tarfile
-ver = sys.argv[1]
+python3 - "$TAG" "${OC2_TGZ_MODE:-npm}" "${OC2_LOCAL_BIN:-}" "$VER" <<'EOF'
+import sys, io, os, tarfile
+tag, oc2_mode, oc2_local, npmver = sys.argv[1], sys.argv[2], (sys.argv[3] if len(sys.argv) > 3 else ""), sys.argv[4]
 
 base = tarfile.open("void-glibc-base.tar.gz", "r:gz")
-src  = tarfile.open("oc-gnu-%s.tgz" % ver, "r:gz")
-out  = tarfile.open("void-glibc-oc2-%s.tar.gz" % ver, "w:gz")
+out  = tarfile.open("void-glibc-oc2-%s.tar.gz" % tag, "w:gz")
 
 def cp(m, fin):
     m.pax_headers = {}
@@ -175,9 +198,32 @@ def cp(m, fin):
 for m in base:
     cp(m, base)
 
-for m in src:                       # opencode2 payload -> /opt/oc/package/**
-    m.name = "./opt/oc/" + m.name.lstrip("./")
-    cp(m, src)
+# opencode v1 (stable release) -> /opt/ocv1/bin/opencode
+v1 = tarfile.open("oc-v1.tgz", "r:gz")
+done_v1 = False
+for m in v1:
+    if not done_v1 and m.isreg() and m.name.split("/")[-1] == "opencode":
+        m.name = "./opt/ocv1/bin/opencode"
+        m.mode = 0o755
+        cp(m, v1)
+        done_v1 = True
+v1.close()
+assert done_v1, "opencode v1 binary not found in oc-v1.tgz"
+
+# opencode2 -> /opt/oc/package/bin/opencode2 (+ wrapper pkg payload when npm)
+if oc2_mode == "local":
+    def add(name, data, mode):
+        ti = tarfile.TarInfo(name)
+        ti.size = len(data)
+        ti.mode = mode
+        out.addfile(ti, io.BytesIO(data))
+    add("./opt/oc/package/bin/opencode2", open(oc2_local, "rb").read(), 0o755)
+else:
+    src = tarfile.open("oc-gnu-%s.tgz" % npmver, "r:gz")
+    for m in src:
+        m.name = "./opt/oc/" + m.name.lstrip("./")
+        cp(m, src)
+    src.close()
 
 def add(name, data, mode):
     ti = tarfile.TarInfo(name)
@@ -185,13 +231,12 @@ def add(name, data, mode):
     ti.mode = mode
     out.addfile(ti, io.BytesIO(data))
 
-# NOTE: JSC_useJIT=false and OPENSSL_armcap=0 are injected by the iSH kernel
-# itself on every execve (third_party/ish-arm64 kernel/exec.c inject_envs), so
-# no wrapper is required. The wrapper below only adds convenience.
+add("./usr/local/bin/opencode",
+    b'#!/bin/sh\nexec /opt/ocv1/bin/opencode "$@"\n', 0o755)
 add("./usr/local/bin/opencode2",
     b'#!/bin/sh\nexec /opt/oc/package/bin/opencode2 "$@"\n', 0o755)
-add("./etc/profile.d/opencode2.sh",
-    b'export PATH="/opt/oc/package/bin:$PATH"\n', 0o644)
+add("./etc/profile.d/opencode.sh",
+    b'export PATH="/opt/ocv1/bin:/opt/oc/package/bin:$PATH"\n', 0o644)
 add("./etc/resolv.conf", b"nameserver 1.1.1.1\nnameserver 8.8.8.8\n", 0o644)
 
 bb = open("busybox.bin", "rb").read()
@@ -226,13 +271,13 @@ for a in APPLETS:
     add("./usr/local/bin/" + a,
         b'#!/bin/sh\nexec /usr/local/bin/busybox ' + a.encode() + b' "$@"\n', 0o755)
 
-out.close(); src.close(); base.close()
-print("packed void-glibc-oc2-%s.tar.gz" % ver)
+out.close(); base.close()
+print("packed void-glibc-oc2-%s.tar.gz" % tag)
 EOF
 
 echo "== converting to FakeFS =="
 rm -rf void-rootfs
-"$FAKEFSIFY" "void-glibc-oc2-$VER.tar.gz" void-rootfs
+"$FAKEFSIFY" "void-glibc-oc2-$TAG.tar.gz" void-rootfs
 
 echo "== smoke test =="
 perl -e 'alarm 90; exec @ARGV' -- env ISH_GUEST_CPU_COUNT=2 "$ISH_BIN" -f "$PWD/void-rootfs" /bin/sh -c '
@@ -240,6 +285,8 @@ set -e
 test -x /bin/sh
 test -x /opt/oc/package/bin/opencode2
 test -x /usr/local/bin/opencode2
+test -x /usr/local/bin/opencode
+test -x /opt/ocv1/bin/opencode
 /usr/local/bin/busybox echo busybox-ok
 uname -m
 /bin/sh -c "env" | grep -E "^JSC_useJIT=|^OPENSSL_armcap="

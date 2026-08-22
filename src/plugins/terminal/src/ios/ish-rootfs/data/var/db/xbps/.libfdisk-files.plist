@@ -1,0 +1,41 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple Computer//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+	<key>dirs</key>
+	<array>
+		<dict>
+			<key>file</key>
+			<string>/usr</string>
+		</dict>
+		<dict>
+			<key>file</key>
+			<string>/usr/lib</string>
+		</dict>
+	</array>
+	<key>files</key>
+	<array>
+		<dict>
+			<key>file</key>
+			<string>/usr/lib/libfdisk.so.1.1.0</string>
+			<key>mtime</key>
+			<integer>1730151090</integer>
+			<key>sha256</key>
+			<string>41a728ba820e541b0f06f1f9bb0b350a9dc7d251121e3244d24316bca78ffb64</string>
+			<key>size</key>
+			<integer>526440</integer>
+		</dict>
+	</array>
+	<key>links</key>
+	<array>
+		<dict>
+			<key>file</key>
+			<string>/usr/lib/libfdisk.so.1</string>
+			<key>mtime</key>
+			<integer>1730151090</integer>
+			<key>target</key>
+			<string>/usr/lib/libfdisk.so.1.1.0</string>
+		</dict>
+	</array>
+</dict>
+</plist>
