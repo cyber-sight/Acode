@@ -102,7 +102,12 @@ document.addEventListener("backbutton", backButtonHandler);
 document.addEventListener("menubutton", menuButtonHandler);
 
 async function onDeviceReady() {
-	await initEncodings(); // important to load encodings before anything else
+	try {
+		await initEncodings(); // load encodings before anything else
+	} catch (error) {
+		// Non-fatal: getEncoding() degrades to a UTF-8 fallback map.
+		window.log("error", error);
+	}
 
 	const isFreePackage = /(free)$/.test(BuildInfo.packageName);
 	const oldResolveURL = window.resolveLocalFileSystemURL;

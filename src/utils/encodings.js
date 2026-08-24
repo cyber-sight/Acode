@@ -37,7 +37,12 @@ export function getEncoding(charset) {
 		return encodings[found];
 	}
 
-	return encodings["UTF-8"];
+	// Never return undefined: unknown/empty map must degrade to UTF-8.
+	return encodings["utf-8"] || encodings["UTF-8"] || {
+		label: "UTF-8",
+		aliases: ["utf8"],
+		name: "UTF-8",
+	};
 }
 
 function detectBOM(bytes) {
@@ -163,7 +168,7 @@ export function getEncodingName(charset) {
 
 	if (charset === "auto") charset = "UTF-8";
 
-	return getEncoding(charset).name;
+	return getEncoding(charset)?.name || "UTF-8";
 }
 
 /**
