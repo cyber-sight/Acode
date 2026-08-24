@@ -88,6 +88,18 @@
         <hook type="after_prepare" src="hooks/post-process.js" />
     </platform>
     <platform name="ios">
+        <config-file target="*-Info.plist" parent="CFBundleURLTypes">
+            <array>
+                <dict>
+                    <key>CFBundleURLName</key>
+                    <string>com.foxdebug.acodeios</string>
+                    <key>CFBundleURLSchemes</key>
+                    <array>
+                        <string>acode</string>
+                    </array>
+                </dict>
+            </array>
+        </config-file>
         <preference name="deployment-target" value="15.0" />
         <preference name="Hostname" value="localhost" />
         <preference name="iosScheme" value="ionic" />

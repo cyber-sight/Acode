@@ -474,6 +474,10 @@ const Terminal = {
      */
     backup() {
         return new Promise(async (resolve, reject) => {
+            if (isIOS) {
+                reject("Not supported on iOS");
+                return;
+            }
             if (!await this.isInstalled()) {
                 reject("Alpine is not installed.");
                 return;
@@ -516,6 +520,10 @@ const Terminal = {
      */
     restore() {
         return new Promise(async (resolve, reject) => {
+            if (isIOS) {
+                reject("Not supported on iOS");
+                return;
+            }
             if (await this.isAxsRunning()) {
                 await this.stopAxs();
             }
@@ -564,6 +572,10 @@ const Terminal = {
      */
     uninstall() {
         return new Promise(async (resolve, reject) => {
+            if (isIOS) {
+                reject("Not supported on iOS");
+                return;
+            }
             if (await this.isAxsRunning()) {
                 await this.stopAxs();
             }
@@ -602,6 +614,7 @@ const Terminal = {
      * @returns {Promise<void>}
      */
     async migrateLegacyHome() {
+        if (isIOS) return;
         if (this._legacyHomeMigrated) return;
         try {
             const cmd = `

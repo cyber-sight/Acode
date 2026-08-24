@@ -510,6 +510,21 @@ static void rootfs_progress_callback(void *cookie, double progress, const char *
         [self sendError:[NSError errorWithDomain:@"RootfsManager" code:6 userInfo:@{NSLocalizedDescriptionKey: @"Root filesystem not found."}] command:command];
         return;
     }
+    if ([rootId isEqualToString:self.activeRootId]) {
+        // Activating the already-active root is a no-op; never invalidate a
+        // working selection just because the user re-picked it in the UI.
+        NSDictionary *result = @{@"restartRequired": @NO, @"alreadyActive": @YES};
+        [self.commandDelegate sendPluginResult:[CDVPluginResult resultWithStatus:CDVCommandStatus_OK messageAsDictionary:result] callbackId:command.callbackId];
+        return;
+    }
+    NSError *error = nil;
+    NSString *rootPath = RootPathForId(rootId);
+    NSLog(@"[rootfs] activate: validating %@", rootPath);
+    if (![self validateRootAtPath:rootPath error:&error]) {
+        NSLog(@"[rootfs]   VALIDATION FAILED: %@", error.localizedDescription);
+        [self sendError:error command:command];
+        return;
+    }
     [NSUserDefaults.standardUserDefaults setObject:rootId forKey:AcodeIshActiveRootKey];
     [self.commandDelegate sendPluginResult:[CDVPluginResult resultWithStatus:CDVCommandStatus_OK messageAsDictionary:@{@"restartRequired": @YES}] callbackId:command.callbackId];
 }

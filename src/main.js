@@ -629,6 +629,17 @@ async function loadApp() {
 	}
 	system.setIntentHandler(intentHandler, intentHandler.onError);
 	system.getCordovaIntent(intentHandler, intentHandler.onError);
+	if (window.cordova.platformId === "ios") {
+		// cordova-plugin-customurlscheme calls window.handleOpenURL(url)
+		// for acode:// opens. Route into the shared intent pipeline.
+		window.handleOpenURL = (url) => {
+			try {
+				intentHandler({ action: "android.intent.action.VIEW", data: url });
+			} catch (error) {
+				window.log("error", error);
+			}
+		};
+	}
 	settings.on("update:openFileListPos", () => {
 		setMainMenu();
 		setFileMenu();

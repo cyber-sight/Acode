@@ -4,18 +4,27 @@
 #include "fs/devices.h"
 #include "fs/tty.h"
 #include "kernel/errno.h"
+#include "kernel/signal.h"
 
 @interface AcodeIshTerminal () {
     struct tty *_tty;
+    /** Bytes produced while no outputHandler was attached. Capped; oldest
+     * bytes are dropped. Guarded by pendingOutputLock. */
+    NSMutableData *_pendingOutput;
+    NSLock *_pendingOutputLock;
 }
 @property (nonatomic, readwrite) NSUUID *uuid;
 @end
+
+static const NSUInteger AcodeIshMaxPendingOutput = 256 * 1024;
 
 @implementation AcodeIshTerminal
 
 static int acode_tty_init(struct tty *tty) {
     AcodeIshTerminal *terminal = [[AcodeIshTerminal alloc] init];
     terminal->_tty = tty;
+    terminal->_pendingOutput = [NSMutableData data];
+    terminal->_pendingOutputLock = [NSLock new];
     tty->data = (void *)CFBridgingRetain(terminal);
     return 0;
 }
@@ -24,8 +33,19 @@ static int acode_tty_write(struct tty *tty, const void *buffer, size_t length, b
     (void)blocking;
     AcodeIshTerminal *terminal = (__bridge AcodeIshTerminal *)tty->data;
     AcodeIshTerminalOutputHandler handler = terminal.outputHandler;
-    if (handler && length > 0) {
+    if (length == 0) return 0;
+    if (handler) {
         handler([NSData dataWithBytes:buffer length:length]);
+    } else {
+        // No consumer yet (guest booted faster than the WebSocket attach).
+        // Buffer so a shell banner or first prompt is not silently dropped.
+        [terminal->_pendingOutputLock lock];
+        [terminal->_pendingOutput appendBytes:buffer length:length];
+        NSUInteger overflow = terminal->_pendingOutput.length - AcodeIshMaxPendingOutput;
+        if (overflow > 0) {
+            [terminal->_pendingOutput replaceBytesInRange:NSMakeRange(0, overflow) withBytes:NULL length:0];
+        }
+        [terminal->_pendingOutputLock unlock];
     }
     return (int)length;
 }
@@ -61,8 +81,22 @@ void AcodeIshInstallConsoleDriver(void) {
     self = [super init];
     if (self) {
         _uuid = [NSUUID UUID];
+        _pendingOutput = [NSMutableData data];
+        _pendingOutputLock = [NSLock new];
     }
     return self;
+}
+
+- (void)setOutputHandler:(AcodeIshTerminalOutputHandler)outputHandler {
+    // Attach the new consumer before draining so bytes produced during the
+    // drain are streamed directly instead of re-entering the buffer.
+    _outputHandler = outputHandler;
+    if (!outputHandler) return;
+    [_pendingOutputLock lock];
+    NSMutableData *drain = _pendingOutput;
+    _pendingOutput = [NSMutableData data];
+    [_pendingOutputLock unlock];
+    if (drain.length > 0) outputHandler(drain);
 }
 
 + (instancetype)createPseudoTerminal:(struct tty **)tty {
@@ -84,6 +118,29 @@ void AcodeIshInstallConsoleDriver(void) {
     lock(&tty->lock);
     tty_set_winsize(tty, (struct winsize_){.col = columns, .row = rows});
     unlock(&tty->lock);
+}
+
+- (void)terminateGuest {
+    // tty_hangup only wakes readers/pollers; it never signals guest processes
+    // (fs/tty.c), so an explicit stop must raise SIGHUP itself or the shell
+    // leaks as an invisible running task.
+    struct tty *tty = _tty;
+    pid_t_ fgGroup = 0;
+    if (tty) {
+        lock(&tty->lock);
+        fgGroup = tty->fg_group;
+        unlock(&tty->lock);
+    }
+    // fg_group is copied out first because send_group_signal takes pids_lock;
+    // calling it under tty->lock would invert the kernel's lock ordering
+    // (signal delivery paths take pids_lock and may touch ttys afterwards).
+    if (fgGroup != 0)
+        send_group_signal(fgGroup, SIGHUP_, SIGINFO_NIL);
+    // Fallback for sessions whose controlling-tty setup failed but whose
+    // leader is still alive. The session task is its own session leader
+    // (task_setsid in construct_task), so the pid doubles as the pgid.
+    if (_sessionLeaderPid > 1 && (pid_t_)_sessionLeaderPid != fgGroup)
+        send_group_signal((dword_t)_sessionLeaderPid, SIGHUP_, SIGINFO_NIL);
 }
 
 - (void)destroy {

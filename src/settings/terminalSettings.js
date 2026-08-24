@@ -35,8 +35,12 @@ export default function terminalSettings() {
 
 	const terminalValues = values.terminalSettings;
 
-	Executor.setProotDebug(terminalValues.prootDebug);
-	Executor.BackgroundExecutor.setProotDebug(terminalValues.prootDebug);
+	const isIOS = typeof cordova !== "undefined" && cordova.platformId === "ios";
+
+	if (!isIOS) {
+		Executor.setProotDebug(terminalValues.prootDebug);
+		Executor.BackgroundExecutor.setProotDebug(terminalValues.prootDebug);
+	}
 
 	const items = [
 		{
@@ -248,6 +252,7 @@ export default function terminalSettings() {
 			info: strings["info-backup"],
 			category: categories.maintenance,
 			chevron: true,
+			hidden: isIOS,
 		},
 		{
 			key: "restore",
@@ -255,6 +260,7 @@ export default function terminalSettings() {
 			info: strings["info-restore"],
 			category: categories.maintenance,
 			chevron: true,
+			hidden: isIOS,
 		},
 		{
 			key: "rootfs",
@@ -269,6 +275,7 @@ export default function terminalSettings() {
 			info: strings["info-uninstall"],
 			category: categories.maintenance,
 			chevron: true,
+			hidden: isIOS,
 		},
 	];
 
@@ -352,8 +359,10 @@ export default function terminalSettings() {
 						[key]: value,
 					},
 				});
-				Executor.setProotDebug(value);
-				Executor.BackgroundExecutor.setProotDebug(value);
+				if (!isIOS) {
+					Executor.setProotDebug(value);
+					Executor.BackgroundExecutor.setProotDebug(value);
+				}
 				break;
 
 			default:

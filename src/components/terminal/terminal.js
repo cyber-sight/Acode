@@ -85,6 +85,9 @@ export default class TerminalComponent {
 		this.reconnectTimer = null;
 		this.reconnectAttempt = 0;
 		this.isTerminating = false;
+		this.sessionExited = false;
+		this.intentionalClose = false;
+		this.lastRequestedSize = null;
 		this.nativeInputDisposable = null;
 		this.pid = null;
 		this.isConnected = false;
@@ -703,7 +706,7 @@ export default class TerminalComponent {
 
 		this.boundNativeSelectionMenuHandler = (event) => {
 			if (event.target?.closest?.(".terminal-context-menu")) return;
-			if (IS_IOS && event.isTrusted === false) return;
+			if (isIOSTerminal && event.isTrusted === false) return;
 			event.preventDefault();
 			event.stopPropagation();
 		};
@@ -728,6 +731,7 @@ export default class TerminalComponent {
 
 		try {
 			this.isTerminating = false;
+			this.sessionExited = false;
 			// Check if terminal is installed before starting AXS
 			if (!(await Terminal.isInstalled())) {
 				throw new Error(
@@ -741,7 +745,17 @@ export default class TerminalComponent {
 					Executor.spawnStream(
 						["sh"],
 						(ws, sessionId) => {
-							this.pid = sessionId || `ios-ws-${Date.now()}`;
+							if (!sessionId) {
+								// A fake pid would silently break reconnect forever.
+								try {
+									ws.close();
+								} catch {}
+								reject(
+									new Error("Terminal session did not return a session id"),
+								);
+								return;
+							}
+							this.pid = sessionId;
 							this.attachIOSWebSocket(ws);
 							this.terminal.unicode.activeVersion = "11";
 
@@ -754,6 +768,10 @@ export default class TerminalComponent {
 						(err) => {
 							console.error("Failed to spawn iOS terminal:", err);
 							reject(err);
+						},
+						{
+							cols: this.terminal.cols,
+							rows: this.terminal.rows,
 						},
 					);
 				});
@@ -834,24 +852,77 @@ export default class TerminalComponent {
 		this.websocket = websocket;
 		this.isConnected = true;
 		this.reconnectAttempt = 0;
+		this.sessionExited = false;
 		this.attachAddon?.dispose();
 		this.attachAddon = new AttachAddon(websocket);
 		this.terminal.loadAddon(this.attachAddon);
 
+		// Re-send the last requested PTY size: the guest TTY keeps its old
+		// winsize across a transport interruption.
+		const requestedSize = this.lastRequestedSize;
+		if (requestedSize && websocket.readyState === WebSocket.OPEN) {
+			try {
+				websocket.send(JSON.stringify({ type: "resize", ...requestedSize }));
+			} catch {}
+		}
+
+		// AttachAddon registers its message listener with addEventListener, so
+		// this separate listener coexists with it: text frames are control
+		// messages and binary frames are raw PTY output.
+		websocket.addEventListener("message", (event) => {
+			if (typeof event.data !== "string") return;
+			let message;
+			try {
+				message = JSON.parse(event.data);
+			} catch (error) {
+				// Not a JSON control message.
+				return;
+			}
+			if (message?.type !== "exit") return;
+			this.handleIOSProcessExit(message.status);
+		});
+
 		websocket.onclose = () => {
 			if (this.websocket !== websocket || this.isTerminating) return;
 			this.isConnected = false;
+			if (this.sessionExited || this.intentionalClose) {
+				this.onDisconnect?.({
+					intentional: this.intentionalClose === true,
+					processExited: this.sessionExited === true,
+				});
+				return;
+			}
 			this.scheduleIOSWebSocketReconnect();
 		};
 	}
 
+	handleIOSProcessExit(status) {
+		if (this.sessionExited) return;
+		// The native exit frame is authoritative: the guest process is gone,
+		// so no reconnect may be scheduled for this session anymore.
+		this.sessionExited = true;
+		this.isConnected = false;
+		if (this.reconnectTimer) {
+			clearTimeout(this.reconnectTimer);
+			this.reconnectTimer = null;
+		}
+		this.onProcessExit?.(status);
+	}
+
 	scheduleIOSWebSocketReconnect() {
-		if (this.isTerminating || !this.pid || this.reconnectTimer) return;
+		if (
+			this.isTerminating ||
+			this.sessionExited ||
+			!this.pid ||
+			this.reconnectTimer
+		) {
+			return;
+		}
 		const delay = Math.min(500 * 2 ** this.reconnectAttempt, 10000);
 		this.reconnectAttempt += 1;
 		this.reconnectTimer = setTimeout(() => {
 			this.reconnectTimer = null;
-			if (this.isTerminating || !this.pid) return;
+			if (this.isTerminating || this.sessionExited || !this.pid) return;
 			Executor.reconnectStream(
 				this.pid,
 				(websocket) => {
@@ -899,6 +970,7 @@ export default class TerminalComponent {
 					pid,
 					(websocket) => {
 						this.attachIOSWebSocket(websocket);
+						this.terminal.unicode.activeVersion = "11";
 						resolve();
 					},
 					reject,
@@ -983,7 +1055,9 @@ export default class TerminalComponent {
 					return;
 				}
 
-				this.onDisconnect?.();
+				this.onDisconnect?.(
+					this.intentionalClose ? { intentional: true } : undefined,
+				);
 			};
 
 			websocket.onerror = (error) => {
@@ -1012,7 +1086,9 @@ export default class TerminalComponent {
 			case "exit":
 				this.isConnected = false;
 				this.onProcessExit?.(output);
-				this.onDisconnect?.();
+				this.onDisconnect?.(
+					this.intentionalClose ? { intentional: true } : undefined,
+				);
 				break;
 			default:
 				if (output) {
@@ -1044,8 +1120,13 @@ export default class TerminalComponent {
 		if (!this.pid || !this.serverMode) return;
 
 		if (isIOSTerminal) {
+			this.lastRequestedSize = { cols, rows };
 			try {
-				this.websocket?.send(JSON.stringify({ type: "resize", cols, rows }));
+				if (this.websocket?.readyState === WebSocket.OPEN) {
+					this.websocket.send(
+						JSON.stringify({ type: "resize", cols, rows }),
+					);
+				}
 			} catch (error) {
 				console.error("Failed to resize iOS terminal:", error);
 			}

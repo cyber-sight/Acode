@@ -238,6 +238,17 @@ add("./usr/local/bin/opencode2",
 add("./etc/profile.d/opencode.sh",
     b'export PATH="/opt/ocv1/bin:/opt/oc/package/bin:$PATH"\n', 0o644)
 add("./etc/resolv.conf", b"nameserver 1.1.1.1\nnameserver 8.8.8.8\n", 0o644)
+# Networking workarounds for the emulated stack:
+# - IPv4 pin for the repo host (libfetch tries AAAA first and gives up on
+#   connect failure without falling back to A records)
+# - aarch64 packages live under /current/aarch64 (not /current/musl etc.)
+add("./etc/hosts",
+    b"127.0.0.1 localhost\n"
+    b"::1 localhost\n"
+    b"135.181.160.58 repo-default.voidlinux.org\n"
+    b"135.181.160.58 repo-fastly.voidlinux.org\n", 0o644)
+add("./etc/xbps.d/00-repository-main.conf",
+    b"repository=https://repo-default.voidlinux.org/current/aarch64\n", 0o644)
 
 bb = open("busybox.bin", "rb").read()
 add("./usr/local/bin/busybox", bb, 0o755)

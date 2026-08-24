@@ -54,10 +54,31 @@ function main() {
   const commonFlags = [];
 
   let pbxproj = fs.readFileSync(pbxprojPath, "utf8");
-  for (const obsoleteFlag of ["-Wl,-ld_classic", "-sectalign", "__DATA", "__percpu_first", "1000", "__tracepoints", "20"]) {
-    const escaped = obsoleteFlag.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-    pbxproj = pbxproj.replace(new RegExp(`\\n\\s*\"?${escaped}\"?,`, "g"), "");
+
+  // Obsolete ReleaseLinux linker flags are removed ONLY inside
+  // OTHER_LDFLAGS / OTHER_LDFLAGS[sdk=...] blocks. Earlier revisions deleted
+  // matching lines project-wide, which could corrupt unrelated settings that
+  // happened to contain values like "1000", "20", or "__DATA".
+  function isObsoleteLdflagsLine(line) {
+    const token = line.trim().replace(/,+$/, "").replace(/^"+|"+$/g, "").trim();
+    if (!token) return false;
+    return (
+      token === "-Wl,-ld_classic" ||
+      /^(-Wl,)?-sectalign(\s|$)/.test(token) ||
+      ["__percpu_first", "__tracepoints", "__DATA", "1000", "20"].includes(token)
+    );
   }
+  pbxproj = pbxproj.replace(
+    /(["]?(?:OTHER_LDFLAGS)(?:\[sdk=[^\]]+\])?["]?\s*=\s*\()([\s\S]*?)\);/g,
+    (match, head, body) => {
+      const cleaned = body
+        .split("\n")
+        .filter((line) => !isObsoleteLdflagsLine(line))
+        .join("\n");
+      return `${head}${cleaned});`;
+    },
+  );
+
   const headerSearchPath = quotePbx(sourceDir);
   pbxproj = pbxproj.replace(/HEADER_SEARCH_PATHS = \(([^;]*?)\);/g, (match, body) => {
     if (body.includes(sourceDir)) return match;

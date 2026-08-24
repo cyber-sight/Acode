@@ -662,6 +662,7 @@ class TerminalManager {
 			this.closeTerminal(terminalId);
 		};
 		terminalFile.onpinstatechange = (pinned) => {
+			if (isIOSTerminal) return;
 			if (!terminalComponent.serverMode || !terminalComponent.pid) return;
 			void this.persistTerminalSession(
 				terminalComponent.pid,
@@ -844,7 +845,11 @@ class TerminalManager {
 				const formattedTitle = `${titlePrefix} - ${title}`;
 				terminalFile.filename = formattedTitle;
 
-				if (terminalComponent.serverMode && terminalComponent.pid) {
+				if (
+					!isIOSTerminal &&
+					terminalComponent.serverMode &&
+					terminalComponent.pid
+				) {
 					await this.persistTerminalSession(
 						terminalComponent.pid,
 						formattedTitle,
@@ -980,7 +985,9 @@ class TerminalManager {
 				}
 			}
 
-			if (this.getAllTerminals().size <= 0) {
+			// On iOS, stopService tears down every iSH session including
+			// unrelated exec jobs; per-session stop already ran above.
+			if (!isIOSTerminal && this.getAllTerminals().size <= 0) {
 				Executor.stopService();
 			}
 

@@ -21,6 +21,11 @@
 
 static NSString *const IshBridgeErrorDomain = @"IshBridge";
 
+/** Exit statuses that arrive before their session is registered are kept
+ * briefly so a natural exit racing a spawn is still reported, then dropped. */
+static const NSTimeInterval IshPendingExitMaxAge = 10.0;
+static const NSUInteger IshPendingExitCapacity = 64;
+
 static NSError *IshError(NSInteger code, NSString *message) {
     return [NSError errorWithDomain:IshBridgeErrorDomain
                                code:code
@@ -46,11 +51,23 @@ static void AcodeIshHandleFatalError(const char *message) {
 
 @interface IshBridge ()
 @property (nonatomic) dispatch_queue_t kernelQueue;
+/** Guards only the sessions dictionary, which Executor reads cross-thread
+ * from spawn/reconnect completions on the main thread. All other session
+ * bookkeeping stays kernel-queue-confined. */
+@property (nonatomic, strong) NSLock *sessionsLock;
 @property (nonatomic) NSMutableDictionary<NSString *, AcodeIshTerminal *> *sessions;
 @property (nonatomic) NSMutableDictionary<NSNumber *, NSString *> *sessionIdsByPid;
-@property (nonatomic) NSMutableDictionary<NSNumber *, NSNumber *> *pendingExitStatuses;
+/** pid -> @[status, timestamp]. Kernel queue only. */
+@property (nonatomic) NSMutableDictionary<NSNumber *, NSArray<NSNumber *> *> *pendingExitStatuses;
+/** Session ids with an explicit stop in flight, including the pending
+ * SIGKILL fallback. Kernel queue only; prevents a natural exit racing the
+ * teardown sequence into double-signalling or double-cleanup. */
+@property (nonatomic) NSMutableSet<NSString *> *terminatingSessionIds;
 @property (nonatomic, copy) IshEventHandler eventHandler;
 @property (nonatomic) BOOL kernelStarted;
+/** Latched once a kernel boot mutates state and then fails; see
+ * startKernelIfNeeded. */
+@property (nonatomic) BOOL bootFailed;
 - (BOOL)installBundledDefaultRootfs:(NSError **)error;
 - (BOOL)installGuestCli:(NSError **)error;
 @end
@@ -70,9 +87,11 @@ static void AcodeIshHandleFatalError(const char *message) {
     self = [super init];
     if (self) {
         _kernelQueue = dispatch_queue_create("com.foxdebug.acode.ish-kernel", DISPATCH_QUEUE_SERIAL);
+        _sessionsLock = [NSLock new];
         _sessions = [NSMutableDictionary dictionary];
         _sessionIdsByPid = [NSMutableDictionary dictionary];
         _pendingExitStatuses = [NSMutableDictionary dictionary];
+        _terminatingSessionIds = [NSMutableSet set];
     }
     return self;
 }
@@ -91,6 +110,43 @@ static void AcodeIshProcessExited(struct task *task, int status) {
     dispatch_async(dispatch_get_main_queue(), ^{
         [[IshBridge shared] handleSessionExitForPid:pid status:status];
     });
+}
+
+/// Kernel queue only. Stores a status for a pid that has no session yet,
+/// pruning stale entries and enforcing the capacity cap first.
+- (void)recordPendingExitStatusForPid:(int)pid status:(int)status {
+    double now = NSDate.timeIntervalSinceReferenceDate;
+    NSMutableArray<NSNumber *> *expired = [NSMutableArray array];
+    [self.pendingExitStatuses enumerateKeysAndObjectsUsingBlock:^(NSNumber *key, NSArray<NSNumber *> *entry, BOOL *stop) {
+        if (now - entry[1].doubleValue > IshPendingExitMaxAge) [expired addObject:key];
+    }];
+    [self.pendingExitStatuses removeObjectsForKeys:expired];
+    // Drop the oldest entries so an unreferenced-pid burst cannot grow the
+    // dictionary without bound.
+    while (self.pendingExitStatuses.count >= IshPendingExitCapacity) {
+        __block NSNumber *oldestKey = nil;
+        __block double oldestTimestamp = DBL_MAX;
+        [self.pendingExitStatuses enumerateKeysAndObjectsUsingBlock:^(NSNumber *key, NSArray<NSNumber *> *entry, BOOL *stop) {
+            double timestamp = entry[1].doubleValue;
+            if (timestamp < oldestTimestamp) {
+                oldestTimestamp = timestamp;
+                oldestKey = key;
+            }
+        }];
+        if (!oldestKey) break;
+        [self.pendingExitStatuses removeObjectForKey:oldestKey];
+    }
+    self.pendingExitStatuses[@(pid)] = @[@(status), @(now)];
+}
+
+/// Kernel queue only. Returns and removes the recorded status for pid, or nil
+/// when none was stored or the entry has outlived its freshness window.
+- (nullable NSNumber *)takePendingExitStatusForPid:(int)pid {
+    NSArray<NSNumber *> *entry = self.pendingExitStatuses[@(pid)];
+    if (!entry) return nil;
+    [self.pendingExitStatuses removeObjectForKey:@(pid)];
+    if (NSDate.timeIntervalSinceReferenceDate - entry[1].doubleValue > IshPendingExitMaxAge) return nil;
+    return entry[0];
 }
 
 - (void)startWithCommand:(NSString *)command
@@ -159,28 +215,26 @@ static void AcodeIshProcessExited(struct task *task, int status) {
 
         NSString *sessionId = terminal.uuid.UUIDString;
         int pid = current->pid;
+        // Captured before task_start so an explicit stop can signal the guest
+        // later; each session task is its own session leader (task_setsid), so
+        // the pid doubles as the process group id.
+        terminal.sessionLeaderPid = pid;
+        [self.sessionsLock lock];
         self.sessions[sessionId] = terminal;
+        [self.sessionsLock unlock];
         self.sessionIdsByPid[@(pid)] = sessionId;
         [[IshBackgroundRuntime shared] sessionDidStart:sessionId];
 
-        __weak IshBridge *weakSelf = self;
-        terminal.outputHandler = ^(NSData *data) {
-            NSString *output = [[NSString alloc] initWithData:data encoding:NSISOLatin1StringEncoding] ?: @"";
-            IshBridge *strongSelf = weakSelf;
-            if (!strongSelf) return;
-            dispatch_async(strongSelf.kernelQueue, ^{
-                if (!strongSelf.sessions[sessionId]) return;
-                dispatch_async(dispatch_get_main_queue(), ^{
-                    IshEventHandler handler = strongSelf.eventHandler;
-                    if (handler) handler(sessionId, @"stdout", output);
-                });
-            });
-        };
+        // No output consumer is installed here on purpose. The terminal
+        // buffers bytes until one attaches: streaming spawns attach a
+        // WebSocket-backed handler right after this completion, and legacy
+        // start()/exec() consumers attach theirs in Executor's completion.
+        // Installing anything before task_start would either race the real
+        // consumer or route early prompt output into a dead legacy path.
 
         task_start(current);
-        NSNumber *pendingStatus = self.pendingExitStatuses[@(pid)];
+        NSNumber *pendingStatus = [self takePendingExitStatusForPid:pid];
         if (pendingStatus) {
-            [self.pendingExitStatuses removeObjectForKey:@(pid)];
             dispatch_async(dispatch_get_main_queue(), ^{
                 [self handleSessionExitForPid:pid status:pendingStatus.intValue];
             });
@@ -193,8 +247,10 @@ static void AcodeIshProcessExited(struct task *task, int status) {
                   input:(NSString *)input
              completion:(void (^)(NSError * _Nullable error))completion {
     dispatch_async(self.kernelQueue, ^{
-        AcodeIshTerminal *terminal = self.sessions[sessionId];
         NSError *error = nil;
+        [self.sessionsLock lock];
+        AcodeIshTerminal *terminal = self.sessions[sessionId];
+        [self.sessionsLock unlock];
         if (!terminal) {
             error = IshError(24, @"Session not found");
         } else {
@@ -211,7 +267,9 @@ static void AcodeIshProcessExited(struct task *task, int status) {
             completion:(void (^)(NSError * _Nullable error))completion {
     dispatch_async(self.kernelQueue, ^{
         NSError *error = nil;
+        [self.sessionsLock lock];
         AcodeIshTerminal *terminal = self.sessions[sessionId];
+        [self.sessionsLock unlock];
         if (!terminal) {
             error = IshError(25, @"Session not found");
         } else if (columns < 2 || columns > 1000 || rows < 1 || rows > 1000) {
@@ -230,29 +288,66 @@ static void AcodeIshProcessExited(struct task *task, int status) {
         NSError *error = nil;
         if (!terminal) {
             error = IshError(27, @"Session not found");
-        } else {
+        } else if (![self.terminatingSessionIds containsObject:sessionId]) {
+            [self.terminatingSessionIds addObject:sessionId];
+            int leaderPid = terminal.sessionLeaderPid;
+
+            // tty_hangup alone leaves the guest shell running as an invisible
+            // task, so raise SIGHUP first, then tear the PTY down.
+            [terminal terminateGuest];
             [terminal destroy];
+
+            [self.sessionsLock lock];
             [self.sessions removeObjectForKey:sessionId];
+            [self.sessionsLock unlock];
             NSArray<NSNumber *> *pids = [self.sessionIdsByPid allKeysForObject:sessionId];
             [self.sessionIdsByPid removeObjectsForKeys:pids];
             [[IshBackgroundRuntime shared] sessionDidEnd:sessionId];
+
+            if (leaderPid > 1) {
+                // SIGHUP may be blocked or ignored by a misbehaving guest.
+                // Escalate to SIGKILL once; send_group_signal returns ESRCH
+                // harmlessly when the group is already gone. Skipped when the
+                // pid has since been recycled into a new live session.
+                dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(1500 * NSEC_PER_MSEC)),
+                               self.kernelQueue, ^{
+                    [self killSessionFallbackForLeaderPid:leaderPid sessionId:sessionId];
+                });
+            }
         }
         if (completion) dispatch_async(dispatch_get_main_queue(), ^{ completion(error); });
     });
+}
+
+/// Runs on the kernel queue 1.5s after an explicit stop. Kills the stopped
+/// session's process group if SIGHUP did not finish it. The terminating flag
+/// is always cleared so a later session reusing the id starts clean.
+- (void)killSessionFallbackForLeaderPid:(int)leaderPid sessionId:(NSString *)sessionId {
+    [self.terminatingSessionIds removeObject:sessionId];
+    // If a brand-new session has already been handed this recycled pid,
+    // leave its tasks alone.
+    NSString *currentSession = self.sessionIdsByPid[@(leaderPid)];
+    if (currentSession && ![currentSession isEqualToString:sessionId]) return;
+    send_group_signal((dword_t)leaderPid, SIGKILL_, SIGINFO_NIL);
 }
 
 - (void)handleSessionExitForPid:(int)pid status:(int)status {
     dispatch_async(self.kernelQueue, ^{
         NSString *sessionId = self.sessionIdsByPid[@(pid)];
         if (!sessionId) {
-            self.pendingExitStatuses[@(pid)] = @(status);
+            [self recordPendingExitStatusForPid:pid status:status];
             return;
         }
 
         [self.sessionIdsByPid removeObjectForKey:@(pid)];
+        // The guest died before/while an explicit stop was tearing it down;
+        // clear the flag so the stop's kill fallback knows the id is free.
+        [self.terminatingSessionIds removeObject:sessionId];
+        [self.sessionsLock lock];
         AcodeIshTerminal *terminal = self.sessions[sessionId];
         terminal.outputHandler = nil;
         [self.sessions removeObjectForKey:sessionId];
+        [self.sessionsLock unlock];
         [[IshBackgroundRuntime shared] sessionDidEnd:sessionId];
 
         int exitCode = (status & 0x7f) == 0 ? ((status >> 8) & 0xff) : 128 + (status & 0x7f);
@@ -265,17 +360,26 @@ static void AcodeIshProcessExited(struct task *task, int status) {
 
 - (BOOL)startKernelIfNeeded:(NSError **)error {
     if (self.kernelStarted) return YES;
+    // Once a boot has mutated kernel state (mount, init task) and then failed,
+    // retrying would re-run idempotent-unsafe calls on that state. Only an app
+    // restart gives a clean iSH.
+    if (self.bootFailed) {
+        if (error) *error = IshError(39, @"iSH kernel boot failed previously; restart Acode to try again");
+        return NO;
+    }
     if (![self ensureRootfsReady:error]) return NO;
 
     NSString *dataPath = [AcodeIshActiveRootPath() stringByAppendingPathComponent:@"data"];
     int result = mount_root(&fakefs, dataPath.fileSystemRepresentation);
     if (result < 0) {
+        self.bootFailed = YES;
         if (error) *error = IshError(30, [NSString stringWithFormat:@"Unable to mount root filesystem (%d)", result]);
         return NO;
     }
 
     result = become_first_process();
     if (result < 0) {
+        self.bootFailed = YES;
         if (error) *error = IshError(31, [NSString stringWithFormat:@"Unable to create init process (%d)", result]);
         return NO;
     }
@@ -303,6 +407,7 @@ static void AcodeIshProcessExited(struct task *task, int status) {
     set_console_device(TTY_CONSOLE_MAJOR, 1);
     result = create_stdio("/dev/console", TTY_CONSOLE_MAJOR, 1);
     if (result < 0) {
+        self.bootFailed = YES;
         if (error) *error = IshError(32, [NSString stringWithFormat:@"Unable to create init stdio (%d)", result]);
         return NO;
     }
@@ -340,6 +445,7 @@ static void AcodeIshProcessExited(struct task *task, int status) {
               [initPath isEqualToString:@"/bin/sh"] ? @"" : @"; falling back to /bin/sh");
     }
     if (!startedInit) {
+        self.bootFailed = YES;
         if (error) *error = IshError(33, [NSString stringWithFormat:@"Unable to execute a guest init: %@", [failures componentsJoinedByString:@", "]]);
         return NO;
     }
@@ -597,17 +703,14 @@ static void AcodeIshProcessExited(struct task *task, int status) {
 }
 
 - (AcodeIshTerminal *)terminalForSession:(NSString *)sessionId {
-    // Access is safe without dispatching because:
-    // - sessions is only mutated during startWithCommand (kernel queue)
-    //   and stopSession (kernel queue)
-    // - The completion callback fires after the session is stored
-    // - We're reading during the active session lifecycle
-    // - AcodeIshTerminal is immutable for I/O purposes after creation
+    // Called from Executor's main-thread completions. dispatch_sync onto
+    // kernelQueue would freeze the UI for the whole duration of any in-flight
+    // boot or teardown, so the sessions dictionary is guarded by a dedicated
+    // lock instead (see sessionsLock).
     if (sessionId.length == 0) return nil;
-    __block AcodeIshTerminal *terminal = nil;
-    dispatch_sync(self.kernelQueue, ^{
-        terminal = self.sessions[sessionId];
-    });
+    [self.sessionsLock lock];
+    AcodeIshTerminal *terminal = self.sessions[sessionId];
+    [self.sessionsLock unlock];
     return terminal;
 }
 

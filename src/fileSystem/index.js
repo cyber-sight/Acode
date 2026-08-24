@@ -83,32 +83,42 @@ fsOperation.extend(
 		return {
 			async readFile(encoding, progress) {
 				if (isIos()) {
-					const response = await fetch(url, {
-						cordovaResponseType: encoding ? "text" : "arraybuffer",
-						credentials: "include",
-						headers: {
-							Accept:
-								encoding === "json"
-									? "application/json"
-									: "application/octet-stream",
-						},
+					// WKWebView fetch is CORS-bound and acode.app sends no
+					// ACAO headers — every registry download fails with an
+					// opaque error. Route through the native http plugin
+					// instead; native requests bypass CORS entirely.
+					return await new Promise((resolve, reject) => {
+						cordova.plugin.http.sendRequest(
+							url,
+							{
+								method: "get",
+								responseType: encoding === "json" ? "json" : "arraybuffer",
+							},
+							(response) => {
+								const { data } = response;
+								if (encoding === "json") {
+									try {
+										resolve(typeof data === "string" ? JSON.parse(data) : data);
+									} catch (e) {
+										reject(e);
+									}
+									return;
+								}
+								if (encoding) {
+									decode(data, encoding).then(resolve).catch(reject);
+									return;
+								}
+								resolve(data);
+							},
+							(error) => {
+								const e = new Error(
+									error?.error || `HTTP ${error?.status ?? "unknown"}`,
+								);
+								e.status = error?.status;
+								reject(e);
+							},
+						);
 					});
-
-					if (!response.ok) {
-						throw response;
-					}
-
-					if (encoding === "json") {
-						return response.json();
-					}
-
-					const data = await response.arrayBuffer();
-
-					if (encoding) {
-						return await decode(data, encoding);
-					}
-
-					return data;
 				}
 
 				const data = await ajax.get(url, {

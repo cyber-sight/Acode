@@ -1,10 +1,12 @@
 #import "IshWebSocketServer.h"
 #import "AcodeIshTerminal.h"
+#import "IshBridge.h"
 #import <CommonCrypto/CommonCrypto.h>
 #include <arpa/inet.h>
 #include <errno.h>
 #include <fcntl.h>
 #include <netinet/in.h>
+#include <netinet/tcp.h>
 #include <sys/socket.h>
 #include <unistd.h>
 
@@ -14,6 +16,18 @@ static const NSUInteger IshWSMaxMessage = 4 * 1024 * 1024;
 static const NSUInteger IshWSOutputBatch = 16 * 1024;
 static const NSUInteger IshWSMaxOutputBacklog = 1024 * 1024;
 static const NSTimeInterval IshWSFlushInterval = 1.0 / 60.0;
+// Overall deadline for a single writeData call. Without it, a half-open
+// client socket (common after iOS app suspension drops the peer without a
+// FIN) makes select() spin on EAGAIN forever and wedges the serial server
+// queue, so later reconnects are refused and the session is bricked.
+static const NSTimeInterval IshWSWriteDeadline = 5.0;
+// Aggressive TCP keepalive for loopback clients: after iOS suspension the
+// WebView side can vanish without a FIN; keepalive probes let the kernel
+// detect the dead peer (idle 10s, probe every 5s, 3 failures) instead of
+// leaving a zombie connection occupying the single client slot.
+static const int IshWSKeepAliveIdle = 10;
+static const int IshWSKeepAliveInterval = 5;
+static const int IshWSKeepAliveCount = 3;
 
 static NSString *WSAcceptValue(NSString *key) {
     NSData *source = [[key stringByAppendingString:@"258EAFA5-E914-47DA-95CA-C5AB0DC85B11"]
@@ -52,6 +66,9 @@ static NSData *WSFrame(uint8_t opcode, NSData *payload) {
 @property (nonatomic) int serverFd;
 @property (nonatomic) int clientFd;
 @property (nonatomic, strong) dispatch_queue_t queue;
+// Serializes tty-bound input/resize calls off the WS read loop so they never
+// race the IshBridge kernelQueue boot/stop paths with concurrent delivery.
+@property (nonatomic, strong) dispatch_queue_t inputQueue;
 @property (nonatomic, strong) dispatch_source_t acceptSource;
 @property (nonatomic, strong) dispatch_source_t readSource;
 @property (nonatomic, strong) dispatch_source_t flushTimer;
@@ -79,6 +96,7 @@ static NSData *WSFrame(uint8_t opcode, NSData *payload) {
         _serverFd = -1;
         _clientFd = -1;
         _queue = dispatch_queue_create("com.foxdebug.acode.ish-websocket", DISPATCH_QUEUE_SERIAL);
+        _inputQueue = dispatch_queue_create("com.foxdebug.acode.ish-websocket-input", DISPATCH_QUEUE_SERIAL);
         _inputBuffer = NSMutableData.data;
         _outputBuffer = NSMutableData.data;
         _fragmentBuffer = NSMutableData.data;
@@ -204,6 +222,61 @@ static NSData *WSFrame(uint8_t opcode, NSData *payload) {
     });
 }
 
+- (void)sendControlFrame:(NSData *)data {
+    if (!data.length) return;
+    // Runs on the server queue so it is ordered before any later -stop call
+    // made from the same thread. Buffered PTY output is flushed first so the
+    // final output bytes reach the client ahead of the control frame.
+    dispatch_async(self.queue, ^{
+        if (self.stopping || !self.upgraded || self.clientFd < 0) return;
+        [self flushTerminalOutput];
+        [self writeData:WSFrame(0x1, data)];
+    });
+}
+
+- (NSData *)drainOutputBuffer {
+    // Synchronous hop onto the server queue: the caller (Executor reconnect
+    // path, main thread) needs the bytes before installing a replacement
+    // server. Must not be called from self.queue itself.
+    __block NSData *drained = nil;
+    dispatch_sync(self.queue, ^{
+        drained = self.outputBuffer.length ? [self.outputBuffer copy] : nil;
+        [self.outputBuffer setLength:0];
+    });
+    return drained;
+}
+
+- (void)primeOutputBuffer:(NSData *)data {
+    if (!data.length) return;
+    dispatch_async(self.queue, ^{
+        if (self.stopping) return;
+        // Apply the same backlog bound as live PTY output so a huge stale
+        // backlog cannot blow native memory; oldest bytes are dropped first.
+        [self.outputBuffer appendData:data];
+        if (self.outputBuffer.length > IshWSMaxOutputBacklog) {
+            NSUInteger overflow = self.outputBuffer.length - IshWSMaxOutputBacklog;
+            [self.outputBuffer replaceBytesInRange:NSMakeRange(0, overflow) withBytes:NULL length:0];
+        }
+    });
+}
+
+- (void)rejectConnection:(int)fd {
+    static const char busy[] = "HTTP/1.1 409 Conflict\r\nConnection: close\r\nContent-Length: 0\r\n\r\n";
+    send(fd, busy, sizeof(busy) - 1, 0);
+    close(fd);
+}
+
+// Enable aggressive TCP keepalive on a freshly accepted client so a peer lost
+// to iOS suspension is reaped by the kernel instead of occupying the single
+// client slot until a write stalls.
+- (void)applyClientKeepAlive:(int)fd {
+    int yes = 1;
+    if (setsockopt(fd, SOL_SOCKET, SO_KEEPALIVE, &yes, sizeof(yes)) < 0) return;
+    setsockopt(fd, IPPROTO_TCP, TCP_KEEPALIVE, &IshWSKeepAliveIdle, sizeof(IshWSKeepAliveIdle));
+    setsockopt(fd, IPPROTO_TCP, TCP_KEEPINTVL, &IshWSKeepAliveInterval, sizeof(IshWSKeepAliveInterval));
+    setsockopt(fd, IPPROTO_TCP, TCP_KEEPCNT, &IshWSKeepAliveCount, sizeof(IshWSKeepAliveCount));
+}
+
 - (void)acceptConnections {
     while (!self.stopping) {
         int fd = accept(self.serverFd, NULL, NULL);
@@ -216,15 +289,34 @@ static NSData *WSFrame(uint8_t opcode, NSData *payload) {
             return;
         }
         if (self.clientFd >= 0) {
-            static const char busy[] = "HTTP/1.1 409 Conflict\r\nConnection: close\r\nContent-Length: 0\r\n\r\n";
-            send(fd, busy, sizeof(busy) - 1, 0);
-            close(fd);
-            continue;
+            // Wire contract: when a second client connects while one client
+            // holds the slot, the old client is replaced WITHOUT its
+            // disconnectHandler firing and the newcomer proceeds through the
+            // upgrade handshake. WebView suspension can orphan the previous
+            // TCP link without a FIN, so the new connect IS the reconnect;
+            // answering 409 here would brick the session behind a dead peer.
+            // The legacy 409 is kept only when more than one candidate races
+            // for the slot simultaneously, which is genuinely ambiguous.
+            int rival = -1;
+            do {
+                rival = accept(self.serverFd, NULL, NULL);
+            } while (rival < 0 && errno == EINTR);
+            if (rival >= 0) {
+                NSLog(@"[WS] multiple clients racing for session %@; rejecting extras with 409", self.sessionId ?: @"unknown");
+                [self rejectConnection:fd];
+                [self rejectConnection:rival];
+                continue;
+            }
+            NSLog(@"[WS] replacing stale client for session %@", self.sessionId ?: @"unknown");
+            // Not notifying: no disconnect happened from JS's point of view,
+            // a replacement connection is arriving right now.
+            [self closeClientNotifying:NO];
         }
 #ifdef SO_NOSIGPIPE
         int yes = 1;
         setsockopt(fd, SOL_SOCKET, SO_NOSIGPIPE, &yes, sizeof(yes));
 #endif
+        [self applyClientKeepAlive:fd];
         fcntl(fd, F_SETFL, fcntl(fd, F_GETFL, 0) | O_NONBLOCK);
         self.clientFd = fd;
         self.upgraded = NO;
@@ -386,9 +478,25 @@ static NSData *WSFrame(uint8_t opcode, NSData *payload) {
     return NO;
 }
 
+// Input and resize are serialized on a dedicated internal queue so tty calls
+// are issued off the WS read loop and cannot interleave with IshBridge's
+// kernelQueue boot/stop paths mid-delivery. Text-input frames go through
+// [[IshBridge shared] writeToSession:...] so they ride the kernelQueue like
+// every other session mutation. Binary frames keep calling terminal.sendInput
+// directly because writeToSession takes NSString, and an NSData -> UTF-8
+// string round-trip can corrupt arbitrary (non-UTF-8) terminal bytes; the
+// inputQueue still serializes those calls. This keeps tty invocation off the
+// WS read loop while remaining byte-exact.
+// TODO: route binary frames through kernelQueue too once IshBridge exposes a
+// byte-level write API (e.g. writeToSessionData:).
 - (void)deliverPayload:(NSData *)payload opcode:(uint8_t)opcode {
+    if (self.stopping) return;
     if (opcode == 0x2) {
-        [self.terminal sendInput:payload];
+        NSData *input = [payload copy];
+        dispatch_async(self.inputQueue, ^{
+            if (self.stopping) return;
+            [self.terminal sendInput:input];
+        });
         return;
     }
     NSString *text = [[NSString alloc] initWithData:payload encoding:NSUTF8StringEncoding];
@@ -397,9 +505,16 @@ static NSData *WSFrame(uint8_t opcode, NSData *payload) {
     if ([message isKindOfClass:NSDictionary.class] && [message[@"type"] isEqualToString:@"resize"]) {
         NSInteger columns = [message[@"cols"] integerValue];
         NSInteger rows = [message[@"rows"] integerValue];
-        if (columns > 0 && rows > 0) [self.terminal resizeToColumns:(int)columns rows:(int)rows];
+        if (!(columns > 0 && rows > 0)) return;
+        dispatch_async(self.inputQueue, ^{
+            if (self.stopping) return;
+            [self.terminal resizeToColumns:(int)columns rows:(int)rows];
+        });
     } else {
-        [self.terminal sendInput:payload];
+        dispatch_async(self.inputQueue, ^{
+            if (self.stopping) return;
+            [[IshBridge shared] writeToSession:self.sessionId input:text completion:nil];
+        });
     }
 }
 
@@ -416,11 +531,20 @@ static NSData *WSFrame(uint8_t opcode, NSData *payload) {
 - (BOOL)writeData:(NSData *)data {
     const uint8_t *bytes = data.bytes;
     NSUInteger remaining = data.length;
+    // Overall per-call deadline: on a half-open socket EAGAIN persists
+    // indefinitely after iOS suspension, so waiting forever wedges the
+    // serial server queue and blocks reconnect handling. Give up after
+    // IshWSWriteDeadline and let callers tear the client down.
+    CFAbsoluteTime deadline = CFAbsoluteTimeGetCurrent() + IshWSWriteDeadline;
     while (remaining && self.clientFd >= 0) {
         ssize_t count = send(self.clientFd, bytes, remaining, 0);
         if (count > 0) { bytes += count; remaining -= (NSUInteger)count; continue; }
         if (count < 0 && errno == EINTR) continue;
         if (count < 0 && (errno == EAGAIN || errno == EWOULDBLOCK)) {
+            if (CFAbsoluteTimeGetCurrent() >= deadline) {
+                NSLog(@"[WS] write stalled past %.0fs for session %@; dropping client", IshWSWriteDeadline, self.sessionId ?: @"unknown");
+                return NO;
+            }
             struct timeval timeout = { .tv_sec = 0, .tv_usec = 100000 };
             fd_set set; FD_ZERO(&set); FD_SET(self.clientFd, &set);
             if (select(self.clientFd + 1, NULL, &set, NULL, &timeout) > 0) continue;

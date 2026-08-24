@@ -45,8 +45,47 @@ class Executor {
    * @param {string[]} cmd - Command and arguments to execute (e.g. `["sh", "-c", "echo hi"]`).
    * @param {(ws: WebSocket) => void} callback - Called with the connected WebSocket once the
    *   process is ready. Use `ws.send()` to write to stdin and `ws.onmessage` to read stdout.
+   * @param {{cols?: number, rows?: number}} [size] - Optional initial PTY size applied
+   *   by native spawn before the first output frame.
    */
-  spawnStream(cmd, callback, onError) {
+  spawnStream(cmd, callback, onError, size = {}) {
+    const reportError = (error, fallback) => {
+      if (!onError) return;
+      if (error instanceof Error) {
+        onError(error);
+        return;
+      }
+      const message =
+        typeof error === "string"
+          ? error
+          : error?.message || error?.error || fallback;
+      onError(new Error(message));
+    };
+
+    // Native spawn reads arguments[1] and arguments[2] as cols and rows.
+    const execArgs = [cmd];
+    if (size.cols != null || size.rows != null) {
+      execArgs.push(size.cols ?? 80, size.rows ?? 24);
+    }
+
+    exec(
+      (result) => {
+        this._openWebSocket(result, callback, (error) =>
+          reportError(error, "Terminal WebSocket connection failed")
+        );
+      },
+      (error) => reportError(error, "Failed to start terminal session"),
+      "Executor",
+      "spawn",
+      execArgs
+    );
+  }
+
+  /**
+   * Obtain a live endpoint for an existing iOS terminal session. Native code
+   * recreates the listener first if it is no longer running.
+   */
+  reconnectStream(sessionId, callback, onError) {
     const reportError = (error, fallback) => {
       if (!onError) return;
       if (error instanceof Error) {
@@ -61,26 +100,11 @@ class Executor {
     };
 
     exec(
-      (result) => {
+      (result) =>
         this._openWebSocket(result, callback, (error) =>
           reportError(error, "Terminal WebSocket connection failed")
-        );
-      },
-      (error) => reportError(error, "Failed to start terminal session"),
-      "Executor",
-      "spawn",
-      [cmd]
-    );
-  }
-
-  /**
-   * Obtain a live endpoint for an existing iOS terminal session. Native code
-   * recreates the listener first if it is no longer running.
-   */
-  reconnectStream(sessionId, callback, onError) {
-    exec(
-      (result) => this._openWebSocket(result, callback, onError),
-      onError,
+        ),
+      (error) => reportError(error, "Failed to reconnect terminal session"),
       "Executor",
       "reconnect",
       [sessionId]

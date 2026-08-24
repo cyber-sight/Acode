@@ -17,15 +17,21 @@ const pendingIntents = [];
  * @param {Intent} intent
  */
 export default async function HandleIntent(intent = {}) {
-	if (window.cordova.platformId === "ios") {
-		return;
+	const type = (intent.action || "").split(".").slice(-1)[0];
+	const isIosScheme =
+		window.cordova?.platformId === "ios" &&
+		typeof intent.data === "string" &&
+		intent.data.startsWith("acode://");
+
+	if (window.cordova.platformId === "ios" && !isIosScheme) {
+		// iOS delivers only custom-scheme opens for now; Android intent
+		// shapes (SEND/VIEW/EDIT with fileUri) are not applicable.
+		if (!["SEND", "VIEW", "EDIT"].includes(type)) return;
 	}
 
-	const type = intent.action.split(".").slice(-1)[0];
-
-	if (["SEND", "VIEW", "EDIT"].includes(type)) {
+	if (["SEND", "VIEW", "EDIT"].includes(type) || isIosScheme) {
 		/**@type {string} */
-		const url = intent.fileUri || intent.data;
+		const url = intent.fileUri || intent.data || "";
 		if (!url) return;
 
 		if (url.startsWith("acode://")) {

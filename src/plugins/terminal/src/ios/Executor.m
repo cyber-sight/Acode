@@ -12,10 +12,26 @@ static NSMutableDictionary<NSString *, NSMutableArray<NSDictionary<NSString *, N
 static NSMutableDictionary<NSString *, IshWebSocketServer *> *wsServers;
 static __weak Executor *sharedExecutor;
 
+// Ceiling for one-shot exec() commands; generous because these are expected
+// to be quick build/test invocations, not long-running sessions.
+static const NSTimeInterval IshExecTimeoutSeconds = 120.0;
+// Fail fast once accumulated exec() output grows past this bound instead of
+// letting a runaway command consume unbounded native memory.
+static const NSUInteger IshExecMaxOutputBytes = 2 * 1024 * 1024;
+
 static void HandleExecutorEvent(NSString *sessionId, NSString *type, NSString *payload) {
     if ([type isEqualToString:@"exit"] && wsServers[sessionId]) {
         IshWebSocketServer *server = wsServers[sessionId];
         [wsServers removeObjectForKey:sessionId];
+        // Tell the connected JS client why its socket is about to close so it
+        // does not burn a reconnect attempt discovering the session no longer
+        // exists. sendControlFrame flushes buffered output before writing the
+        // additive {"type":"exit","status":N} text frame; both are ordered
+        // ahead of the -stop teardown on the server's serial queue. Best
+        // effort: with no upgraded client nothing is sent.
+        NSInteger status = [payload integerValue];
+        NSString *frame = [NSString stringWithFormat:@"{\"type\":\"exit\",\"status\":%ld}", (long)status];
+        [server sendControlFrame:[frame dataUsingEncoding:NSUTF8StringEncoding]];
         [server stop];
         [pendingEvents removeObjectForKey:sessionId];
         return;
@@ -58,10 +74,37 @@ static void HandleExecutorEvent(NSString *sessionId, NSString *type, NSString *p
         }
         [output appendString:payload ?: @""];
 
+        // Cap accumulation: a runaway command must not grow this buffer
+        // without bound. The cheap UTF-16 length pre-filters; the exact UTF-8
+        // size is only measured once that bound trips. On overflow, fail fast
+        // with a clear error and stop the guest session.
+        if (output.length >= IshExecMaxOutputBytes &&
+            [output lengthOfBytesUsingEncoding:NSUTF8StringEncoding] > IshExecMaxOutputBytes) {
+            NSString *overflowCallbackId = execCallbacks[sessionId];
+            [execCallbacks removeObjectForKey:sessionId];
+            [execOutputs removeObjectForKey:sessionId];
+            [execMarkers removeObjectForKey:sessionId];
+            [pendingEvents removeObjectForKey:sessionId];
+            [[IshBridge shared] stopSession:sessionId completion:nil];
+            if (sharedExecutor && overflowCallbackId) {
+                CDVPluginResult *result = [CDVPluginResult resultWithStatus:CDVCommandStatus_ERROR
+                    messageAsString:@"Command output exceeded 2 MB before returning a result"];
+                [sharedExecutor.commandDelegate sendPluginResult:result callbackId:overflowCallbackId];
+            }
+            return;
+        }
+
         NSString *marker = execMarkers[sessionId];
         if (!marker) return;
-        NSRange markerRange = [output rangeOfString:marker];
-        if (markerRange.location == NSNotFound) return;
+        // Only recognize the marker at line-start of accumulated output: it
+        // must begin at the last line boundary, so guest output containing a
+        // marker-shaped substring mid-line cannot fake an exit code.
+        NSRange lastNewline = [output rangeOfString:@"\n" options:NSBackwardsSearch];
+        if (lastNewline.location == NSNotFound) return;
+        NSUInteger markerStart = lastNewline.location;
+        if (output.length - markerStart < marker.length) return;
+        if ([output compare:marker options:0 range:NSMakeRange(markerStart, marker.length)] != NSOrderedSame) return;
+        NSRange markerRange = NSMakeRange(markerStart, marker.length);
         NSUInteger exitCodeStart = NSMaxRange(markerRange);
         NSRange newlineRange = [output rangeOfString:@"\n" options:0 range:NSMakeRange(exitCodeStart, output.length - exitCodeStart)];
         if (newlineRange.location == NSNotFound) return;
@@ -244,7 +287,7 @@ static IshWebSocketServer *CreateWebSocketServer(NSString *sessionId,
         execOutputs[sessionId] = [NSMutableString string];
         execMarkers[sessionId] = marker;
         DrainPendingEvents(sessionId);
-        dispatch_after(dispatch_time(DISPATCH_TIME_NOW, 120 * NSEC_PER_SEC), dispatch_get_main_queue(), ^{
+        dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(IshExecTimeoutSeconds * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
             NSString *callbackId = execCallbacks[sessionId];
             if (!callbackId) {
                 return;
@@ -255,7 +298,8 @@ static IshWebSocketServer *CreateWebSocketServer(NSString *sessionId,
             [pendingEvents removeObjectForKey:sessionId];
             [[IshBridge shared] stopSession:sessionId completion:nil];
             if (sharedExecutor) {
-                CDVPluginResult *result = [CDVPluginResult resultWithStatus:CDVCommandStatus_ERROR messageAsString:@"Command timed out after 120 seconds"];
+                CDVPluginResult *result = [CDVPluginResult resultWithStatus:CDVCommandStatus_ERROR
+                    messageAsString:[NSString stringWithFormat:@"Command timed out after %.0f seconds", IshExecTimeoutSeconds]];
                 [sharedExecutor.commandDelegate sendPluginResult:result callbackId:callbackId];
             }
         });
@@ -386,6 +430,10 @@ static IshWebSocketServer *CreateWebSocketServer(NSString *sessionId,
 
     IshWebSocketServer *server = wsServers[sessionId];
     if (!server.isRunning) {
+        // Output produced while the listener was down sits in the dead
+        // server's buffer. Drain it before teardown and prime the replacement
+        // so a reconnect does not silently lose that output.
+        NSData *backlog = [server drainOutputBuffer];
         [server stop];
         [wsServers removeObjectForKey:sessionId];
         NSError *serverError = nil;
@@ -397,6 +445,9 @@ static IshWebSocketServer *CreateWebSocketServer(NSString *sessionId,
             [self.commandDelegate sendPluginResult:result callbackId:command.callbackId];
             return;
         }
+        // Prime immediately after creation, before any new PTY output handler
+        // traffic and before the port is handed back to JavaScript.
+        [server primeOutputBuffer:backlog];
         NSLog(@"[WS] restarted listener for session %@ on port %u", sessionId, server.port);
     }
 
