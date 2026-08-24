@@ -1,3 +1,4 @@
+import apiFetch from "lib/apiFetch";
 import config from "./config";
 
 /**
@@ -78,12 +79,10 @@ class AuthService {
 
 	async logout() {
 		try {
-			const res = await fetch(`${config.API_BASE}/login`, {
+			await apiFetch(`${config.API_BASE}/login`, {
 				method: "DELETE",
+				responseType: "text",
 			});
-			if (!res.ok) {
-				throw new Error("Unable to logout.");
-			}
 		} catch (error) {
 			console.error("Error during logout:", error);
 		}
@@ -108,54 +107,53 @@ class AuthService {
 		if (loggedInUser && !forceFetch) return loggedInUser;
 
 		try {
-			const res = await fetch(`${config.API_BASE}/login`);
+			const user = await apiFetch(`${config.API_BASE}/login`, {
+				responseType: "json",
+			});
 
-			if (res.ok) {
-				loggedInUser = await res.json();
-				localStorage.setItem(CACHE_USER_KEY, JSON.stringify(loggedInUser));
-				clearTimeout(cacheTimeout);
-				cacheTimeout = setTimeout(() => (loggedInUser = null), 600_000);
-				return loggedInUser;
-			}
-
-			if (res.status === 401) {
-				localStorage.removeItem(CACHE_USER_KEY);
-				return null;
-			}
-
-			throw new Error("Unable to fetch user Info");
+			loggedInUser = user;
+			localStorage.setItem(CACHE_USER_KEY, JSON.stringify(loggedInUser));
+			clearTimeout(cacheTimeout);
+			cacheTimeout = setTimeout(() => (loggedInUser = null), 600_000);
+			return loggedInUser;
 		} catch (error) {
+			// Fall back to the cached user when available
 			if (CACHE_USER_KEY in localStorage) {
 				try {
 					return JSON.parse(localStorage.getItem(CACHE_USER_KEY));
 				} catch {}
 			}
+			if (error?.status === 401) {
+				localStorage.removeItem(CACHE_USER_KEY);
+				return null;
+			}
 			console.error("Unable to fetch user info:", error);
 			throw error;
 		}
-	}
 
-	async login() {
-		return new Promise((resolve, reject) => {
-			const callback = { resolve, reject };
-			this.#loginCallbacks.add(callback);
-			this.#exec("login", [
-				{
-					baseUrl: config.BASE_URL,
-					appVersionCode: window.BuildInfo?.versionCode || 0,
-				},
-			])
-				.then(() => {
-					loginEvents.emit();
-				})
-				.catch((err) => {
-					console.error("Native login error", err);
-					this.#loginCallbacks.delete(callback);
-					reject("Failed to login");
-				});
-		});
+		async;
+		login();
+		{
+			return new Promise((resolve, reject) => {
+				const callback = { resolve, reject };
+				this.#loginCallbacks.add(callback);
+				this.#exec("login", [
+					{
+						baseUrl: config.BASE_URL,
+						appVersionCode: window.BuildInfo?.versionCode || 0,
+					},
+				])
+					.then(() => {
+						loginEvents.emit();
+					})
+					.catch((err) => {
+						console.error("Native login error", err);
+						this.#loginCallbacks.delete(callback);
+						reject("Failed to login");
+					});
+			});
+		}
 	}
 }
-
 export default new AuthService();
 export { loginEvents };

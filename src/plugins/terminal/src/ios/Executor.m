@@ -168,6 +168,28 @@ static IshWebSocketServer *CreateWebSocketServer(NSString *sessionId,
     return server;
 }
 
+/// Legacy (non-WebSocket) consumers — start() and exec() — receive PTY bytes
+/// through this handler. It must be attached AFTER startWithCommand's
+/// completion so AcodeIshTerminal's pre-attach buffer drains through it
+/// (capturing output produced before registration). UTF-8 first, Latin-1 as
+/// lossy fallback for legacy string payloads.
+static void AttachLegacyOutputHandler(NSString *sessionId) {
+    if (!sharedExecutor) return;
+    AcodeIshTerminal *terminal = [[IshBridge shared] terminalForSession:sessionId];
+    if (!terminal) return;
+    [terminal setOutputHandler:^(NSData *data) {
+        NSString *output = [[NSString alloc] initWithData:data encoding:NSUTF8StringEncoding]
+            ?: [[NSString alloc] initWithData:data encoding:NSISOLatin1StringEncoding]
+            ?: @"";
+        dispatch_async(dispatch_get_main_queue(), ^{
+            NSString *callbackSessionCallbacks = sessionCallbacks[sessionId];
+            NSString *execCallbackId = execCallbacks[sessionId];
+            if (!callbackSessionCallbacks && !execCallbackId) return;
+            HandleExecutorEvent(sessionId, @"stdout", output);
+        });
+    }];
+}
+
 @implementation Executor
 
 + (void)initialize {
@@ -206,6 +228,7 @@ static IshWebSocketServer *CreateWebSocketServer(NSString *sessionId,
             return;
         }
         sessionCallbacks[sessionId] = callbackId;
+        AttachLegacyOutputHandler(sessionId);
         CDVPluginResult *result = [CDVPluginResult resultWithStatus:CDVCommandStatus_OK messageAsString:sessionId];
         [result setKeepCallback:@YES];
         [self.commandDelegate sendPluginResult:result callbackId:callbackId];
@@ -284,6 +307,7 @@ static IshWebSocketServer *CreateWebSocketServer(NSString *sessionId,
             return;
         }
         execCallbacks[sessionId] = command.callbackId;
+        AttachLegacyOutputHandler(sessionId);
         execOutputs[sessionId] = [NSMutableString string];
         execMarkers[sessionId] = marker;
         DrainPendingEvents(sessionId);

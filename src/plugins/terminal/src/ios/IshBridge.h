@@ -24,6 +24,12 @@ typedef void (^IshEventHandler)(NSString *sessionId, NSString *type, NSString *p
 /** Return the AcodeIshTerminal for an active session. */
 - (nullable AcodeIshTerminal *)terminalForSession:(NSString *)sessionId;
 
+/// Invoked when the iSH emulator raises its fatal die_handler. Notifies each
+/// live session through the event handler ("fatal"), then clears session
+/// bookkeeping and latches the bridge so further spawns fail fast until the
+/// app restarts. Safe to call from any thread.
+- (void)notifyFatalEmulatorErrorWithReason:(NSString *)reason;
+
 /**
  * Validate the active fakefs metadata and checkpoint it when the kernel has
  * not mounted it yet. Host-side files must be imported through RootfsManager;

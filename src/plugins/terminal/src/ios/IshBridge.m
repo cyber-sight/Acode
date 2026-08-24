@@ -6,6 +6,7 @@
 #include <netdb.h>
 #include <resolv.h>
 #import <sqlite3.h>
+#import <Network/Network.h>
 
 #define ISH_INTERNAL 1
 #include "fs/dev.h"
@@ -46,7 +47,15 @@ static NSData *IshStringVector(NSArray<NSString *> *strings) {
 }
 
 static void AcodeIshHandleFatalError(const char *message) {
-    NSLog(@"iSH fatal error: %s", message ?: "unknown");
+    // Runs on an arbitrary guest/emulator thread with kernel state corrupt.
+    // Touch nothing here but logging and an async hop to a safe queue.
+    NSString *reason = (message && message[0])
+        ? ([NSString stringWithUTF8String:message] ?: @"unknown")
+        : @"unknown";
+    NSLog(@"iSH fatal error: %@", reason);
+    dispatch_async(dispatch_get_main_queue(), ^{
+        [[IshBridge shared] notifyFatalEmulatorErrorWithReason:reason];
+    });
 }
 
 @interface IshBridge ()
@@ -68,6 +77,12 @@ static void AcodeIshHandleFatalError(const char *message) {
 /** Latched once a kernel boot mutates state and then fails; see
  * startKernelIfNeeded. */
 @property (nonatomic) BOOL bootFailed;
+/** Watches iOS network-path changes so guest /etc/resolv.conf can track the
+ * current DNS servers instead of staying frozen at boot-time values.
+ * Raw C handle; retained once and never released (bridge is a singleton). */
+@property (nonatomic, assign, nullable) nw_path_monitor_t dnsPathMonitor;
+/** Coalesces rapid path-change bursts into one rewrite. Kernel queue only. */
+@property (nonatomic, strong, nullable) dispatch_source_t dnsRefreshTimer;
 - (BOOL)installBundledDefaultRootfs:(NSError **)error;
 - (BOOL)installGuestCli:(NSError **)error;
 @end
@@ -416,6 +431,7 @@ static void AcodeIshProcessExited(struct task *task, int status) {
     if (![self configureGuestDns:&dnsError]) {
         NSLog(@"iSH: %@", dnsError.localizedDescription);
     }
+    [self startDnsPathMonitor];
 
     NSError *cliError = nil;
     if (![self installGuestCli:&cliError]) {
@@ -495,6 +511,49 @@ static void AcodeIshProcessExited(struct task *task, int status) {
     BOOL wroteConfiguration = [self writeGuestFile:@"/etc/resolv.conf" content:content error:error];
     if (wroteConfiguration) NSLog(@"iSH: wrote %d iOS DNS server(s) to /etc/resolv.conf", serverCount);
     return wroteConfiguration;
+}
+
+/// Keeps the guest's view of DNS current. iOS hands out different resolver
+/// addresses per network (Wi-Fi vs cellular, VPN split DNS); without this the
+/// guest keeps boot-time servers until relaunch and lookups break after a
+/// network switch.
+- (void)startDnsPathMonitor {
+    if (self.dnsPathMonitor) return;
+    // Network.framework's Obj-C surface is the C API; NWPathMonitor is Swift.
+    nw_path_monitor_t monitor = nw_path_monitor_create();
+    self.dnsPathMonitor = monitor;
+    nw_path_monitor_set_queue(monitor, dispatch_get_global_queue(QOS_CLASS_UTILITY, 0));
+    nw_path_monitor_set_update_handler(monitor, ^(nw_path_t path) {
+        (void)path;
+        // Called on the monitor queue; all state below is kernelQueue-confined.
+        dispatch_async(self.kernelQueue, ^{
+            [self scheduleDnsRefresh];
+        });
+    });
+    nw_path_monitor_start(monitor);
+}
+
+/// Arms a fresh one-shot 2s debounce on the kernel queue; any newer path
+/// event replaces the pending one so a network flap rewrites resolv.conf
+/// exactly once, after things settle.
+- (void)scheduleDnsRefresh {
+    if (!self.kernelStarted || self.bootFailed) return;
+    if (self.dnsRefreshTimer) {
+        dispatch_source_cancel(self.dnsRefreshTimer);
+        self.dnsRefreshTimer = nil;
+    }
+    dispatch_source_t timer = dispatch_source_create(DISPATCH_SOURCE_TYPE_TIMER, 0, 0, self.kernelQueue);
+    dispatch_source_set_timer(timer,
+        dispatch_time(DISPATCH_TIME_NOW, (int64_t)(2 * NSEC_PER_SEC)), 0, 0);
+    dispatch_source_set_event_handler(timer, ^{
+        if (!self.kernelStarted || self.bootFailed) return;
+        NSError *error = nil;
+        if (![self configureGuestDns:&error]) {
+            NSLog(@"iSH: DNS refresh failed: %@", error.localizedDescription);
+        }
+    });
+    self.dnsRefreshTimer = timer;
+    dispatch_resume(timer);
 }
 
 - (BOOL)writeGuestFile:(NSString *)path content:(NSString *)content error:(NSError **)error {
@@ -700,6 +759,31 @@ static void AcodeIshProcessExited(struct task *task, int status) {
     BOOL valid = [self validateRootAtPath:rootPath requireRelease:AcodeIshIsDefaultRootActive() error:error];
     if (valid && !self.kernelStarted) valid = [self checkpointRootAtPath:rootPath error:error];
     return valid;
+}
+
+- (void)notifyFatalEmulatorErrorWithReason:(NSString *)reason {
+    // Main queue: snapshot session ids, surface one fatal event per live
+    // session so the UI can show an error instead of a silently dead terminal.
+    [self.sessionsLock lock];
+    NSArray<NSString *> *liveSessions = self.sessions.allKeys;
+    [self.sessionsLock unlock];
+
+    for (NSString *sessionId in liveSessions) {
+        IshEventHandler handler = self.eventHandler;
+        if (handler) handler(sessionId, @"fatal", reason ?: @"iSH emulator fatal error");
+        [[IshBackgroundRuntime shared] sessionDidEnd:sessionId];
+    }
+
+    dispatch_async(self.kernelQueue, ^{
+        // The emulator's global state is corrupt; never re-boot in-process.
+        self.bootFailed = YES;
+        [self.sessionsLock lock];
+        [self.sessions removeAllObjects];
+        [self.sessionsLock unlock];
+        [self.sessionIdsByPid removeAllObjects];
+        [self.pendingExitStatuses removeAllObjects];
+        [self.terminatingSessionIds removeAllObjects];
+    });
 }
 
 - (AcodeIshTerminal *)terminalForSession:(NSString *)sessionId {

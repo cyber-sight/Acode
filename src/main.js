@@ -38,6 +38,7 @@ import acode from "lib/acode";
 import actionStack from "lib/actionStack";
 import adRewards from "lib/adRewards";
 import ajax from "lib/ajax";
+import apiFetch from "lib/apiFetch";
 import applySettings from "lib/applySettings";
 import checkFiles from "lib/checkFiles";
 import { canSaveFile } from "lib/commands";
@@ -441,9 +442,10 @@ async function onLogin() {
 
 async function fetchPromotions() {
 	try {
-		const res = await fetch(`${config.API_BASE}/promotions`);
-		if (res.ok) {
-			const data = await res.json();
+		const data = await apiFetch(`${config.API_BASE}/promotions`, {
+			responseType: "json",
+		});
+		if (true) {
 			if (Array.isArray(data)) {
 				localStorage.setItem("cached_promotions", JSON.stringify(data));
 			}

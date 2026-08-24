@@ -337,8 +337,10 @@ export default {
 	},
 	async checkAPIStatus() {
 		try {
-			const res = await fetch(Url.join(config.API_BASE, "status"));
-			return res.ok;
+			const res = await apiFetch(Url.join(config.API_BASE, "status"), {
+				responseType: "text",
+			});
+			return !!res;
 		} catch (error) {
 			window.log("error", error);
 			return false;
