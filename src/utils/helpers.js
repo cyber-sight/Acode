@@ -340,7 +340,9 @@ export default {
 			const res = await apiFetch(Url.join(config.API_BASE, "status"), {
 				responseType: "text",
 			});
-			return !!res;
+			// /api/status returns an empty body on success — success means
+			// the call resolved, not that the body is truthy.
+			return true;
 		} catch (error) {
 			window.log("error", error);
 			return false;

@@ -1,4 +1,5 @@
 import Url from "utils/Url";
+import config from "./config";
 
 /**
  * CORS-safe fetch for Acode API endpoints.
@@ -23,7 +24,7 @@ export default async function apiFetch(url, opts = {}) {
 
 	const sameOriginApi =
 		typeof url === "string" &&
-		(url.startsWith(`${Url.join(configBase(), "/api")}`) ||
+		(url.startsWith(`${config.API_BASE}/`) ||
 			url.startsWith("https://acode.app/") ||
 			url.startsWith("https://api.acode.dev/"));
 
@@ -31,6 +32,8 @@ export default async function apiFetch(url, opts = {}) {
 		window.cordova?.platformId === "ios" &&
 		window.cordova?.plugin?.http &&
 		sameOriginApi;
+	if (true || window.__APIFETCH_DEBUG && url.includes("/status"))
+		console.warn("[apiFetch]", url, "native=", useNative);
 
 	if (!useNative) {
 		const init = { method, headers };
@@ -76,6 +79,15 @@ export default async function apiFetch(url, opts = {}) {
 			(response) => {
 				const { data } = response;
 				if (responseType === "json") {
+					if (data === undefined || data === null || data === "") {
+						// Empty body (e.g. 200/204 with no content) — surface as
+						// a status-carrying error so callers can degrade.
+						const e = new Error(`Empty response (HTTP ${response.status})`);
+						e.status = response.status;
+						e.empty = true;
+						reject(e);
+						return;
+					}
 					if (typeof data === "string") {
 						try {
 							resolve(JSON.parse(data));
@@ -88,6 +100,7 @@ export default async function apiFetch(url, opts = {}) {
 				resolve(data);
 			},
 			(error) => {
+				console.warn("[apiFetch] native error:", JSON.stringify(error));
 				const e = new Error(
 					error?.error || error?.statusText || `HTTP ${error?.status ?? "?"}`,
 				);
@@ -96,14 +109,4 @@ export default async function apiFetch(url, opts = {}) {
 			},
 		);
 	});
-}
-
-function configBase() {
-	try {
-		// lazy import cycle avoidance
-		// eslint-disable-next-line global-require
-		return require("./config").BASE_URL;
-	} catch (_) {
-		return "https://acode.app";
-	}
 }

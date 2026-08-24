@@ -637,10 +637,14 @@ async function loadApp() {
 	system.setIntentHandler(intentHandler, intentHandler.onError);
 	system.getCordovaIntent(intentHandler, intentHandler.onError);
 	if (window.cordova.platformId === "ios") {
-		// cordova-plugin-customurlscheme calls window.handleOpenURL(url)
-		// for acode:// opens. Route into the shared intent pipeline.
+		// cordova-plugin-customurlscheme calls window.handleOpenURL(url) for
+		// acode:// opens — but ALSO fires on ordinary launches with whatever
+		// URL was in the launch options. Only forward real acode:// urls;
+		// everything else would fall through to openFile() and crash on
+		// fs.stat for non-file schemes.
 		window.handleOpenURL = (url) => {
 			try {
+				if (typeof url !== "string" || !url.startsWith("acode://")) return;
 				intentHandler({ action: "android.intent.action.VIEW", data: url });
 			} catch (error) {
 				window.log("error", error);
