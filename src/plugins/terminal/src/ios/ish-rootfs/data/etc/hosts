@@ -1,9 +1,4 @@
-#
-# /etc/hosts: static lookup table for host names
-#
-
-#<ip-address>		<hostname.domain.org>	<hostname>
-127.0.0.1		localhost.localdomain	localhost
-::1			localhost.localdomain	localhost ip6-localhost
-
-# End of file
+127.0.0.1 localhost
+::1 localhost
+135.181.160.58 repo-default.voidlinux.org
+135.181.160.58 repo-fastly.voidlinux.org
