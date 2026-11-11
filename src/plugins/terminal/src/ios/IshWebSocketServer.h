@@ -1,8 +1,8 @@
 #import <Foundation/Foundation.h>
+#import "AcodeTerminalBackend.h"
 
 NS_ASSUME_NONNULL_BEGIN
 
-@class AcodeIshTerminal;
 
 @interface IshWebSocketServer : NSObject
 
@@ -13,7 +13,7 @@ NS_ASSUME_NONNULL_BEGIN
 
 - (instancetype)init NS_UNAVAILABLE;
 + (instancetype)new NS_UNAVAILABLE;
-- (instancetype)initWithTerminal:(AcodeIshTerminal *)terminal NS_DESIGNATED_INITIALIZER;
+- (instancetype)initWithTerminal:(id<AcodeTerminalEndpoint>)terminal NS_DESIGNATED_INITIALIZER;
 - (BOOL)startWithError:(NSError **)error;
 - (void)stop;
 

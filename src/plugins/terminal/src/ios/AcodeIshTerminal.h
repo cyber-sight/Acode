@@ -1,4 +1,5 @@
 #import <Foundation/Foundation.h>
+#import "AcodeTerminalBackend.h"
 
 NS_ASSUME_NONNULL_BEGIN
 
@@ -6,9 +7,9 @@ struct tty;
 
 FOUNDATION_EXPORT void AcodeIshInstallConsoleDriver(void);
 
-typedef void (^AcodeIshTerminalOutputHandler)(NSData *data);
+typedef AcodeTerminalOutputHandler AcodeIshTerminalOutputHandler;
 
-@interface AcodeIshTerminal : NSObject
+@interface AcodeIshTerminal : NSObject <AcodeTerminalEndpoint>
 
 @property (nonatomic, readonly) NSUUID *uuid;
 /** Guest pid of this session's leader task. Each session is created through

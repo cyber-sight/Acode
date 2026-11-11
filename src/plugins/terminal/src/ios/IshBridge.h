@@ -1,12 +1,13 @@
 #import <Foundation/Foundation.h>
+#import "AcodeTerminalBackend.h"
 
 @class AcodeIshTerminal;
 
 NS_ASSUME_NONNULL_BEGIN
 
-typedef void (^IshEventHandler)(NSString *sessionId, NSString *type, NSString *payload);
+typedef AcodeTerminalEventHandler IshEventHandler;
 
-@interface IshBridge : NSObject
+@interface IshBridge : NSObject <AcodeTerminalBackend>
 
 + (instancetype)shared;
 

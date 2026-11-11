@@ -1,5 +1,5 @@
 #import "IshWebSocketServer.h"
-#import "AcodeIshTerminal.h"
+#import "AcodeTerminalBackend.h"
 #import "IshBridge.h"
 #import <CommonCrypto/CommonCrypto.h>
 #include <arpa/inet.h>
@@ -62,7 +62,7 @@ static NSData *WSFrame(uint8_t opcode, NSData *payload) {
 
 @interface IshWebSocketServer ()
 @property (nonatomic, readwrite) in_port_t port;
-@property (nonatomic, strong) AcodeIshTerminal *terminal;
+@property (nonatomic, strong) id<AcodeTerminalEndpoint> terminal;
 @property (nonatomic) int serverFd;
 @property (nonatomic) int clientFd;
 @property (nonatomic, strong) dispatch_queue_t queue;
@@ -80,7 +80,7 @@ static NSData *WSFrame(uint8_t opcode, NSData *payload) {
 @property (nonatomic) BOOL started;
 @property (nonatomic) BOOL stopping;
 @property (nonatomic) BOOL disconnectNotified;
-@property (nonatomic, copy, nullable) AcodeIshTerminalOutputHandler installedOutputHandler;
+@property (nonatomic, copy, nullable) AcodeTerminalOutputHandler installedOutputHandler;
 @end
 
 @implementation IshWebSocketServer
@@ -89,7 +89,7 @@ static NSData *WSFrame(uint8_t opcode, NSData *payload) {
     return self.started && !self.stopping && self.serverFd >= 0;
 }
 
-- (instancetype)initWithTerminal:(AcodeIshTerminal *)terminal {
+- (instancetype)initWithTerminal:(id<AcodeTerminalEndpoint>)terminal {
     self = [super init];
     if (self) {
         _terminal = terminal;
@@ -114,7 +114,7 @@ static NSData *WSFrame(uint8_t opcode, NSData *payload) {
     // A replacement server may already own the same terminal. Clearing the
     // property unconditionally from an old server's stop/dealloc path would
     // disconnect the replacement listener from all future PTY output.
-    AcodeIshTerminalOutputHandler installed = self.installedOutputHandler;
+    AcodeTerminalOutputHandler installed = self.installedOutputHandler;
     if (installed && self.terminal.outputHandler == installed) {
         self.terminal.outputHandler = nil;
     }
@@ -182,7 +182,7 @@ static NSData *WSFrame(uint8_t opcode, NSData *payload) {
     dispatch_source_set_event_handler(self.flushTimer, ^{ [weakSelf flushTerminalOutput]; });
     dispatch_resume(self.flushTimer);
 
-    AcodeIshTerminalOutputHandler outputHandler = ^(NSData *data) {
+    AcodeTerminalOutputHandler outputHandler = ^(NSData *data) {
         if (!data.length) return;
         dispatch_async(weakSelf.queue, ^{
             if (weakSelf.stopping) return;
@@ -481,7 +481,7 @@ static NSData *WSFrame(uint8_t opcode, NSData *payload) {
 // Input and resize are serialized on a dedicated internal queue so tty calls
 // are issued off the WS read loop and cannot interleave with IshBridge's
 // kernelQueue boot/stop paths mid-delivery. Text-input frames go through
-// [[IshBridge shared] writeToSession:...] so they ride the kernelQueue like
+// the active backend's writeToSession: (for iSH, IshBridge's kernelQueue) like
 // every other session mutation. Binary frames keep calling terminal.sendInput
 // directly because writeToSession takes NSString, and an NSData -> UTF-8
 // string round-trip can corrupt arbitrary (non-UTF-8) terminal bytes; the
@@ -513,7 +513,7 @@ static NSData *WSFrame(uint8_t opcode, NSData *payload) {
     } else {
         dispatch_async(self.inputQueue, ^{
             if (self.stopping) return;
-            [[IshBridge shared] writeToSession:self.sessionId input:text completion:nil];
+            [AcodeActiveTerminalBackend() writeToSession:self.sessionId input:text completion:nil];
         });
     }
 }

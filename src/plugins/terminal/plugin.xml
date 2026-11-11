@@ -93,6 +93,10 @@
             </feature>
         </config-file>
 
+        <header-file src="src/ios/AcodeTerminalBackend.h" />
+        <source-file src="src/ios/AcodeTerminalBackend.m" />
+        <header-file src="src/ios/KernariumBridge.h" />
+        <source-file src="src/ios/KernariumBridge.m" />
         <header-file src="src/ios/Executor.h" />
         <source-file src="src/ios/Executor.m" />
         <header-file src="src/ios/BackgroundExecutor.h" />
@@ -110,6 +114,8 @@
         <resource-file src="scripts/acode-cli.sh" target="acode-cli.sh" />
         <framework src="libresolv.tbd" />
         <framework src="BackgroundTasks.framework" />
+        <framework src="Metal.framework" />
+        <framework src="MetalKit.framework" />
 
         <edit-config file="*-Info.plist" mode="merge" target="BGTaskSchedulerPermittedIdentifiers">
             <array>
@@ -124,5 +130,6 @@
 
         <hook type="after_prepare" src="hooks/ios/add-ish-lib.js" />
         <hook type="after_prepare" src="hooks/ios/add-ish-rootfs.js" />
+        <hook type="after_prepare" src="hooks/ios/add-kernarium-runtime.js" />
     </platform>
 </plugin>

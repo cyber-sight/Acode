@@ -1,8 +1,7 @@
 #import "Executor.h"
 #import <Cordova/CDVPluginResult.h>
-#import "IshBridge.h"
+#import "AcodeTerminalBackend.h"
 #import "IshWebSocketServer.h"
-#import "AcodeIshTerminal.h"
 
 static NSMutableDictionary<NSString *, NSString *> *sessionCallbacks;
 static NSMutableDictionary<NSString *, NSString *> *execCallbacks;
@@ -85,7 +84,7 @@ static void HandleExecutorEvent(NSString *sessionId, NSString *type, NSString *p
             [execOutputs removeObjectForKey:sessionId];
             [execMarkers removeObjectForKey:sessionId];
             [pendingEvents removeObjectForKey:sessionId];
-            [[IshBridge shared] stopSession:sessionId completion:nil];
+            [AcodeActiveTerminalBackend() stopSession:sessionId completion:nil];
             if (sharedExecutor && overflowCallbackId) {
                 CDVPluginResult *result = [CDVPluginResult resultWithStatus:CDVCommandStatus_ERROR
                     messageAsString:@"Command output exceeded 2 MB before returning a result"];
@@ -119,7 +118,7 @@ static void HandleExecutorEvent(NSString *sessionId, NSString *type, NSString *p
         [execOutputs removeObjectForKey:sessionId];
         [execMarkers removeObjectForKey:sessionId];
         [pendingEvents removeObjectForKey:sessionId];
-        [[IshBridge shared] stopSession:sessionId completion:nil];
+        [AcodeActiveTerminalBackend() stopSession:sessionId completion:nil];
         if (!sharedExecutor) return;
 
         CDVPluginResult *result;
@@ -154,7 +153,7 @@ static void DrainPendingEvents(NSString *sessionId) {
 }
 
 static IshWebSocketServer *CreateWebSocketServer(NSString *sessionId,
-                                                  AcodeIshTerminal *terminal,
+                                                  id<AcodeTerminalEndpoint> terminal,
                                                   NSError **error) {
     IshWebSocketServer *server = [[IshWebSocketServer alloc] initWithTerminal:terminal];
     server.sessionId = sessionId;
@@ -175,7 +174,7 @@ static IshWebSocketServer *CreateWebSocketServer(NSString *sessionId,
 /// lossy fallback for legacy string payloads.
 static void AttachLegacyOutputHandler(NSString *sessionId) {
     if (!sharedExecutor) return;
-    AcodeIshTerminal *terminal = [[IshBridge shared] terminalForSession:sessionId];
+    id<AcodeTerminalEndpoint> terminal = [AcodeActiveTerminalBackend() terminalForSession:sessionId];
     if (!terminal) return;
     [terminal setOutputHandler:^(NSData *data) {
         NSString *output = [[NSString alloc] initWithData:data encoding:NSUTF8StringEncoding]
@@ -200,7 +199,7 @@ static void AttachLegacyOutputHandler(NSString *sessionId) {
         execMarkers = [NSMutableDictionary dictionary];
         pendingEvents = [NSMutableDictionary dictionary];
         wsServers = [NSMutableDictionary dictionary];
-        [[IshBridge shared] setEventHandler:^(NSString *sessionId, NSString *type, NSString *payload) {
+        [AcodeActiveTerminalBackend() setEventHandler:^(NSString *sessionId, NSString *type, NSString *payload) {
             dispatch_async(dispatch_get_main_queue(), ^{
                 HandleExecutorEvent(sessionId, type, payload);
             });
@@ -216,7 +215,7 @@ static void AttachLegacyOutputHandler(NSString *sessionId) {
     NSString *cmd = command.arguments.count > 0 ? command.arguments[0] : @"";
     NSString *callbackId = command.callbackId;
 
-    [[IshBridge shared] startWithCommand:cmd completion:^(NSString *sessionId, NSError * _Nullable error) {
+    [AcodeActiveTerminalBackend() startWithCommand:cmd completion:^(NSString *sessionId, NSError * _Nullable error) {
         if (error) {
             CDVPluginResult *result = [CDVPluginResult resultWithStatus:CDVCommandStatus_ERROR messageAsString:error.localizedDescription];
             [self.commandDelegate sendPluginResult:result callbackId:callbackId];
@@ -240,7 +239,7 @@ static void AttachLegacyOutputHandler(NSString *sessionId) {
     NSString *sessionId = command.arguments.count > 0 ? command.arguments[0] : @"";
     NSString *input = command.arguments.count > 1 ? command.arguments[1] : @"";
 
-    [[IshBridge shared] writeToSession:sessionId input:input completion:^(NSError * _Nullable error) {
+    [AcodeActiveTerminalBackend() writeToSession:sessionId input:input completion:^(NSError * _Nullable error) {
         if (error) {
             CDVPluginResult *result = [CDVPluginResult resultWithStatus:CDVCommandStatus_ERROR messageAsString:error.localizedDescription];
             [self.commandDelegate sendPluginResult:result callbackId:command.callbackId];
@@ -256,7 +255,7 @@ static void AttachLegacyOutputHandler(NSString *sessionId) {
 	NSInteger columns = command.arguments.count > 1 ? [command.arguments[1] integerValue] : 0;
 	NSInteger rows = command.arguments.count > 2 ? [command.arguments[2] integerValue] : 0;
 
-	[[IshBridge shared] resizeSession:sessionId columns:columns rows:rows completion:^(NSError * _Nullable error) {
+	[AcodeActiveTerminalBackend() resizeSession:sessionId columns:columns rows:rows completion:^(NSError * _Nullable error) {
 		CDVPluginResult *result = error
 			? [CDVPluginResult resultWithStatus:CDVCommandStatus_ERROR messageAsString:error.localizedDescription]
 			: [CDVPluginResult resultWithStatus:CDVCommandStatus_OK];
@@ -273,7 +272,7 @@ static void AttachLegacyOutputHandler(NSString *sessionId) {
         [server stop];
     }
 
-    [[IshBridge shared] stopSession:sessionId completion:^(NSError * _Nullable error) {
+    [AcodeActiveTerminalBackend() stopSession:sessionId completion:^(NSError * _Nullable error) {
         if (error) {
             CDVPluginResult *result = [CDVPluginResult resultWithStatus:CDVCommandStatus_ERROR messageAsString:error.localizedDescription];
             [self.commandDelegate sendPluginResult:result callbackId:command.callbackId];
@@ -295,7 +294,7 @@ static void AttachLegacyOutputHandler(NSString *sessionId) {
     NSString *marker = [NSString stringWithFormat:@"\n__ACODE_EXEC_EXIT_%@__:", token];
     NSString *wrappedCommand = [NSString stringWithFormat:@"(\n%@\n)\n__acode_exec_status=$?\nprintf '\\n__ACODE_EXEC_EXIT_%@__:%%s\\n' \"$__acode_exec_status\"", cmd, token];
 
-    [[IshBridge shared] startWithCommand:wrappedCommand completion:^(NSString *sessionId, NSError * _Nullable error) {
+    [AcodeActiveTerminalBackend() startWithCommand:wrappedCommand completion:^(NSString *sessionId, NSError * _Nullable error) {
         if (error) {
             CDVPluginResult *result = [CDVPluginResult resultWithStatus:CDVCommandStatus_ERROR messageAsString:error.localizedDescription];
             [self.commandDelegate sendPluginResult:result callbackId:command.callbackId];
@@ -320,7 +319,7 @@ static void AttachLegacyOutputHandler(NSString *sessionId) {
             [execOutputs removeObjectForKey:sessionId];
             [execMarkers removeObjectForKey:sessionId];
             [pendingEvents removeObjectForKey:sessionId];
-            [[IshBridge shared] stopSession:sessionId completion:nil];
+            [AcodeActiveTerminalBackend() stopSession:sessionId completion:nil];
             if (sharedExecutor) {
                 CDVPluginResult *result = [CDVPluginResult resultWithStatus:CDVCommandStatus_ERROR
                     messageAsString:[NSString stringWithFormat:@"Command timed out after %.0f seconds", IshExecTimeoutSeconds]];
@@ -334,14 +333,14 @@ static void AttachLegacyOutputHandler(NSString *sessionId) {
     // Stop WebSocket-served sessions
     for (NSString *sessionId in wsServers.allKeys) {
         [wsServers[sessionId] stop];
-        [[IshBridge shared] stopSession:sessionId completion:nil];
+        [AcodeActiveTerminalBackend() stopSession:sessionId completion:nil];
     }
     [wsServers removeAllObjects];
 
     // Stop Cordova callback-served sessions
     NSArray<NSString *> *callbackSessionIds = [sessionCallbacks.allKeys arrayByAddingObjectsFromArray:execCallbacks.allKeys];
     for (NSString *sessionId in callbackSessionIds) {
-        [[IshBridge shared] stopSession:sessionId completion:nil];
+        [AcodeActiveTerminalBackend() stopSession:sessionId completion:nil];
     }
     [sessionCallbacks removeAllObjects];
     [execCallbacks removeAllObjects];
@@ -388,7 +387,7 @@ static void AttachLegacyOutputHandler(NSString *sessionId) {
     NSInteger cols = command.arguments.count > 1 ? [command.arguments[1] integerValue] : 80;
     NSInteger rows = command.arguments.count > 2 ? [command.arguments[2] integerValue] : 24;
 
-    [[IshBridge shared] startWithCommand:cmd completion:^(NSString *sessionId, NSError *error) {
+    [AcodeActiveTerminalBackend() startWithCommand:cmd completion:^(NSString *sessionId, NSError *error) {
         if (error) {
             CDVPluginResult *result = [CDVPluginResult resultWithStatus:CDVCommandStatus_ERROR
                                                         messageAsString:error.localizedDescription];
@@ -402,7 +401,7 @@ static void AttachLegacyOutputHandler(NSString *sessionId) {
             return;
         }
 
-        AcodeIshTerminal *terminal = [[IshBridge shared] terminalForSession:sessionId];
+        id<AcodeTerminalEndpoint> terminal = [AcodeActiveTerminalBackend() terminalForSession:sessionId];
         if (!terminal) {
             CDVPluginResult *result = [CDVPluginResult resultWithStatus:CDVCommandStatus_ERROR
                                                         messageAsString:@"Terminal session not found after creation"];
@@ -417,7 +416,7 @@ static void AttachLegacyOutputHandler(NSString *sessionId) {
         NSError *serverError = nil;
         IshWebSocketServer *server = CreateWebSocketServer(sessionId, terminal, &serverError);
         if (!server) {
-            [[IshBridge shared] stopSession:sessionId completion:nil];
+            [AcodeActiveTerminalBackend() stopSession:sessionId completion:nil];
             NSString *msg = serverError.localizedDescription ?: @"Failed to start WebSocket server";
             CDVPluginResult *result = [CDVPluginResult resultWithStatus:CDVCommandStatus_ERROR
                                                         messageAsString:msg];
@@ -444,7 +443,7 @@ static void AttachLegacyOutputHandler(NSString *sessionId) {
         return;
     }
 
-    AcodeIshTerminal *terminal = [[IshBridge shared] terminalForSession:sessionId];
+    id<AcodeTerminalEndpoint> terminal = [AcodeActiveTerminalBackend() terminalForSession:sessionId];
     if (!terminal) {
         CDVPluginResult *result = [CDVPluginResult resultWithStatus:CDVCommandStatus_ERROR
                                                     messageAsString:@"Terminal session no longer exists"];
